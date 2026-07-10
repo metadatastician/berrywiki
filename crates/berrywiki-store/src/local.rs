@@ -9,7 +9,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use berrywiki_core::{
-    generate_sidebar, serialize_source, PageGraph, PageMetadata, SidebarOptions, WikiPage,
+    generate_sidebar, serialize_source, Diagnostic, PageGraph, PageMetadata, SidebarOptions,
+    WikiPage,
 };
 
 use crate::error::StoreError;
@@ -24,6 +25,9 @@ pub struct LocalFolderStore {
     root: PathBuf,
     graph: PageGraph,
     sidebar_options: SidebarOptions,
+    /// Non-fatal problems encountered while loading (e.g. an unreadable or
+    /// non-UTF-8 file that was skipped). Surfaced to the UI, never fatal.
+    load_diagnostics: Vec<Diagnostic>,
 }
 
 impl LocalFolderStore {
@@ -40,6 +44,7 @@ impl LocalFolderStore {
             root,
             graph: PageGraph::build(Vec::new()),
             sidebar_options: SidebarOptions::default(),
+            load_diagnostics: Vec::new(),
         };
         store.reload()?;
         Ok(store)
@@ -48,6 +53,61 @@ impl LocalFolderStore {
     /// The canonical store root.
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Non-fatal diagnostics from the last load (skipped/unreadable files).
+    pub fn load_diagnostics(&self) -> &[Diagnostic] {
+        &self.load_diagnostics
+    }
+
+    /// Validate a prospective parent: it must exist and be *managed* (have
+    /// metadata), because an unmanaged page's id is its filename — a volatile
+    /// value that would break every child the moment the parent is renamed.
+    fn check_parent(&self, parent_id: Option<&str>) -> Result<()> {
+        if let Some(parent) = parent_id {
+            let page = self
+                .graph
+                .get(parent)
+                .ok_or_else(|| StoreError::ParentNotFound(parent.to_string()))?;
+            if page.metadata.is_none() {
+                return Err(StoreError::UnmanagedParent(parent.to_string()));
+            }
+        }
+        Ok(())
+    }
+
+    /// True if a mutation on `id` is unsafe because two files share that id.
+    fn ensure_unambiguous(&self, id: &str) -> Result<()> {
+        let ambiguous = self
+            .graph
+            .diagnostics()
+            .iter()
+            .any(|d| d.code == "graph.duplicate-id" && d.page.as_deref() == Some(id));
+        if ambiguous {
+            return Err(StoreError::AmbiguousId(id.to_string()));
+        }
+        Ok(())
+    }
+
+    /// True if some existing top-level entry matches `name` case-insensitively.
+    /// Excludes `except` (a page's own current filename) so a rename-in-place
+    /// does not collide with itself.
+    fn filename_taken_ci(&self, name: &str, except: Option<&str>) -> bool {
+        let lower = name.to_lowercase();
+        let Ok(entries) = fs::read_dir(&self.root) else {
+            return self.root.join(name).exists();
+        };
+        for entry in entries.flatten() {
+            if let Some(existing) = entry.file_name().to_str() {
+                if Some(existing) == except {
+                    continue;
+                }
+                if existing.to_lowercase() == lower {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Resolve a validated, root-relative file path. The single gate through
@@ -122,11 +182,24 @@ impl LocalFolderStore {
         };
         file.write_all(content)
             .map_err(|e| StoreError::io(format!("writing temp file for {relative:?}"), e))?;
+        // Flush the file's contents to disk BEFORE the rename, so the "both
+        // files, never neither" move guarantee holds across a power loss: the
+        // renamed entry can never point at partially-written data.
+        file.sync_all()
+            .map_err(|e| StoreError::io(format!("syncing temp file for {relative:?}"), e))?;
         drop(file);
         fs::rename(&tmp, &target).map_err(|e| {
             let _ = fs::remove_file(&tmp);
             StoreError::io(format!("renaming temp file into {relative:?}"), e)
         })?;
+        // Best-effort: persist the rename itself by syncing the directory.
+        // Unsupported on some platforms/filesystems — a failure here does not
+        // undo a successful rename, so it is intentionally not fatal.
+        if let Some(parent) = target.parent() {
+            if let Ok(dir) = fs::File::open(parent) {
+                let _ = dir.sync_all();
+            }
+        }
         Ok(())
     }
 
@@ -190,16 +263,28 @@ impl LocalFolderStore {
     }
 
     /// Choose a collision-free filename, falling back to an id suffix.
-    fn unique_filename(&self, ancestors: &[String], title: &str, id: &str) -> Result<String> {
+    ///
+    /// Collision detection is **case-insensitive** (a wiki cloned onto Windows
+    /// or macOS cannot hold `Plan.md` and `plan.md` at once, and GitHub link
+    /// resolution would be ambiguous). `own_path` is the moving page's current
+    /// filename, excluded from the check so a same-place rename or a reposition
+    /// of a suffix-named page does not collide with itself.
+    fn unique_filename(
+        &self,
+        ancestors: &[String],
+        title: &str,
+        id: &str,
+        own_path: Option<&str>,
+    ) -> Result<String> {
         let name = page_filename(ancestors, title)?;
-        if !self.root.join(&name).exists() {
+        if !self.filename_taken_ci(&name, own_path) {
             return Ok(name);
         }
         let suffixed = with_id_suffix(&name, id);
         // The suffix embeds caller-supplied id characters: re-validate the
         // final name rather than trusting the pre-suffix validation.
         validate_component(&suffixed)?;
-        if self.root.join(&suffixed).exists() {
+        if self.filename_taken_ci(&suffixed, own_path) {
             return Err(StoreError::InvalidName {
                 name: suffixed,
                 reason: "filename collision even with id suffix".to_string(),
@@ -222,32 +307,53 @@ impl LocalFolderStore {
 
 impl WikiStore for LocalFolderStore {
     fn reload(&mut self) -> Result<()> {
-        let mut pages = Vec::new();
-        let entries = fs::read_dir(&self.root)
-            .map_err(|e| StoreError::io("listing the wiki folder", e))?;
-        for entry in entries {
+        let mut load_diagnostics = Vec::new();
+
+        // Collect eligible page filenames, then sort: read_dir order is
+        // OS-dependent, and the graph's tie-breaking must be deterministic
+        // (so a crash-mid-move duplicate-id state resolves the same way every
+        // load).
+        let read = fs::read_dir(&self.root).map_err(|e| StoreError::io("listing the wiki folder", e))?;
+        let mut names: Vec<String> = Vec::new();
+        for entry in read {
             let entry = entry.map_err(|e| StoreError::io("listing the wiki folder", e))?;
-            let path = entry.path();
             // Symlinks are never managed content: `is_file()` follows links
             // (so a link to an outside file would be silently ingested) and
             // dangling links would otherwise linger invisibly.
             let file_type = entry
                 .file_type()
                 .map_err(|e| StoreError::io("inspecting a wiki folder entry", e))?;
-            if file_type.is_symlink() || !path.is_file() {
+            if file_type.is_symlink() || !entry.path().is_file() {
                 continue;
             }
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
             if !name.ends_with(".md") || name == SIDEBAR_FILE || name == FOOTER_FILE {
                 continue;
             }
-            let source = fs::read_to_string(&path)
-                .map_err(|e| StoreError::io(format!("reading page {name:?}"), e))?;
-            pages.push(WikiPage::parse(name.to_string(), source));
+            names.push(name);
+        }
+        names.sort();
+
+        let mut pages = Vec::with_capacity(names.len());
+        for name in names {
+            match fs::read_to_string(self.root.join(&name)) {
+                Ok(source) => pages.push(WikiPage::parse(name, source)),
+                // A single unreadable/non-UTF-8 file must not make the whole
+                // wiki unopenable — skip it with a diagnostic (non-negotiable
+                // "malformed input degrades, never crashes").
+                Err(e) => load_diagnostics.push(
+                    Diagnostic::warning(
+                        "store.unreadable-file",
+                        format!("Skipped {name:?}: {e}. Fix or remove the file to include it."),
+                    )
+                    .with_page(name),
+                ),
+            }
         }
         self.graph = PageGraph::build(pages);
+        self.load_diagnostics = load_diagnostics;
         Ok(())
     }
 
@@ -276,17 +382,23 @@ impl WikiStore for LocalFolderStore {
         // Ids flow into filenames, attachment directories and metadata:
         // reject anything but BerryWiki's own id alphabet up front.
         crate::paths::validate_page_id(&input.id)?;
+        // Tags must not be able to corrupt the metadata block; reject rather
+        // than silently sanitise so the caller sees a clear error.
+        for tag in &input.tags {
+            if berrywiki_core::sanitises_field(tag) {
+                return Err(StoreError::InvalidName {
+                    name: tag.clone(),
+                    reason: "tag contains a newline, control character or '-->'".to_string(),
+                });
+            }
+        }
         if self.graph.get(&input.id).is_some() {
             return Err(StoreError::DuplicateId(input.id));
         }
-        if let Some(parent) = &input.parent_id {
-            if self.graph.get(parent).is_none() {
-                return Err(StoreError::ParentNotFound(parent.clone()));
-            }
-        }
+        self.check_parent(input.parent_id.as_deref())?;
 
         let ancestors = self.ancestor_titles(input.parent_id.as_deref())?;
-        let filename = self.unique_filename(&ancestors, &input.title, &input.id)?;
+        let filename = self.unique_filename(&ancestors, &input.title, &input.id, None)?;
 
         let mut meta = PageMetadata::new(input.id.clone());
         meta.parent_id = input.parent_id.clone();
@@ -294,7 +406,10 @@ impl WikiStore for LocalFolderStore {
         meta.kind = input.kind.clone();
         meta.tags = input.tags.clone();
 
-        let body = if input.body.trim_start().starts_with('#') {
+        // Prepend the title only when the body does not already open with an
+        // H1. A leading `##`/`###` is NOT a title, so we must still prepend —
+        // testing for a bare `#` would drop the caller's title.
+        let body = if body_has_leading_h1(&input.body) {
             input.body.clone()
         } else if input.body.trim().is_empty() {
             format!("# {}\n", input.title)
@@ -310,6 +425,7 @@ impl WikiStore for LocalFolderStore {
     }
 
     fn update_page(&mut self, id: &str, new_body: &str) -> Result<()> {
+        self.ensure_unambiguous(id)?;
         let page = self.page(id)?;
         let path = page.path.clone();
         let meta = page.metadata.clone();
@@ -322,6 +438,7 @@ impl WikiStore for LocalFolderStore {
     }
 
     fn move_page(&mut self, input: MovePageInput) -> Result<()> {
+        self.ensure_unambiguous(&input.id)?;
         let page = self.page(&input.id)?;
         let Some(meta) = page.metadata.clone() else {
             return Err(StoreError::UnmanagedPage(input.id));
@@ -330,10 +447,8 @@ impl WikiStore for LocalFolderStore {
         let title = page.title.clone();
         let body = page.body.clone();
 
+        self.check_parent(input.new_parent_id.as_deref())?;
         if let Some(parent) = &input.new_parent_id {
-            if self.graph.get(parent).is_none() {
-                return Err(StoreError::ParentNotFound(parent.clone()));
-            }
             if parent == &input.id || self.is_ancestor(parent, &input.id) {
                 return Err(StoreError::CycleDetected {
                     page: input.id,
@@ -347,10 +462,13 @@ impl WikiStore for LocalFolderStore {
         new_meta.position = input.new_position;
 
         let ancestors = self.ancestor_titles(input.new_parent_id.as_deref())?;
+        // Exclude the page's own current file from the collision check, so a
+        // pure reposition (or reparent-and-return) of a suffix-named page is
+        // not rejected as colliding with itself.
         let new_path = if page_filename(&ancestors, &title)? == old_path {
             old_path.clone()
         } else {
-            self.unique_filename(&ancestors, &title, &input.id)?
+            self.unique_filename(&ancestors, &title, &input.id, Some(&old_path))?
         };
 
         let source = serialize_source(Some(&new_meta), &body);
@@ -369,6 +487,7 @@ impl WikiStore for LocalFolderStore {
     }
 
     fn delete_page(&mut self, id: &str) -> Result<()> {
+        self.ensure_unambiguous(id)?;
         let page = self.page(id)?;
         let path = page.path.clone();
         let children = self.graph.children_of(id);
@@ -387,7 +506,14 @@ impl WikiStore for LocalFolderStore {
     }
 
     fn add_attachment(&mut self, page_id: &str, filename: &str, bytes: &[u8]) -> Result<Attachment> {
-        self.page(page_id)?; // page must exist
+        self.ensure_unambiguous(page_id)?;
+        let page = self.page(page_id)?; // page must exist…
+        if page.metadata.is_none() {
+            // …and be managed: an unmanaged page's id is its filename, so an
+            // assets/<id>/ directory keyed on it would break the instant the
+            // page is renamed. Require a stable id first.
+            return Err(StoreError::UnmanagedParent(page_id.to_string()));
+        }
         validate_component(filename)?;
         // Attachment directories are keyed by page id (stable across renames).
         // Page ids come from metadata; validate them as a path component too.
@@ -413,5 +539,17 @@ impl WikiStore for LocalFolderStore {
 
     fn regenerate_sidebar(&mut self) -> Result<bool> {
         self.write_sidebar_if_changed()
+    }
+}
+
+/// True when the body's first non-empty line is a level-1 ATX heading (`# …`).
+/// A `##`/`###` opener is deliberately *not* treated as a title.
+fn body_has_leading_h1(body: &str) -> bool {
+    match body.lines().find(|l| !l.trim().is_empty()) {
+        Some(line) => {
+            let t = line.trim_start();
+            t.starts_with("# ") || t == "#"
+        }
+        None => false,
     }
 }

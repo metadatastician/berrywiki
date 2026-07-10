@@ -1,0 +1,53 @@
+= Adversarial review of berrywiki-store (2026-07-11)
+:toc: macro
+
+toc::[]
+
+== Method
+
+A multi-agent review of commit `9f411fe` (the initial `berrywiki-store`):
+three finder lenses (fs-safety, engine-contract, test-gaps) produced 22 raw
+findings; each was then attacked by two independent skeptic agents, and only
+findings both skeptics *failed to refute* were kept. **20 confirmed, 2
+refuted.** This log records the disposition of each.
+
+== Disposition
+
+[cols="1,5,1", options="header"]
+|===
+| # | Finding | Status
+
+| 1/6 | Page titled `_Sidebar`/`_Footer` written to the reserved control file, skipped by reload, then clobbered by sidebar regeneration (silent content loss / ghost page) | Fixed
+| 2/7 | `move_page` self-collision: a suffix-named page could never be repositioned while its collider existed | Fixed (own-path exclusion)
+| 3 | No `fsync`: the "both files, never neither" move guarantee did not hold across power loss | Fixed (best-effort `sync_all` on file + parent dir)
+| 4 | `update_page` dropped multi-line values under unknown metadata keys | Fixed (parser preserves indented continuation lines)
+| 5 | `reload` followed symlinks out of the root, surfacing host files as pages | Fixed (symlinks skipped)
+| 8 | Case-only filename collisions broke Windows/macOS checkouts and link resolution | Fixed (case-insensitive collision check)
+| 9 | Mutations on a duplicate-id page acted on an arbitrary file; `delete` returned `Ok` while the page remained | Fixed (`AmbiguousId` guard refuses mutation)
+| 10 | `serialize_metadata` did not escape values — a tag with a newline or `-->` corrupted the file | Fixed (defensive sanitiser + input-boundary rejection)
+| 11/17 | `UnmanagedPage` error prescribed an unimplemented recovery | Fixed (reworded to an implementable action)
+| 12 | `CreatePageInput.id` never validated (`/` → unscanned subdir; empty → defeats dup detection) | Fixed (`validate_page_id`)
+| 13 | Atomic-write behaviour untested | Addressed (planted-symlink + move tests)
+| 14 | `resolve()` root-containment untested (every traversal intercepted earlier) | Partially addressed (symlink reload/temp tests); a direct `resolve()` escape unit test remains a gap
+| 15 | Crash-mid-move recovery nondeterministic (raw `read_dir` order) | Fixed (sorted load; determinism test) + guarded by #9
+| 16 | Unmanaged pages accepted as parents / attachment owners (volatile id persisted) | Fixed (`check_parent` + managed-owner guard)
+| 18 | A single non-UTF-8 file made the whole store unopenable | Fixed (skip + `store.unreadable-file` diagnostic)
+| 19 | Untested edge paths (move-to-root, collision branch, H2 body, unmanaged parent) | Addressed (several tests added; not exhaustive)
+| 20 | H1 sniff treated any leading `#` as a title, dropping the caller's title on a `##` body | Fixed (`body_has_leading_h1`)
+|===
+
+Refuted (no change): a claimed temp-path symlink escape (already prevented by
+`create_new`), and a duplicate of #4.
+
+== Residual gaps (tracked, not yet closed)
+
+* A direct `resolve()`-escape unit test (#14) — current coverage exercises it
+  through symlink and traversal paths but not a crafted absolute escape.
+* Test coverage for #19 is representative, not exhaustive (e.g. Unicode-title
+  round-trip through move is untested).
+* `fsync` is best-effort on the parent directory (unsupported on some
+  filesystems); this is acceptable for a local adapter and revisited when the
+  git-backed adapter defines its own durability contract.
+
+Store suite grew 15 → 27 integration tests; core metadata gained 2 tests;
+`paths` 6 → 8. Whole workspace: 79 tests, warning-free.

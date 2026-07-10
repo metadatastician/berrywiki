@@ -345,6 +345,123 @@ fn reload_ignores_symlinked_pages() {
 }
 
 #[test]
+fn reposition_of_suffix_named_page_succeeds() {
+    // Review finding #2/#7: a page whose file carries the id suffix (because
+    // its plain name collided) must still be repositionable.
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    store
+        .create_page(create_input("res-2222", "Research", None))
+        .unwrap();
+    assert!(dir.join("Research--2222.md").exists());
+
+    // Pure reposition (same parent) must NOT fail with a self-collision.
+    store
+        .move_page(MovePageInput {
+            id: "res-2222".to_string(),
+            new_parent_id: None,
+            new_position: 99,
+        })
+        .unwrap();
+    assert_eq!(store.read_page("res-2222").unwrap().position(), 99);
+    assert!(dir.join("Research--2222.md").exists());
+}
+
+#[test]
+fn case_insensitive_filename_collision_is_suffixed() {
+    // Review finding #8: "research" must not sit beside "Research.md".
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    store
+        .create_page(create_input("res-lc", "research", None))
+        .unwrap();
+    // No case-colliding twin of the existing Research.md was created; the new
+    // page landed on a distinct id-suffixed name.
+    assert!(!dir.join("research.md").exists());
+    let created = &store.read_page("res-lc").unwrap().path;
+    assert!(created.to_lowercase().starts_with("research--"), "got {created}");
+    assert!(dir.join(created).exists());
+}
+
+#[test]
+fn create_rejects_unmanaged_parent() {
+    // Review finding #16: an unmanaged page (id == filename) cannot be a parent.
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    let err = store
+        .create_page(create_input("child-x", "Child", Some("Plain-Legacy-Page.md")))
+        .unwrap_err();
+    assert!(matches!(err, StoreError::UnmanagedParent(_)), "got {err}");
+}
+
+#[test]
+fn create_rejects_hostile_tags() {
+    // Review finding #10 at the input boundary.
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    let mut input = create_input("tag-evil", "Tagged", None);
+    input.tags = vec!["fine".to_string(), "evil\n-->".to_string()];
+    assert!(matches!(
+        store.create_page(input).unwrap_err(),
+        StoreError::InvalidName { .. }
+    ));
+}
+
+#[test]
+fn create_preserves_title_when_body_starts_with_h2() {
+    // Review finding #20: a leading "## Section" is not a title.
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    let mut input = create_input("h2-body", "My Real Title", None);
+    input.body = "## A Section\n\ntext\n".to_string();
+    store.create_page(input).unwrap();
+    let page = store.read_page("h2-body").unwrap();
+    assert_eq!(page.title, "My Real Title", "supplied title kept, not dropped");
+}
+
+#[test]
+fn non_utf8_file_is_skipped_not_fatal() {
+    // Review finding #18: one bad file must not make the whole store unopenable.
+    let dir = scratch_wiki();
+    fs::write(dir.join("Broken.md"), [0x23, 0x20, 0xff, 0xfe, 0x0a]).unwrap();
+    let store = LocalFolderStore::open(&dir).unwrap(); // must still open
+    assert!(store.list_pages().iter().any(|p| p.title == "Home"));
+    assert!(
+        store.load_diagnostics().iter().any(|d| d.code == "store.unreadable-file"),
+        "the skipped file is surfaced as a diagnostic"
+    );
+}
+
+#[test]
+fn duplicate_id_makes_mutations_refuse_safely() {
+    // Review finding #9: with two files sharing an id (e.g. an interrupted
+    // move), a mutation must refuse rather than act on an arbitrary file.
+    let dir = scratch_wiki();
+    let dup = "<!-- berrywiki\nid: 0195f6ec-36a2-7a42-b519-5f558842e256\nparent: null\nposition: 0\nkind: page\ntags: []\narchived: false\n-->\n\n# Twin\n";
+    fs::write(dir.join("Twin.md"), dup).unwrap(); // same id as Assessment Plan
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+
+    let err = store.update_page(PLAN_ID, "# x\n").unwrap_err();
+    assert!(matches!(err, StoreError::AmbiguousId(_)), "update refused: {err}");
+    let err = store.delete_page(PLAN_ID).unwrap_err();
+    assert!(matches!(err, StoreError::AmbiguousId(_)), "delete refused: {err}");
+    // Both files still on disk — nothing was acted on.
+    assert!(dir.join("Twin.md").exists());
+    assert!(dir.join("Teaching--Course-A--Assessment-Plan.md").exists());
+}
+
+#[test]
+fn reload_is_deterministic() {
+    // Review finding #15: repeated loads yield identical page order.
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    let first: Vec<String> = store.list_pages().into_iter().map(|p| p.id).collect();
+    store.reload().unwrap();
+    let second: Vec<String> = store.list_pages().into_iter().map(|p| p.id).collect();
+    assert_eq!(first, second);
+}
+
+#[test]
 fn reload_picks_up_external_edits() {
     let dir = scratch_wiki();
     let mut store = LocalFolderStore::open(&dir).unwrap();

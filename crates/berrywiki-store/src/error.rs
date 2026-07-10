@@ -18,6 +18,12 @@ pub enum StoreError {
     DuplicateId(String),
     /// The referenced parent page does not exist.
     ParentNotFound(String),
+    /// The referenced parent has no stable id (unmanaged), so it cannot own
+    /// children — its filename is not a durable identifier.
+    UnmanagedParent(String),
+    /// Two pages on disk share this id; a mutation would act on an arbitrary
+    /// one. Resolve the duplicate before mutating.
+    AmbiguousId(String),
     /// The move would make a page its own ancestor.
     CycleDetected { page: String, parent: String },
     /// The page has no BerryWiki metadata, so it cannot be managed
@@ -64,6 +70,18 @@ impl fmt::Display for StoreError {
                 f,
                 "Parent page {id:?} does not exist. Nothing was changed."
             ),
+            StoreError::UnmanagedParent(id) => write!(
+                f,
+                "Page {id:?} has no BerryWiki metadata, so it cannot be used as \
+                 a parent — its filename is not a stable id. Give it metadata \
+                 first. Nothing was changed."
+            ),
+            StoreError::AmbiguousId(id) => write!(
+                f,
+                "Two pages on disk share id {id:?}; a change would act on an \
+                 unpredictable one. Nothing was changed — resolve the duplicate \
+                 (often a leftover from an interrupted move) first."
+            ),
             StoreError::CycleDetected { page, parent } => write!(
                 f,
                 "Moving page {page:?} under {parent:?} would make it its own \
@@ -71,8 +89,9 @@ impl fmt::Display for StoreError {
             ),
             StoreError::UnmanagedPage(id) => write!(
                 f,
-                "Page {id:?} has no BerryWiki metadata so it cannot be moved \
-                 or re-parented yet. Open and save it once to assign an id."
+                "Page {id:?} has no BerryWiki metadata so it cannot be moved or \
+                 re-parented. Assign it metadata first (a create/adopt step the \
+                 caller must perform); nothing was changed."
             ),
             StoreError::HasChildren { page, child_count } => write!(
                 f,

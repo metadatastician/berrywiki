@@ -257,8 +257,21 @@ fn parse_block(lines: &[&str], diagnostics: &mut Vec<Diagnostic>) -> PageMetadat
                 }
             }
             _ => {
-                // Unknown top-level key: preserve verbatim.
+                // Unknown top-level key: preserve verbatim, INCLUDING any
+                // block-list items or indented continuation lines beneath it.
+                // Dropping them would silently corrupt the file on the next
+                // save (breaking the unknown-field-preservation contract).
                 meta.extra.push(line.trim_end().to_string());
+                while i + 1 < lines.len() {
+                    let next = lines[i + 1];
+                    let indented = next.starts_with(' ') || next.starts_with('\t');
+                    if indented && !next.trim().is_empty() {
+                        meta.extra.push(next.trim_end().to_string());
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
             }
         }
         i += 1;
@@ -289,30 +302,63 @@ fn split_key_value(line: &str) -> Option<(String, &str)> {
     Some((key.to_string(), v.trim()))
 }
 
+/// Neutralise any field content that could break the HTML-comment block:
+/// line breaks (which would inject spurious metadata lines) and the literal
+/// close marker `-->` (which would terminate the block early). This is a
+/// last-resort gate — callers should validate input first (see
+/// [`sanitises_field`]) — but it guarantees a well-formed, re-parseable block
+/// no matter what a field contains, so page content can never be corrupted by
+/// a stray tag. It only ever alters pathological values.
+fn sanitise_field(value: &str) -> String {
+    let mut s: String = value
+        .chars()
+        .map(|c| if c == '\n' || c == '\r' || c.is_control() { ' ' } else { c })
+        .collect();
+    if s.contains("-->") {
+        s = s.replace("-->", "-- >");
+    }
+    s
+}
+
+/// True when serialising `value` would require sanitisation (i.e. it contains
+/// a newline, control character or the `-->` token). Callers use this to
+/// reject bad input with a clear error rather than silently rewriting it.
+pub fn sanitises_field(value: &str) -> bool {
+    value.chars().any(|c| c == '\n' || c == '\r' || c.is_control()) || value.contains("-->")
+}
+
 /// Serialise metadata into the canonical, deterministic block form (including
-/// the open/close markers and a trailing newline). Key order is fixed.
+/// the open/close markers and a trailing newline). Key order is fixed. Field
+/// values are sanitised so the block is always well-formed and re-parseable.
 pub fn serialize_metadata(meta: &PageMetadata) -> String {
     let mut out = String::new();
     out.push_str(OPEN_MARKER);
     out.push('\n');
-    out.push_str(&format!("id: {}\n", meta.id));
+    out.push_str(&format!("id: {}\n", sanitise_field(&meta.id)));
     match &meta.parent_id {
-        Some(p) => out.push_str(&format!("parent: {p}\n")),
+        Some(p) => out.push_str(&format!("parent: {}\n", sanitise_field(p))),
         None => out.push_str("parent: null\n"),
     }
     out.push_str(&format!("position: {}\n", meta.position));
-    out.push_str(&format!("kind: {}\n", meta.kind.as_str()));
+    out.push_str(&format!("kind: {}\n", sanitise_field(meta.kind.as_str())));
     if meta.tags.is_empty() {
         out.push_str("tags: []\n");
     } else {
         out.push_str("tags:\n");
         for tag in &meta.tags {
-            out.push_str(&format!("  - {tag}\n"));
+            out.push_str(&format!("  - {}\n", sanitise_field(tag)));
         }
     }
     out.push_str(&format!("archived: {}\n", meta.archived));
     for line in &meta.extra {
-        out.push_str(line);
+        // Extra lines carry their own indentation; only neutralise a stray
+        // close marker, never their leading whitespace.
+        let safe = if line.contains("-->") {
+            line.replace("-->", "-- >")
+        } else {
+            line.clone()
+        };
+        out.push_str(safe.trim_end_matches(['\n', '\r']));
         out.push('\n');
     }
     out.push_str(CLOSE_MARKER);
@@ -448,5 +494,41 @@ This page describes the assessment strategy.\n";
         let m = parse_source(src).metadata.unwrap();
         assert_eq!(m.kind, PageKind::Other("template".to_string()));
         assert!(serialize_metadata(&m).contains("kind: template"));
+    }
+
+    #[test]
+    fn multiline_unknown_metadata_survives_round_trip() {
+        // Review finding #4: an unknown key with a block list must not lose its
+        // items on re-serialisation.
+        let src = "<!-- berrywiki\nid: x\ncollaborators:\n  - alice\n  - bob\ncolor: blue\n-->\n\n# T\n";
+        let parsed = parse_source(src);
+        let m = parsed.metadata.unwrap();
+        let out = serialize_metadata(&m);
+        assert!(out.contains("collaborators:"), "unknown key kept");
+        assert!(out.contains("  - alice"), "block item alice kept");
+        assert!(out.contains("  - bob"), "block item bob kept");
+        assert!(out.contains("color: blue"));
+        // And it is stable: parse(serialize(m)) == m.
+        assert_eq!(parse_source(&out).metadata.unwrap(), m);
+    }
+
+    #[test]
+    fn hostile_tag_cannot_break_the_block() {
+        // Review finding #10: a tag containing a newline or the close marker
+        // must not corrupt the file. The block stays well-formed and the page
+        // body is untouched.
+        let mut m = PageMetadata::new("x");
+        m.tags = vec!["ok".to_string(), "evil\n-->\n# Injected".to_string()];
+        let source = serialize_source(Some(&m), "# Real Title\n\nbody\n");
+        let reparsed = parse_source(&source);
+        assert!(reparsed.metadata.is_some(), "block still parses");
+        assert!(
+            reparsed.body.starts_with("# Real Title"),
+            "page body intact, not hijacked: {:?}",
+            reparsed.body
+        );
+        assert!(!reparsed.body.contains("Injected"));
+        assert!(sanitises_field("evil\n-->"));
+        assert!(!sanitises_field("perfectly-normal-tag"));
     }
 }

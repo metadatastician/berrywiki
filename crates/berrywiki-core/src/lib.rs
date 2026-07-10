@@ -43,7 +43,8 @@ pub mod sidebar;
 pub use diagnostics::{Diagnostic, Severity};
 pub use graph::{Backlink, PageGraph};
 pub use metadata::{
-    parse_source, serialize_metadata, serialize_source, PageKind, PageMetadata, ParsedSource,
+    parse_source, sanitises_field, serialize_metadata, serialize_source, PageKind, PageMetadata,
+    ParsedSource,
 };
 pub use page::{extract_headings, extract_links, slug, PageHeading, PageLink, WikiPage};
 pub use sidebar::{generate_sidebar, SidebarOptions};
