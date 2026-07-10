@@ -1,0 +1,53 @@
+= ADR-0001: Page filename strategy
+:sectnums:
+
+== Status
+
+*Proposed* (provisional). To be confirmed or revised after the live GitHub Wiki
+compatibility spike. Depends on evidence tracked in
+link:../compatibility/github-wiki.adoc[the compatibility report].
+
+== Context
+
+CherryWiki presents a hierarchical notebook, but the canonical store is a
+GitHub `.wiki.git` repository whose native web UI does not render real directory
+hierarchy. The product requirement for Phase 0 is that *the native GitHub wiki
+reader must work* for users without CherryWiki.
+
+The tree must be derived from stable page ids + `parent` metadata, never
+inferred from filenames. Filenames therefore only need to be stable, unique,
+GitHub-renderable and rename-tolerant.
+
+== Decision (provisional)
+
+Use *flat, `--`-separated filenames* that encode the logical path for human
+legibility, e.g.:
+
+----
+Teaching--Course-A--Assessment-Plan.md
+----
+
+* The hierarchy of record is the `parent` id chain in metadata.
+* The filename is a human-friendly slug, not a source of truth.
+* Collisions are resolved deterministically by appending a short id suffix
+  (`Assessment-Plan--e256.md`) only when needed.
+
+== Alternatives considered
+
+. *True nested directories* (`Teaching/Course-A/Assessment-Plan.md`) — rejected
+  provisionally because the native GitHub wiki UI does not present them as
+  navigable hierarchy, and `[[WikiLink]]` resolution appears to be title-global.
+  Revisit if the spike proves nested dirs render acceptably.
+. *Opaque id filenames* (`0195f6ec….md`) — maximally rename-safe but unreadable
+  in a plain checkout and in GitHub's page list; violates "usable without the
+  app". Rejected.
+. *Title-only filenames* (`Assessment-Plan.md`) — collides across branches of
+  the tree with duplicate logical titles. Rejected as the default.
+
+== Consequences
+
+* Renames change the filename but not the id, so links keyed on id survive; link
+  *text* rewriting is a separate, configurable operation.
+* The `--` separator must be escaped/normalised in titles that literally contain
+  `--`.
+* Final confirmation is blocked on the live spike; treat as provisional.

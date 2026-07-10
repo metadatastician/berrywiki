@@ -1,0 +1,65 @@
+= ADR-0004: Page metadata format
+:sectnums:
+
+== Status
+
+*Accepted* for Phase 0 (block form); the central-manifest option is *deferred*
+and revisited if per-page churn proves painful.
+
+== Context
+
+CherryWiki manages hierarchy, ordering, tags and archival per page while keeping
+files usable without the app and invisible to GitHub's rendered wiki.
+
+* YAML frontmatter (`---`) is *not* an option: GitHub Wiki renders it visibly,
+  unlike Jekyll.
+* An HTML comment is invisible in rendered Markdown (to be *verified* live) and
+  survives a plain-text edit.
+
+== Decision
+
+Store metadata in a leading HTML comment block:
+
+----
+<!-- cherrywiki
+id: <uuid>
+parent: <id|null>
+position: <int>
+kind: page|code|<other>
+tags:
+  - <tag>
+archived: <bool>
+-->
+----
+
+Guarantees implemented in `cherrywiki-core::metadata`:
+
+* *Optional* — pages without a block open normally; a block is only recognised
+  as the first non-blank content of the file.
+* *Non-fatal* — malformed values default and emit a diagnostic; the page stays
+  readable. Unterminated blocks are ignored with a warning.
+* *Unknown-preserving* — unrecognised top-level keys (`icon:`, `color:`, …) are
+  kept verbatim and re-emitted.
+* *Deterministic & idempotent* — canonical serialisation uses a fixed key order;
+  `serialize(parse(serialize(m))) == serialize(m)` and `parse(serialize(m)) == m`.
+  CherryWiki normalises the block on first managed write; arbitrary input
+  whitespace is *not* preserved byte-for-byte.
+
+== Alternatives considered
+
+* *Per-page `position` vs central manifest* — per-page ordering means reordering
+  one sibling dirties several files. A central `.cherrywiki/index.json` keyed by
+  id would localise churn and make tree ops atomic, at the cost of a structured
+  merge hotspot. *Deferred*: start per-page (simpler, self-describing files);
+  reconsider if churn/merge pain shows up in real use.
+* *Deeply-nested unknown YAML preservation* — the current parser preserves
+  unknown *top-level* lines verbatim; nested unknown structures are not
+  round-tripped. Acceptable for the known metadata surface; documented as a
+  limitation.
+
+== Consequences
+
+* Files remain plain, hand-editable Markdown.
+* Invisibility in GitHub's renderer is assumed and must be *verified live*
+  before being relied upon (compatibility report).
+* Reordering churn is accepted for now (see the deferred manifest option).

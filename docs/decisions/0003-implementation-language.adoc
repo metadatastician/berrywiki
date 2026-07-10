@@ -1,0 +1,57 @@
+= ADR-0003: Implementation language
+:sectnums:
+
+== Status
+
+*Accepted.*
+
+== Context
+
+The upstream CherryWiki specification proposed a "TypeScript monorepo". That
+recommendation originated from an external tool and conflicts with the estate's
+language doctrine. The estate defaults are:
+
+* RS/TS/JS → *AffineScript → typed-wasm* (never ReScript).
+* Rust → *Rust/SPARK*.
+
+The engine is pure, deterministic logic (parsing, graph construction,
+serialisation) with strong invariants that benefit from formal reasoning. The
+eventual product also needs a web UI.
+
+Observed toolchain reality on the development host: mature Rust
+(`rustc`/`cargo` 1.85); GNAT 14.2 (SPARK available); *AffineScript is not
+installed* and, per current project notes, cannot yet parse its own standard
+library — it is still being driven toward base-language completion.
+
+== Decision
+
+. *TypeScript is rejected outright.* It is not used anywhere in CherryWiki.
+. *The core engine and all Phase-0 tooling are written in Rust.* This matches
+  the _Rust → Rust/SPARK_ default and gives a mature, testable base today. The
+  engine's invariants (deterministic round-trip, acyclic hierarchy,
+  deterministic sidebar) are earmarked for SPARK/Ada proof in a later hardening
+  phase.
+. *The web UI will be AffineScript → typed-wasm, deferred* until AffineScript
+  reaches sufficient maturity. Building the UI in AffineScript now would be
+  building on an unfinished language; the dependency is tracked against the
+  AffineScript completion drive.
+
+== Alternatives considered
+
+* *TypeScript* — banned by doctrine; rejected.
+* *AffineScript for the core, now* — blocked by language immaturity (not
+  installed; stdlib does not parse). Rejected for Phase 0.
+* *Ada/SPARK for the entire engine, now* — viable and attractive for proof, but
+  slower initial velocity and a heavier authoring loop than Rust for the
+  string/graph-heavy core. Chosen as a *later* proof target rather than the
+  initial implementation language.
+
+== Consequences
+
+* Fast, well-tested progress on the engine today (35 tests green, zero deps).
+* A clean seam (`WikiStore` trait, I/O-free core) keeps the door open to
+  proving parts in SPARK and to an AffineScript UI later without rewriting the
+  domain logic.
+* CI must eventually run `rustfmt`/`clippy`; the current distro Rust lacks both
+  components (no rustup), so lint enforcement is a CI responsibility, recorded
+  as a follow-up.

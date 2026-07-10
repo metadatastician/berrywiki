@@ -1,0 +1,93 @@
+= GitHub Wiki Compatibility Report
+:toc: macro
+:toclevels: 2
+:sectnums:
+
+toc::[]
+
+[IMPORTANT]
+====
+This report strictly separates *Verified*, *Assumption*, *Unverified* and
+*Decision*. Do not treat an assumption as a fact. Nothing in the "live GitHub"
+column has been tested yet: `gh` is not installed on the development host and no
+disposable wiki has been exercised. See
+link:../decisions/0002-authentication-strategy.adoc[ADR-0002].
+====
+
+== Status legend
+
+[cols="1,4", options="header"]
+|===
+| Tag | Meaning
+| ✅ Verified | Reproduced locally or against a real GitHub Wiki, as noted.
+| 🟡 Assumption | Believed true from docs/experience; not yet reproduced here.
+| ❓ Unverified | Requires a live GitHub Wiki test we have not run.
+| 📌 Decision | A choice recorded in an ADR.
+|===
+
+== Local behaviour (verified in this repo)
+
+[cols="3,1,3", options="header"]
+|===
+| Behaviour | Tag | Evidence
+
+| Metadata block parses and round-trips byte-stably | ✅ | `metadata::tests`, `fixture_metadata_round_trips`
+| Pages without metadata open as roots | ✅ | `fixture_builds_hierarchy`, `unmanaged_page_gets_path_id`
+| Malformed metadata is non-fatal + diagnosed | ✅ | `fixture_reports_expected_diagnostics`
+| Hierarchy built from stable ids, not filenames | ✅ | `builds_hierarchy_from_metadata`
+| Backlinks computed both directions | ✅ | `calculates_backlinks`, `fixture_backlinks_resolve`
+| Broken/ambiguous links, cycles, dup ids diagnosed | ✅ | `graph::tests`
+| `_Sidebar.md` generation is deterministic | ✅ | `sidebar::tests::output_is_deterministic`
+| Headings inside code fences ignored | ✅ | `ignores_headings_in_code_fences`
+| Unicode + spaces in titles resolve by title | ✅ | fixture `Sandbox — Ünïcode & Spaces`
+|===
+
+== Live GitHub Wiki behaviour (UNVERIFIED — Phase 0 spike targets)
+
+Each row below is a concrete test to run against a disposable
+`<repo>.wiki.git`. All are currently ❓.
+
+[cols="3,1,3", options="header"]
+|===
+| Question | Tag | Expected / hypothesis (to confirm or refute)
+
+| Does a leading `<!-- cherrywiki ... -->` comment stay invisible in the rendered wiki page? | ❓ | 🟡 Yes — GitHub strips HTML comments from rendered Markdown.
+| Do nested subdirectories render as navigable hierarchy in the native wiki UI? | ❓ | 🟡 No — the native UI is effectively flat; hierarchy will live only in CherryWiki + `_Sidebar.md`.
+| Are `[[WikiLinks]]` resolved by global page title, ignoring path? | ❓ | 🟡 Yes.
+| Do `[[Page#heading]]` anchor links work? | ❓ | 🟡 Partial.
+| Do links with spaces / `.md` / no `.md` all resolve? | ❓ | 🟡 Mixed; needs the matrix run.
+| How do case-only renames behave on GitHub's store? | ❓ | 🟡 Risky on case-insensitive clients.
+| How should attachments be linked so they survive sync? | ❓ | 📌 Page-id-keyed `assets/<id>/…` (ADR pending).
+| How does `_Sidebar.md` behave / is it honoured? | ❓ | 🟡 Honoured as the sidebar.
+| How do concurrent pushes fail (non-fast-forward)? | ❓ | 🟡 Rejected; must fetch-before-push.
+| Does the default wiki branch have special behaviour? | ❓ | 🟡 `master` historically; confirm.
+|===
+
+== Link-format matrix (to populate during the spike)
+
+For each: author form → persisted form → does GitHub render it → does it survive
+a rename. _Rows pending live evidence._
+
+== Filename strategy findings
+
+See link:../decisions/0001-page-filename-strategy.adoc[ADR-0001]. Working
+hypothesis given "native reader must work": flat `--`-separated filenames
+(`Teaching--Course-A--Assessment-Plan.md`), because the native wiki UI does not
+present real directory hierarchy. *Unverified* until the nested-directory test
+runs.
+
+== Open questions
+
+* Exact anchor slug algorithm GitHub uses for headings (we implement a
+  GitHub-compatible approximation; confirm edge cases with Unicode).
+* Whether `_Sidebar.md` supports nested lists in the rendered sidebar to the
+  depth we generate.
+* Attachment path resolution relative to page location after sync.
+
+== Recommendations (provisional, pending the spike)
+
+. Persist links in GitHub-native Markdown; accept `[[…]]` only as *authoring*
+  input, serialised on save.
+. Use flat `--` filenames; keep the tree in metadata, never infer it from paths.
+. Keep the metadata HTML comment, but verify invisibility on a live page before
+  relying on it.

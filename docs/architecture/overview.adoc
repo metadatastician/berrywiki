@@ -1,0 +1,53 @@
+= CherryWiki — Architecture Overview
+:toc: macro
+:toclevels: 2
+
+toc::[]
+
+== Layers
+
+[source]
+----
+┌─────────────────────────────────────────────┐
+│ UI  (AffineScript → typed-wasm) — DEFERRED   │
+├─────────────────────────────────────────────┤
+│ WikiStore adapters                           │
+│   LocalFolderStore · GitHubWikiStore · …     │  (next slices)
+├─────────────────────────────────────────────┤
+│ cherrywiki-core  (Rust, I/O-free) — DONE     │
+│   metadata · page · graph · sidebar · diag   │
+└─────────────────────────────────────────────┘
+----
+
+== Principles
+
+* *Markdown + Git are canonical.* Everything else is derived and rebuildable.
+* *Stable ids, not filenames*, define identity and hierarchy.
+* *Deterministic* parsing, serialisation and sidebar generation.
+* *Non-fatal degradation*: malformed input yields diagnostics, never crashes.
+* *Storage is abstracted*: no filesystem/git/GitHub calls leak into the engine
+  or (later) the UI.
+
+== Crate: `cherrywiki-core`
+
+[cols="1,3", options="header"]
+|===
+| Module | Responsibility
+| `metadata` | Parse/serialise the hidden CherryWiki block; round-trip-stable.
+| `page` | `WikiPage` model; heading, wiki-link and Markdown-link extraction; title/slug.
+| `graph` | `PageGraph`: hierarchy, sibling order, backlinks, consistency diagnostics.
+| `sidebar` | Deterministic `_Sidebar.md` generation.
+| `diagnostics` | Structured, non-fatal, actionable diagnostics.
+|===
+
+== Planned crates
+
+* `cherrywiki-store` — the `WikiStore` trait + `LocalFolderStore` (safe writes,
+  path-traversal-proof), then `GitHubWikiStore` (credential-gated).
+* `cherrywiki-app` — read-only three-pane prototype first.
+
+== The WikiStore seam (planned)
+
+All repository access goes through one trait so the engine and UI never touch
+git/GitHub directly. `LocalFolderStore` is built and tested first, enabling the
+whole product to be developed without live credentials.

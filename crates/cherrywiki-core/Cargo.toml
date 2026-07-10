@@ -1,0 +1,18 @@
+[package]
+name = "cherrywiki-core"
+description = "Deterministic, storage-agnostic engine for CherryWiki: page metadata, hierarchy, backlinks and sidebar generation."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Non-negotiable: the core engine has NO browser, GitHub, git or filesystem
+# dependencies. It operates purely on in-memory page sources so it can be
+# exhaustively unit-tested and reused behind any WikiStore adapter.
+# Dependencies are deliberately kept at zero to guarantee deterministic,
+# reproducible parsing and serialisation.
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"

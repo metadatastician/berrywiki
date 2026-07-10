@@ -1,0 +1,21 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.orig
+
+# CherryWiki must never commit derived data, caches, tokens or temp clones
+# (Non-negotiable requirements 3, 13 and the Git rules).
+/.cherrywiki-cache/
+*.cherrywiki-index
+*.sqlite
+*.sqlite-*
+.env
+.env.*
+!.env.example
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

@@ -1,0 +1,98 @@
+= CherryWiki — Phase 0 Plan (Compatibility & Authentication Spike)
+:toc: macro
+:toclevels: 3
+:sectnums:
+
+toc::[]
+
+== Purpose
+
+Prove the complete vertical path and build the deterministic core engine
+_before_ investing in UI, rich editing, import or live GitHub synchronisation.
+
+Phase 0 answers one question: *can CherryWiki treat a GitHub Wiki as a
+hierarchical, backlinked notebook while keeping the files plain, GitHub-usable
+Markdown?* — and it builds the parts that do not depend on live GitHub access.
+
+== Technology decisions (locked for Phase 0)
+
+* *Engine & tooling: Rust.* Estate default is _Rust → Rust/SPARK_. The core's
+  invariants (deterministic round-trip, acyclic hierarchy, deterministic
+  sidebar) are natural SPARK/Ada proof candidates in a later phase.
+  See link:../decisions/0003-implementation-language.adoc[ADR-0003].
+* *No TypeScript, anywhere.* The upstream spec's "TypeScript monorepo" was an
+  external artefact and is explicitly rejected.
+* *Web UI: AffineScript → typed-wasm, deferred* until AffineScript reaches
+  base-language completion. Not started in Phase 0.
+* *Docs:* AsciiDoc (`.adoc`) for technical docs/ADRs; Markdown (`.md`) for wiki
+  content and community-health files.
+
+== What Phase 0 delivers
+
+[cols="1,3,1", options="header"]
+|===
+| # | Deliverable | Status
+
+| 1 | Rust workspace + `cherrywiki-core` crate (no I/O, zero deps) | *Done*
+| 2 | Metadata block parse/serialise, round-trip-stable & idempotent | *Done*
+| 3 | Heading + wiki-link/Markdown-link extraction | *Done*
+| 4 | Hierarchy from stable ids, sibling ordering, backlinks | *Done*
+| 5 | Diagnostics: broken link, missing parent, cycle, duplicate id, malformed metadata | *Done*
+| 6 | Deterministic `_Sidebar.md` generation | *Done*
+| 7 | Fixture wiki (`fixtures/test-wiki/`) | *Done*
+| 8 | Unit + fixture-integration tests (35 passing) | *Done*
+| 9 | `LocalFolderStore` (read + safe write, path-traversal-proof) | *Next*
+| 10 | Read-only three-pane prototype (tree / viewer / backlinks / diagnostics) | *Next*
+| 11 | Git conflict-detection test harness (no data loss) | *Next*
+| 12 | `GitHubWikiStore` behind the interface (not faked) | *Next*
+| 13 | Compatibility report filled with real evidence | *In progress (local verified; GitHub unverified)*
+|===
+
+== Architecture (Phase 0 slice)
+
+[source]
+----
+raw .md source
+   │  cherrywiki-core::WikiPage::parse
+   ▼
+WikiPage  (metadata, body, headings, outgoing_links, diagnostics)
+   │  cherrywiki-core::PageGraph::build
+   ▼
+PageGraph (roots, children, backlinks, resolved links, diagnostics)
+   │  cherrywiki-core::generate_sidebar
+   ▼
+_Sidebar.md  (deterministic)
+----
+
+The engine is I/O-free. All repository access will go through a `WikiStore`
+trait (next slice), with implementations `LocalFolderStore` (first) and
+`GitHubWikiStore` (credential-gated).
+
+== Non-negotiables honoured so far
+
+* Markdown is canonical; metadata lives in an HTML comment invisible to GitHub's
+  renderer (rendering invisibility itself is *unverified* pending a live test —
+  see the compatibility report).
+* Derived data (graph, sidebar, future index) is fully rebuildable.
+* Malformed metadata never makes a page unreadable — it degrades with a
+  diagnostic.
+* Pages without metadata open normally.
+* Serialisation is deterministic; re-saving an unchanged page does not churn.
+
+== Explicitly NOT in Phase 0
+
+Rich editor, CherryTree/Zim import, live production GitHub push/pull, search
+index, attachments upload pipeline, conflict-resolution UI.
+
+== Exit criteria
+
+Phase 0 is complete when: fixture loads; tree builds; backlinks compute;
+metadata round-trips; sidebar is deterministic; local page operations are
+tested; git conflicts are detected without data loss; a read-only three-pane
+prototype works; the compatibility report exists with GitHub behaviour clearly
+labelled verified vs unverified; and build + tests pass.
+
+Current standing: *engine, fixtures, tests and determinism are done and green.*
+Remaining: `LocalFolderStore`, the read-only prototype, the git-conflict
+harness, and live GitHub verification (blocked on `gh`/credentials — see
+link:../decisions/0002-authentication-strategy.adoc[ADR-0002]).

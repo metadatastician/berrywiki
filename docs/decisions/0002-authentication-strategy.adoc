@@ -1,0 +1,54 @@
+= ADR-0002: Authentication strategy
+:sectnums:
+
+== Status
+
+*Proposed* (provisional). Blocked on live verification: `gh` is not installed on
+the development host and no disposable GitHub Wiki has been exercised.
+
+== Context
+
+A GitHub Wiki is a separate `.wiki.git` repository. There is no REST API for
+wiki *pages*; the only interface is cloning, committing and pushing that git
+repo. CherryWiki must clone, read, modify, commit and push it through a storage
+adapter, for both public and private wikis, without ever leaking credentials.
+
+Estate constraints: secrets live in the reasonably-good-token-vault / env, never
+in code, logs, or committed files; `.github/workflows/**` pushes need a token
+with `workflow` scope.
+
+== Decision (provisional)
+
+. *Transport:* HTTPS clone/push using a short-lived token supplied via
+  environment variable (never embedded in a clone URL that could be logged).
+  Git credential handling is delegated to a helper so the token is never written
+  to `.git/config` in plaintext.
+. *Token type:* a fine-grained Personal Access Token scoped to the *minimum*
+  required (Contents: read/write on the target repo). SSH deploy keys are an
+  accepted alternative for single-repo automation.
+. *Storage:* tokens read from `CHERRYWIKI_GITHUB_TOKEN` (or an approved secret
+  store). An `.env.example` documents *names only*.
+. *Redaction:* all logs redact tokens and any credential-bearing URL; page
+  content is not logged by default.
+. *Never* expose a token to browser code. The sync layer runs server-side.
+
+== Alternatives considered
+
+* *GitHub App installation token* — better for multi-user/hosted deployment;
+  heavier to set up. Deferred to the deployment-model ADR.
+* *OAuth device flow* — good UX for an interactive desktop app; revisit when the
+  UI exists.
+* *`gh auth` piggy-backing* — convenient locally but not a deployment story.
+
+== Consequences
+
+* Live integration tests are *credential-gated* and will be clearly listed as
+  such; CI runs them only where a scoped token is available.
+* Until a token + `gh`/git-over-HTTPS path is exercised against a real wiki, the
+  GitHub adapter is implemented behind the `WikiStore` interface but its success
+  is *not* claimed as verified.
+
+== Tests that require credentials (to be enumerated as they are written)
+
+clone private wiki · push fast-forward · non-fast-forward rejection · auth
+failure surfaced without leaking the token · `_Sidebar.md` round-trip on remote.
