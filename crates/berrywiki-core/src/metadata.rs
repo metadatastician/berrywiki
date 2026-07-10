@@ -1,11 +1,11 @@
-//! The hidden CherryWiki metadata block.
+//! The hidden BerryWiki metadata block.
 //!
-//! A CherryWiki-managed page *may* begin with an HTML comment that is invisible
+//! A BerryWiki-managed page *may* begin with an HTML comment that is invisible
 //! in GitHub's rendered wiki (verified requirement: HTML comments are stripped
 //! from rendered output). Example:
 //!
 //! ```text
-//! <!-- cherrywiki
+//! <!-- berrywiki
 //! id: 0195f6ec-36a2-7a42-b519-5f558842e256
 //! parent: 0195f6d0-b787-7c3a-a48f-c1a04fb2ea84
 //! position: 30
@@ -29,13 +29,13 @@
 //!   unchanged model yields byte-identical output, so re-saving does not create
 //!   a meaningless diff.
 //!
-//! CherryWiki normalises the block on the first *managed* write; we do not try
+//! BerryWiki normalises the block on the first *managed* write; we do not try
 //! to preserve arbitrary input whitespace byte-for-byte (documented in
 //! ADR-0004 metadata format).
 
 use crate::diagnostics::Diagnostic;
 
-const OPEN_MARKER: &str = "<!-- cherrywiki";
+const OPEN_MARKER: &str = "<!-- berrywiki";
 const CLOSE_MARKER: &str = "-->";
 
 /// The kind of a page. Extensible; unknown kinds are preserved as-is via a
@@ -66,7 +66,7 @@ impl PageKind {
     }
 }
 
-/// Parsed CherryWiki metadata.
+/// Parsed BerryWiki metadata.
 ///
 /// `extra` holds unknown top-level `key: value` lines verbatim (without a
 /// trailing newline), so they survive a parse → serialise round-trip.
@@ -147,7 +147,7 @@ pub fn parse_source(source: &str) -> ParsedSource {
         // Unterminated block: keep the page readable, warn, treat as no metadata.
         diagnostics.push(Diagnostic::warning(
             "metadata.unterminated",
-            "CherryWiki metadata block was opened but never closed with `-->`; \
+            "BerryWiki metadata block was opened but never closed with `-->`; \
              the block was ignored and left in the page body.",
         ));
         return ParsedSource {
@@ -267,7 +267,7 @@ fn parse_block(lines: &[&str], diagnostics: &mut Vec<Diagnostic>) -> PageMetadat
     if !seen_id {
         diagnostics.push(Diagnostic::warning(
             "metadata.missing-id",
-            "CherryWiki metadata block has no `id`; the page cannot be managed \
+            "BerryWiki metadata block has no `id`; the page cannot be managed \
              (moved, backlinked) reliably until an id is assigned.",
         ));
     }
@@ -340,7 +340,7 @@ pub fn serialize_source(meta: Option<&PageMetadata>, body: &str) -> String {
 mod tests {
     use super::*;
 
-    const SAMPLE: &str = "<!-- cherrywiki\n\
+    const SAMPLE: &str = "<!-- berrywiki\n\
 id: 0195f6ec-36a2-7a42-b519-5f558842e256\n\
 parent: 0195f6d0-b787-7c3a-a48f-c1a04fb2ea84\n\
 position: 30\n\
@@ -399,7 +399,7 @@ This page describes the assessment strategy.\n";
 
     #[test]
     fn unknown_fields_are_preserved() {
-        let src = "<!-- cherrywiki\nid: x\nicon: rocket\ncolor: blue\n-->\n\n# T\n";
+        let src = "<!-- berrywiki\nid: x\nicon: rocket\ncolor: blue\n-->\n\n# T\n";
         let parsed = parse_source(src);
         let m = parsed.metadata.unwrap();
         assert!(m.extra.contains(&"icon: rocket".to_string()));
@@ -411,7 +411,7 @@ This page describes the assessment strategy.\n";
 
     #[test]
     fn malformed_position_warns_but_survives() {
-        let src = "<!-- cherrywiki\nid: x\nposition: not-a-number\n-->\n\n# T\n";
+        let src = "<!-- berrywiki\nid: x\nposition: not-a-number\n-->\n\n# T\n";
         let parsed = parse_source(src);
         let m = parsed.metadata.unwrap();
         assert_eq!(m.position, 0);
@@ -423,7 +423,7 @@ This page describes the assessment strategy.\n";
 
     #[test]
     fn unterminated_block_is_non_fatal() {
-        let src = "<!-- cherrywiki\nid: x\n\n# Title still readable\n";
+        let src = "<!-- berrywiki\nid: x\n\n# Title still readable\n";
         let parsed = parse_source(src);
         assert!(parsed.metadata.is_none());
         assert!(parsed.body.contains("# Title still readable"));
@@ -444,7 +444,7 @@ This page describes the assessment strategy.\n";
 
     #[test]
     fn unknown_kind_preserved() {
-        let src = "<!-- cherrywiki\nid: x\nkind: template\n-->\n\n# T\n";
+        let src = "<!-- berrywiki\nid: x\nkind: template\n-->\n\n# T\n";
         let m = parse_source(src).metadata.unwrap();
         assert_eq!(m.kind, PageKind::Other("template".to_string()));
         assert!(serialize_metadata(&m).contains("kind: template"));

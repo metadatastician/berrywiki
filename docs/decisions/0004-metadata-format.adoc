@@ -8,7 +8,7 @@ and revisited if per-page churn proves painful.
 
 == Context
 
-CherryWiki manages hierarchy, ordering, tags and archival per page while keeping
+BerryWiki manages hierarchy, ordering, tags and archival per page while keeping
 files usable without the app and invisible to GitHub's rendered wiki.
 
 * YAML frontmatter (`---`) is *not* an option: GitHub Wiki renders it visibly,
@@ -21,7 +21,7 @@ files usable without the app and invisible to GitHub's rendered wiki.
 Store metadata in a leading HTML comment block:
 
 ----
-<!-- cherrywiki
+<!-- berrywiki
 id: <uuid>
 parent: <id|null>
 position: <int>
@@ -32,7 +32,7 @@ archived: <bool>
 -->
 ----
 
-Guarantees implemented in `cherrywiki-core::metadata`:
+Guarantees implemented in `berrywiki-core::metadata`:
 
 * *Optional* — pages without a block open normally; a block is only recognised
   as the first non-blank content of the file.
@@ -42,13 +42,13 @@ Guarantees implemented in `cherrywiki-core::metadata`:
   kept verbatim and re-emitted.
 * *Deterministic & idempotent* — canonical serialisation uses a fixed key order;
   `serialize(parse(serialize(m))) == serialize(m)` and `parse(serialize(m)) == m`.
-  CherryWiki normalises the block on first managed write; arbitrary input
+  BerryWiki normalises the block on first managed write; arbitrary input
   whitespace is *not* preserved byte-for-byte.
 
 == Alternatives considered
 
 * *Per-page `position` vs central manifest* — per-page ordering means reordering
-  one sibling dirties several files. A central `.cherrywiki/index.json` keyed by
+  one sibling dirties several files. A central `.berrywiki/index.json` keyed by
   id would localise churn and make tree ops atomic, at the cost of a structured
   merge hotspot. *Deferred*: start per-page (simpler, self-describing files);
   reconsider if churn/merge pain shows up in real use.

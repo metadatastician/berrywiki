@@ -14,7 +14,7 @@
 use crate::graph::PageGraph;
 use crate::page::WikiPage;
 
-/// Options controlling sidebar rendering (mirrors `.cherrywiki.json` `sidebar`).
+/// Options controlling sidebar rendering (mirrors `.berrywiki.json` `sidebar`).
 #[derive(Debug, Clone)]
 pub struct SidebarOptions {
     pub include_archived: bool,
@@ -86,7 +86,7 @@ mod tests {
             None => "parent: null\n".to_string(),
         };
         let src = format!(
-            "<!-- cherrywiki\nid: {id}\n{parent_line}position: {pos}\nkind: page\ntags: []\narchived: {archived}\n-->\n\n# {title}\n"
+            "<!-- berrywiki\nid: {id}\n{parent_line}position: {pos}\nkind: page\ntags: []\narchived: {archived}\n-->\n\n# {title}\n"
         );
         WikiPage::parse(path, src)
     }

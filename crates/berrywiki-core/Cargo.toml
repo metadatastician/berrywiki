@@ -1,6 +1,6 @@
 [package]
-name = "cherrywiki-core"
-description = "Deterministic, storage-agnostic engine for CherryWiki: page metadata, hierarchy, backlinks and sidebar generation."
+name = "berrywiki-core"
+description = "Deterministic, storage-agnostic engine for BerryWiki: page metadata, hierarchy, backlinks and sidebar generation."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -7,7 +7,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use cherrywiki_core::{generate_sidebar, PageGraph, SidebarOptions, WikiPage};
+use berrywiki_core::{generate_sidebar, PageGraph, SidebarOptions, WikiPage};
 
 fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -86,9 +86,9 @@ fn fixture_metadata_round_trips() {
     // The Assessment Plan page: parse -> serialise -> parse yields equal metadata.
     let dir = fixture_dir();
     let src = fs::read_to_string(dir.join("Teaching--Course-A--Assessment-Plan.md")).unwrap();
-    let parsed = cherrywiki_core::parse_source(&src);
+    let parsed = berrywiki_core::parse_source(&src);
     let meta = parsed.metadata.expect("has metadata");
-    let reserialised = cherrywiki_core::serialize_source(Some(&meta), &parsed.body);
-    let reparsed = cherrywiki_core::parse_source(&reserialised);
+    let reserialised = berrywiki_core::serialize_source(Some(&meta), &parsed.body);
+    let reparsed = berrywiki_core::parse_source(&reserialised);
     assert_eq!(reparsed.metadata.unwrap(), meta);
 }

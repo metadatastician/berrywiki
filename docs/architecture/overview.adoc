@@ -1,4 +1,4 @@
-= CherryWiki — Architecture Overview
+= BerryWiki — Architecture Overview
 :toc: macro
 :toclevels: 2
 
@@ -14,7 +14,7 @@ toc::[]
 │ WikiStore adapters                           │
 │   LocalFolderStore · GitHubWikiStore · …     │  (next slices)
 ├─────────────────────────────────────────────┤
-│ cherrywiki-core  (Rust, I/O-free) — DONE     │
+│ berrywiki-core  (Rust, I/O-free) — DONE     │
 │   metadata · page · graph · sidebar · diag   │
 └─────────────────────────────────────────────┘
 ----
@@ -28,12 +28,12 @@ toc::[]
 * *Storage is abstracted*: no filesystem/git/GitHub calls leak into the engine
   or (later) the UI.
 
-== Crate: `cherrywiki-core`
+== Crate: `berrywiki-core`
 
 [cols="1,3", options="header"]
 |===
 | Module | Responsibility
-| `metadata` | Parse/serialise the hidden CherryWiki block; round-trip-stable.
+| `metadata` | Parse/serialise the hidden BerryWiki block; round-trip-stable.
 | `page` | `WikiPage` model; heading, wiki-link and Markdown-link extraction; title/slug.
 | `graph` | `PageGraph`: hierarchy, sibling order, backlinks, consistency diagnostics.
 | `sidebar` | Deterministic `_Sidebar.md` generation.
@@ -42,9 +42,9 @@ toc::[]
 
 == Planned crates
 
-* `cherrywiki-store` — the `WikiStore` trait + `LocalFolderStore` (safe writes,
+* `berrywiki-store` — the `WikiStore` trait + `LocalFolderStore` (safe writes,
   path-traversal-proof), then `GitHubWikiStore` (credential-gated).
-* `cherrywiki-app` — read-only three-pane prototype first.
+* `berrywiki-app` — read-only three-pane prototype first.
 
 == The WikiStore seam (planned)
 

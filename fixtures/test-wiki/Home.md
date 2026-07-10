@@ -1,4 +1,4 @@
-<!-- cherrywiki
+<!-- berrywiki
 id: 0195f6d0-0000-7000-8000-000000000001
 parent: null
 position: 0
@@ -10,7 +10,7 @@ archived: false
 
 # Home
 
-Welcome to the CherryWiki fixture notebook.
+Welcome to the BerryWiki fixture notebook.
 
 - [[Teaching]]
 - [[Research]]

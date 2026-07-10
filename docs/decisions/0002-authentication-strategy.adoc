@@ -10,7 +10,7 @@ the development host and no disposable GitHub Wiki has been exercised.
 
 A GitHub Wiki is a separate `.wiki.git` repository. There is no REST API for
 wiki *pages*; the only interface is cloning, committing and pushing that git
-repo. CherryWiki must clone, read, modify, commit and push it through a storage
+repo. BerryWiki must clone, read, modify, commit and push it through a storage
 adapter, for both public and private wikis, without ever leaking credentials.
 
 Estate constraints: secrets live in the reasonably-good-token-vault / env, never
@@ -26,7 +26,7 @@ with `workflow` scope.
 . *Token type:* a fine-grained Personal Access Token scoped to the *minimum*
   required (Contents: read/write on the target repo). SSH deploy keys are an
   accepted alternative for single-repo automation.
-. *Storage:* tokens read from `CHERRYWIKI_GITHUB_TOKEN` (or an approved secret
+. *Storage:* tokens read from `BERRYWIKI_GITHUB_TOKEN` (or an approved secret
   store). An `.env.example` documents *names only*.
 . *Redaction:* all logs redact tokens and any credential-bearing URL; page
   content is not logged by default.

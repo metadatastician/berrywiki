@@ -290,7 +290,7 @@ mod tests {
             None => "parent: null\n".to_string(),
         };
         let src = format!(
-            "<!-- cherrywiki\nid: {id}\n{parent_line}position: {pos}\nkind: page\ntags: []\narchived: false\n-->\n\n# {title}\n\n{body}\n"
+            "<!-- berrywiki\nid: {id}\n{parent_line}position: {pos}\nkind: page\ntags: []\narchived: false\n-->\n\n# {title}\n\n{body}\n"
         );
         WikiPage::parse(format!("{title}.md"), src)
     }

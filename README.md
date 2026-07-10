@@ -1,14 +1,14 @@
-# CherryWiki
+# BerryWiki
 
 A companion authoring, navigation, indexing and synchronisation layer for
 **GitHub.com Wikis** that gives them a CherryTree/Zim-style hierarchical
 notebook experience — while keeping the content as plain, GitHub-compatible
 Markdown in ordinary Git storage.
 
-> **Core principle:** the wiki must stay fully usable when CherryWiki is not.
+> **Core principle:** the wiki must stay fully usable when BerryWiki is not.
 > You can always clone the `.wiki.git` repo, read/edit the Markdown in any
 > editor, commit, push, and view it through GitHub's normal Wiki UI.
-> CherryWiki *enhances* the files; it never makes them depend on the app.
+> BerryWiki *enhances* the files; it never makes them depend on the app.
 
 ## Status — Phase 0 (Compatibility & Authentication Spike)
 
@@ -18,8 +18,8 @@ editor yet. See [`docs/architecture/phase-0-plan.adoc`](docs/architecture/phase-
 
 Implemented so far:
 
-- `cherrywiki-core` — deterministic, I/O-free engine:
-  - hidden CherryWiki metadata block parse/serialise (round-trip stable),
+- `berrywiki-core` — deterministic, I/O-free engine:
+  - hidden BerryWiki metadata block parse/serialise (round-trip stable),
   - heading + wiki-link/Markdown-link extraction,
   - page hierarchy from stable ids, sibling ordering, backlinks,
   - consistency diagnostics (broken links, missing parent, cycles, duplicate ids),
@@ -39,7 +39,7 @@ Implemented so far:
 ## Layout
 
 ```
-crates/cherrywiki-core/   deterministic engine (no I/O)
+crates/berrywiki-core/   deterministic engine (no I/O)
 fixtures/test-wiki/       fixture notebook (Markdown)
 docs/architecture/        plan + overview
 docs/compatibility/       GitHub Wiki compatibility findings

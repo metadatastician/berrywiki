@@ -1,15 +1,15 @@
-//! # cherrywiki-core
+//! # berrywiki-core
 //!
-//! The deterministic, storage-agnostic heart of CherryWiki.
+//! The deterministic, storage-agnostic heart of BerryWiki.
 //!
 //! This crate turns raw Markdown page sources into a navigable notebook: it
-//! parses the hidden CherryWiki metadata block, extracts headings and links,
+//! parses the hidden BerryWiki metadata block, extracts headings and links,
 //! builds the page hierarchy from stable ids, computes backlinks, reports
 //! consistency diagnostics, and generates a deterministic GitHub `_Sidebar.md`.
 //!
 //! It performs **no** I/O and depends on **no** browser, git or GitHub APIs, so
 //! it can be exhaustively unit-tested and reused behind any `WikiStore`
-//! adapter (see the forthcoming `cherrywiki-store` crate).
+//! adapter (see the forthcoming `berrywiki-store` crate).
 //!
 //! ## Pipeline
 //!
@@ -18,15 +18,15 @@
 //! ```
 //!
 //! ```
-//! use cherrywiki_core::{WikiPage, PageGraph, generate_sidebar, SidebarOptions};
+//! use berrywiki_core::{WikiPage, PageGraph, generate_sidebar, SidebarOptions};
 //!
 //! let home = WikiPage::parse(
 //!     "Home.md",
-//!     "<!-- cherrywiki\nid: home\nparent: null\nposition: 0\nkind: page\ntags: []\narchived: false\n-->\n\n# Home\n\nSee [[Guide]].\n",
+//!     "<!-- berrywiki\nid: home\nparent: null\nposition: 0\nkind: page\ntags: []\narchived: false\n-->\n\n# Home\n\nSee [[Guide]].\n",
 //! );
 //! let guide = WikiPage::parse(
 //!     "Guide.md",
-//!     "<!-- cherrywiki\nid: guide\nparent: home\nposition: 0\nkind: page\ntags: []\narchived: false\n-->\n\n# Guide\n",
+//!     "<!-- berrywiki\nid: guide\nparent: home\nposition: 0\nkind: page\ntags: []\narchived: false\n-->\n\n# Guide\n",
 //! );
 //! let graph = PageGraph::build(vec![home, guide]);
 //! assert_eq!(graph.backlinks_of("guide").len(), 1);

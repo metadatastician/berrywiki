@@ -3,10 +3,10 @@
 **/*.rs.bk
 Cargo.lock.orig
 
-# CherryWiki must never commit derived data, caches, tokens or temp clones
+# BerryWiki must never commit derived data, caches, tokens or temp clones
 # (Non-negotiable requirements 3, 13 and the Git rules).
-/.cherrywiki-cache/
-*.cherrywiki-index
+/.berrywiki-cache/
+*.berrywiki-index
 *.sqlite
 *.sqlite-*
 .env

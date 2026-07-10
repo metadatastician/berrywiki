@@ -7,7 +7,7 @@
 
 == Context
 
-The upstream CherryWiki specification proposed a "TypeScript monorepo". That
+The upstream BerryWiki specification proposed a "TypeScript monorepo". That
 recommendation originated from an external tool and conflicts with the estate's
 language doctrine. The estate defaults are:
 
@@ -25,7 +25,7 @@ library — it is still being driven toward base-language completion.
 
 == Decision
 
-. *TypeScript is rejected outright.* It is not used anywhere in CherryWiki.
+. *TypeScript is rejected outright.* It is not used anywhere in BerryWiki.
 . *The core engine and all Phase-0 tooling are written in Rust.* This matches
   the _Rust → Rust/SPARK_ default and gives a mature, testable base today. The
   engine's invariants (deterministic round-trip, acyclic hierarchy,

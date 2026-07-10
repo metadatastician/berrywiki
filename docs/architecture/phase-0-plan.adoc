@@ -1,4 +1,4 @@
-= CherryWiki — Phase 0 Plan (Compatibility & Authentication Spike)
+= BerryWiki — Phase 0 Plan (Compatibility & Authentication Spike)
 :toc: macro
 :toclevels: 3
 :sectnums:
@@ -10,7 +10,7 @@ toc::[]
 Prove the complete vertical path and build the deterministic core engine
 _before_ investing in UI, rich editing, import or live GitHub synchronisation.
 
-Phase 0 answers one question: *can CherryWiki treat a GitHub Wiki as a
+Phase 0 answers one question: *can BerryWiki treat a GitHub Wiki as a
 hierarchical, backlinked notebook while keeping the files plain, GitHub-usable
 Markdown?* — and it builds the parts that do not depend on live GitHub access.
 
@@ -33,7 +33,7 @@ Markdown?* — and it builds the parts that do not depend on live GitHub access.
 |===
 | # | Deliverable | Status
 
-| 1 | Rust workspace + `cherrywiki-core` crate (no I/O, zero deps) | *Done*
+| 1 | Rust workspace + `berrywiki-core` crate (no I/O, zero deps) | *Done*
 | 2 | Metadata block parse/serialise, round-trip-stable & idempotent | *Done*
 | 3 | Heading + wiki-link/Markdown-link extraction | *Done*
 | 4 | Hierarchy from stable ids, sibling ordering, backlinks | *Done*
@@ -53,13 +53,13 @@ Markdown?* — and it builds the parts that do not depend on live GitHub access.
 [source]
 ----
 raw .md source
-   │  cherrywiki-core::WikiPage::parse
+   │  berrywiki-core::WikiPage::parse
    ▼
 WikiPage  (metadata, body, headings, outgoing_links, diagnostics)
-   │  cherrywiki-core::PageGraph::build
+   │  berrywiki-core::PageGraph::build
    ▼
 PageGraph (roots, children, backlinks, resolved links, diagnostics)
-   │  cherrywiki-core::generate_sidebar
+   │  berrywiki-core::generate_sidebar
    ▼
 _Sidebar.md  (deterministic)
 ----

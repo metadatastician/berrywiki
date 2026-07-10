@@ -51,8 +51,8 @@ Each row below is a concrete test to run against a disposable
 |===
 | Question | Tag | Expected / hypothesis (to confirm or refute)
 
-| Does a leading `<!-- cherrywiki ... -->` comment stay invisible in the rendered wiki page? | ❓ | 🟡 Yes — GitHub strips HTML comments from rendered Markdown.
-| Do nested subdirectories render as navigable hierarchy in the native wiki UI? | ❓ | 🟡 No — the native UI is effectively flat; hierarchy will live only in CherryWiki + `_Sidebar.md`.
+| Does a leading `<!-- berrywiki ... -->` comment stay invisible in the rendered wiki page? | ❓ | 🟡 Yes — GitHub strips HTML comments from rendered Markdown.
+| Do nested subdirectories render as navigable hierarchy in the native wiki UI? | ❓ | 🟡 No — the native UI is effectively flat; hierarchy will live only in BerryWiki + `_Sidebar.md`.
 | Are `[[WikiLinks]]` resolved by global page title, ignoring path? | ❓ | 🟡 Yes.
 | Do `[[Page#heading]]` anchor links work? | ❓ | 🟡 Partial.
 | Do links with spaces / `.md` / no `.md` all resolve? | ❓ | 🟡 Mixed; needs the matrix run.

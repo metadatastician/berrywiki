@@ -9,10 +9,10 @@ link:../compatibility/github-wiki.adoc[the compatibility report].
 
 == Context
 
-CherryWiki presents a hierarchical notebook, but the canonical store is a
+BerryWiki presents a hierarchical notebook, but the canonical store is a
 GitHub `.wiki.git` repository whose native web UI does not render real directory
 hierarchy. The product requirement for Phase 0 is that *the native GitHub wiki
-reader must work* for users without CherryWiki.
+reader must work* for users without BerryWiki.
 
 The tree must be derived from stable page ids + `parent` metadata, never
 inferred from filenames. Filenames therefore only need to be stable, unique,
