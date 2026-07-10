@@ -1,0 +1,995 @@
+= BerryWiki Implementation Plan (Phase 0 → MVP)
+:toc:
+:toclevels: 3
+:sectnums:
+
+[IMPORTANT]
+====
+*Status: DRAFT — synthesised and critic-reviewed, final revision NOT applied.*
+This plan is the synthesis output of the `berrywiki-ultraplan` workflow
+(2026-07-11). Three adversarial critics then reviewed it; the automated
+revision that would fold their findings back in did not run (interrupted by a
+spend limit). Their findings are preserved verbatim in
+<<critique-appendix>> and *must be resolved before the affected slices are
+executed*. Several are load-bearing (e.g. zero-JS idle-autosave is
+infeasible; non-leaf moves cascade under the ADR-0001 filename scheme; the
+journal file must not live inside the clone; fine-grained PAT access to
+`.wiki.git` is an unverified assumption). Treat the phase bodies below as a
+strong draft, not a ratified plan.
+====
+
+[NOTE]
+====
+This is the synthesised implementation plan, produced from five independent
+designs and three judge reviews. It starts from the strongest-scoring design
+(MVP-first, zero-JS SSR) and grafts in the judges' recommended mechanisms from
+the other four. Every contradiction between designs is resolved explicitly in
+<<decisions>>. All statements about live GitHub behaviour in this document are
+*unverified* until dated evidence lands in
+link:../compatibility/github-wiki.adoc[the compatibility report] — per
+link:../decisions/0002-authentication-strategy.adoc[ADR-0002], nothing live is
+ever claimed verified without an actual recorded run.
+====
+
+== Executive summary
+
+BerryWiki's hardest layers are already green and committed: `berrywiki-core`
+(zero-dependency, I/O-free engine, 35 tests), `berrywiki-store` (`WikiStore`
+trait + `LocalFolderStore` with create/update/move/delete/attachments/sidebar,
+commit `9f411fe`), and `berrywiki-git-compat` (git-CLI evidence harness with
+six no-data-loss conflict tests, commit `a47e667`). Several of the candidate
+designs believed the harness was uncommitted; it is not, and this plan does not
+re-schedule that work.
+
+The plan drives at a single product gate: *the owner browses, edits, and safely
+syncs their real `.wiki.git` from BerryWiki daily*. Five phases get there:
+
+. *Read your real wiki* — read-only three-pane SSR explorer + repo
+  publication with estate CI + the credential-gated *read-side* live spike.
+. *Edit in BerryWiki* — full authoring loop (editor, preview, drafts,
+  create/delete, transactional move/rename with inbound-link rewriting) while
+  the user keeps syncing with terminal git. A genuinely usable increment.
+. *Sync from the app* — commit/pull/push with the safety rules enforced by
+  construction, the conflict workflow, and the *write-side* live spike.
+  *This is the daily-use gate.*
+. *Organise it* — tags, history, attachments, templates, accessibility pass.
+. *CherryTree import, packaging, MVP declaration.*
+
+SPARK proofs, the AffineScript→typed-wasm enhancement layer, Zim import and a
+gitoxide re-evaluation are explicitly post-MVP, with the ground prepared (not
+paid for) during the MVP: a numbered invariants ledger from Phase 1, pure
+plan/apply seams, and golden vector corpora.
+
+[#decisions]
+== Decisions taken
+
+Locked decisions from ADR-0001..0004 are taken as given and not re-litigated.
+New expensive-to-reverse decisions are marked *ADR required* and get their own
+ADR before or in the slice that implements them.
+
+[cols="2,3,4,2", options="header"]
+|===
+| Decision | Choice | Rationale (and contradictions resolved) | Reversibility
+
+| UI now
+| Zero-JS server-side-rendered web app: axum 0.8 + maud templates + comrak
+  (GFM) rendering. Single binary `berrywiki serve <path\|url>` on localhost;
+  reachable from the Windows browser via WSL mirrored networking. Three panes:
+  tree \| rendered page \| outline + backlinks. *ADR-0005 (this decision) —
+  see link:../decisions/0005-ui-technology.adoc[].*
+| The daily question is "does this render the way GitHub will" — that needs
+  HTML, ruling out a TUI as primary (two designs proposed TUI-first; both were
+  marked down by judges for exactly this). Rust→wasm frameworks are rejected
+  now: wasm-bindgen ships generated JS glue (doctrinally unresolved) and the
+  host toolchain (distro Rust 1.85, no rustup) cannot target wasm32 locally —
+  the one design that bet on Leptos was judged fatally flawed on both counts.
+  Zero-JS SSR has no doctrine ambiguity, the best accessibility story
+  (semantic HTML + forms), the smallest dependency tree, and a thin swappable
+  seam for AffineScript. CI enforces the choice mechanically: a test asserts
+  *no `<script>` element in any HTTP response*.
+| High — templates are thin; all behaviour lives behind HTTP endpoints, so a
+  future front-end swap does not touch the engine.
+
+| Git engine
+| Shell out to the git binary via a new `berrywiki-git` crate: a *closed
+  command enum* rendered to argv (no string splicing), parsing only
+  `--porcelain=v2` / `-z` output, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`,
+  minimum git version check (floor 2.30), repo-level advisory lockfile.
+  *ADR required (ADR-0006), written in Phase 3 with harness evidence
+  attached.*
+| Unanimous across all five designs; the wrapper hardening is grafted from the
+  verification-first design (judges' strongest git encoding): an audit test
+  enumerates every constructible command and asserts `--force`,
+  `--force-with-lease`, `reset --hard` cannot appear — force-push is
+  *unrepresentable*, not merely forbidden. A CI grep gate over `src/`
+  (risk-first graft) backs this up cheaply. The CLI matches byte-for-byte
+  what a user without BerryWiki does (the product's core promise), and all
+  evidence from the committed `berrywiki-git-compat` harness transfers
+  directly. libgit2 rejected (C dependency, divergent merge behaviour,
+  CVE history); gitoxide's push/merge surface still maturing — re-evaluate
+  post-MVP behind the same typed interface.
+| Medium — the typed interface isolates the engine; gitoxide could replace
+  the subprocess behind it later.
+
+| Credential handling
+| Fine-grained PAT (Contents R/W, single wiki repo), sourced from
+  reasonably-good-token-vault, exported as `BERRYWIKI_GITHUB_TOKEN`. Injected
+  via *GIT_ASKPASS self-re-exec*: the `berrywiki` binary re-invoked with a
+  hidden flag that prints the env var — token never on argv, never in
+  `.git/config`, never in a URL. All captured git output passes a redaction
+  layer; a leak-hunting test greps every log artifact for the token.
+| Estate-Native graft, endorsed by all three judges: exceeds ADR-0002's floor
+  with no helper-script file to manage.
+| High — swap of injection mechanism touches one module.
+
+| Search
+| `SearchIndex` trait in a new `berrywiki-index` crate. MVP implementation:
+  in-memory index (title > headings > tags > body ranking, case-folded,
+  code-fence-aware via core's extractors), rebuilt on store reload —
+  milliseconds at real wiki scale. SQLite FTS5 (rusqlite, `bundled`) lands
+  behind the *same trait* only if the Phase 5 perf run on a 2,000-page
+  synthetic wiki shows measured pain; if it lands, the index lives in the
+  *XDG cache* keyed by repo hash — never inside the wiki clone — with a
+  versioned schema and a `berrywiki reindex` full-rebuild command, and the
+  in-memory implementation is *kept permanently as a differential-test
+  oracle*.
+| Resolves the designs' three-way split (in-memory vs FTS5-now vs FTS5 with
+  in-memory oracle): defer the schema/versioning machinery past the daily-use
+  threshold without foreclosing it; take the oracle pattern
+  (verification-first graft) and the never-pollute-the-clone location
+  (Estate-Native graft, protects "usable without BerryWiki"). Tantivy
+  rejected unanimously: dependency weight disproportionate to wiki scale.
+| High — trait seam proven with two implementations before FTS5 exists.
+
+| Transactional move/rename
+| Two-layer design: a *pure ChangeSet planner* in `berrywiki-core`
+  (`plan_move`/`plan_rename` → ordered `FileOp` list as plain data: validate
+  parent → cycle check → metadata/position edits → filename rename →
+  surgical inbound-link span rewrites → attachment references → sidebar
+  regeneration), plus a *journaled apply* in the store: write
+  `.berrywiki/journal.json` listing every FileOp *before touching anything*;
+  apply via atomic temp-write+rename; on failure or crash, roll back by
+  `git restore` of exactly the journaled paths (git is the transaction log).
+  Recovery rules on startup: journal present + no commit → restore journaled
+  paths from HEAD; journal present + commit exists → delete journal. One
+  logical operation = one commit, sidebar included.
+| Merges the three designs' mechanisms: pure planner (risk-first/product-ux),
+  journal protocol with explicit crash-recovery rules (risk-first S4.2 —
+  judges called it "a complete, testable never-half-moved mechanism"), and
+  git-restore-from-HEAD rollback (Estate-Native — "the simplest sound
+  transactional-move design offered"). Link rewrites are surgical span edits
+  computed by the existing code-fence-aware extractor — never regex over raw
+  Markdown. Case-only renames done as a two-step rename for case-insensitive
+  filesystems.
+| Medium — the planner is data-in/data-out and is the future SPARK target.
+
+| Conflict policy
+| Pull is `merge --ff-only` when Behind; when Diverged, an explicit conflict
+  flow: conflicts classified into a machine-readable `ConflictReport` with
+  base/ours/theirs extracted via `git show :1:/:2:/:3:<path>`.
+  `_Sidebar.md` conflicts are *auto-resolved by regenerating from the merged
+  graph* (the harness already shows they behave like ordinary file
+  conflicts). *Metadata-block and body conflicts are always surfaced to the
+  user — never silently merged.* Modify/delete keeps local content plus a
+  diagnostic. Abort is always available and provably restores the pre-merge
+  working tree (already harness-tested).
+| Grafts risk-first's classification and sidebar auto-regeneration (judges:
+  "turns the most common conflict class into a non-event") but *rejects* its
+  silent per-key union of metadata conflicts, which one judge flagged as
+  edging the never-discard-local-work line. Resolution: only the sidebar —
+  which is derived data by definition — auto-resolves.
+| High — policy layer above the git wrapper.
+
+| Drafts
+| Autosaved on idle to the XDG state dir, keyed by repo hash + page id —
+  never inside the clone, never committed. Visible save-state in the UI;
+  restore-on-open banner; drafts are additive-only (never deleted without
+  explicit user action); a kill-mid-edit test proves an unsaved draft
+  survives.
+| Product-ux graft (judges: "the trust-building feature for a refugee whose
+  old tool never lost a keystroke"), adapted to SSR: autosave is a periodic
+  form post in the MVP, upgraded to as-you-type in the enhancement era.
+| High.
+
+| Live spike timing
+| Split: *read-side* evidence (metadata invisibility, link matrix, sidebar
+  depth, nested dirs, default branch) in Phase 1 before any editing exists;
+  *write-side* evidence (push, non-FF rejection, conflicts end-to-end, auth
+  redaction, private clone) in Phase 3 before in-app sync is declared
+  working. Credential-gated throughout; see <<spike>>.
+| Each assumption is verified just before it becomes load-bearing — endorsed
+  by all three judges over both "spike-first-and-nothing-else" (risk-first
+  Phase 1, judged to withhold usable product needlessly) and "spike at
+  Phase C after two build phases" (verification-first, judged late).
+| n/a — evidence, not code.
+
+| Estate CI timing
+| One bounded PR in Phase 1, alongside repo publication: the 4 required
+  hyperpolymath/standards workflows (*names verified against
+  `standards/.meta` at push time* — known doc drift), `hypatia-scan` with
+  `--exit-zero`, secret scanner, community-health files as `.md` with the OU
+  address, `.a2ml` meta files (not `.scm`), no third-party AI review bots,
+  all actions SHA-pinned per action-trust-layers. Push requires
+  `gh auth refresh -s workflow` first.
+| Resolves the judges' tension: one judge dinged the base design for
+  deferring standards CI to Phase 5; another punished a whole
+  estate-citizenship phase before any product. Resolution: estate CI is
+  cheap and bounded — do it in one PR early, and do *nothing else*
+  infrastructure-shaped before the user can open a wiki.
+| n/a.
+
+| SPARK insertion point
+| Post-MVP, never on the MVP critical path. Prepared from Phase 1 via a
+  numbered invariants ledger (`docs/proofs/invariants.adoc`, INV-1..6)
+  cross-referenced to Rust tests, with *demote-or-gate language discipline*:
+  every invariant reads "tested, proof scheduled" until a green gnatprove CI
+  lane gates that specific claim. See <<spark>>.
+| All designs except verification-first put SPARK post-MVP; two judges
+  independently flagged verification-first's gnatprove-inside-the-MVP-gate
+  as the proof-before-product pattern the estate's own theatre-cleanup
+  doctrine warns against. The ledger + language discipline (Estate-Native
+  graft) keeps the door genuinely open at near-zero cost.
+| n/a.
+
+| Generated-JS-glue doctrine question
+| *Parked, not ruled.* The SSR MVP ships zero JS of any provenance, so
+  nothing depends on the answer. A formal user ruling (*ADR required,
+  ADR-0007*) is the gate for starting the post-MVP AffineScript-era
+  enhancement layer (drag-and-drop, inline autocomplete, live preview).
+| Resolves the contradiction between the risk-first design (build a
+  timeboxed wasm spike pre-MVP to force the ruling) and the base design
+  (park it): the spike is *unbuildable on the local toolchain* (no rustup →
+  no wasm32), so pre-MVP it would be CI-only guesswork. The ruling is a
+  decision for the user, not an artifact to build; it is scheduled as an
+  explicit open question with a deadline of "before the enhancement layer
+  starts".
+| n/a.
+
+| Drag-and-drop
+| Not in the MVP. Moves are form/keyboard operations with a dry-run diff
+  preview (files to be touched, links to be rewritten) before confirm. When
+  pointer DnD ships in the AffineScript era, it MUST drive the *identical
+  plan/apply path* as the keyboard/form flow, with a differential test
+  asserting both input methods produce byte-identical commits.
+| The dual-input-one-path contract is a product-ux graft all three judges
+  recommended; recording it now costs nothing and prevents a second move
+  implementation later.
+| n/a.
+|===
+
+== Crate layout
+
+Workspace, existing members kept unchanged in mission:
+
+[cols="2,6", options="header"]
+|===
+| Crate | Role
+
+| `berrywiki-core` (exists)
+| I/O-free deterministic engine; *zero runtime dependencies forever*,
+  enforced by a CI gate that fails if its `[dependencies]` is non-empty.
+  Grows the pure ChangeSet planner (Phase 2) and the shared slug logic.
+  proptest enters as a dev-dependency only (open question: or a separate
+  test-only crate).
+
+| `berrywiki-store` (exists)
+| `WikiStore` trait + `LocalFolderStore`. Extended in Phase 2 with
+  inbound-link rewriting on move and the journaled multi-file apply. Stays
+  synchronous by design; no git or network dependencies.
+
+| `berrywiki-git-compat` (exists, committed at `a47e667`)
+| Test-support git sandbox (bare remote + two clones, hermetic config), six
+  no-data-loss conflict tests green. Evidence generator and offline oracle
+  only; never shipped. Extended, never replaced.
+
+| `berrywiki-render` (new, Phase 1)
+| comrak GFM Markdown→HTML; heading-anchor slugs reusing core's slug
+  algorithm; `[[wikilink]]` → resolved `<a href="/page/:id">` via the
+  PageGraph. Keeps core zero-dep. Golden-HTML tests over the fixture wiki.
+
+| `berrywiki-index` (new, Phase 1)
+| `SearchIndex` trait + in-memory implementation; optional `fts5` feature
+  later adds the rusqlite implementation (see <<decisions>>).
+
+| `berrywiki-git` (new, Phase 3)
+| Production sync engine: closed command enum → argv, porcelain-v2 `-z`
+  parsers, lockfile, GIT_ASKPASS self-re-exec, redacting logger, SyncState
+  computation. Integration-tested exclusively against the
+  `berrywiki-git-compat` sandbox (no network).
+
+| `berrywiki-import` (new, Phase 5)
+| CherryTree `.ctd` (XML, quick-xml) and `.ctb` (SQLite, rusqlite behind a
+  feature) → neutral `ImportModel` → store. Dry-run default; machine + human
+  reports; source opened read-only, byte-hash-verified untouched. Zim reuses
+  the model post-MVP.
+
+| `berrywiki-app` (new, Phase 1)
+| The axum + maud SSR server and the `berrywiki` CLI (`serve`, `check`,
+  `sidebar`, later `reindex`, `import`, `spike`). Composes everything; the
+  only crate that knows about HTTP. `GitWikiStore` (Phase 3) composes
+  `LocalFolderStore` over a managed clone directory — no `WikiStore` trait
+  changes needed.
+|===
+
+== Phase-by-phase plan
+
+=== Phase 1 — Read your real wiki (read-only explorer + read-side evidence)
+
+*Goal:* the user opens a manually-cloned real `.wiki.git` in a browser daily
+for navigation and reading, and the provisional ADRs (0001 filenames, 0004
+metadata invisibility) get real GitHub evidence before anything is built on
+them.
+
+*Slices (each PR-sized):*
+
+. *S1.1 Publish + estate CI (one PR).* Push the four existing commits to
+  `github.com/metadatastician/berrywiki` (user runs the push;
+  `gh auth refresh -s workflow` first). Add: `rust.yml`
+  (dtolnay/rust-toolchain pinned by SHA: `cargo fmt --check`,
+  `clippy --all-targets -D warnings`, `cargo test`; separate MSRV 1.85 job) —
+  lint is CI-only since the WSL host has no rustfmt/clippy; the 4 required
+  hyperpolymath/standards workflows with names verified against
+  `standards/.meta` at push time; `hypatia-scan` with `--exit-zero`; secret
+  scanner; a grep gate forbidding `--force`, `--force-with-lease`,
+  `reset --hard` under `src/`; the core-stays-zero-dep gate;
+  community-health `.md` files (CONTRIBUTING, SECURITY, CODE_OF_CONDUCT with
+  `j.d.a.jewell@open.ac.uk`); required `.a2ml` meta files. No third-party AI
+  review bots, ever.
+. *S1.2 Invariants ledger.* Create `docs/proofs/invariants.adoc`: INV-1
+  metadata round-trip idempotence; INV-2 hierarchy acyclicity + deterministic
+  sibling order; INV-3 sidebar determinism; INV-4 never-lose-local-work;
+  INV-5 never-half-moved; INV-6 path safety (root containment). Each entry
+  cross-references its Rust tests and reads "tested, proof scheduled".
+. *S1.3 `berrywiki-render`.* comrak with GFM options (tables, strikethrough,
+  tasklist, autolink); heading-anchor slugs shared with core;
+  wikilink resolution through the graph; golden-HTML tests over the fixture.
+. *S1.4 `berrywiki-app` skeleton.* `berrywiki serve <folder>` (axum + maud +
+  tokio, zero client JS); routes: `/` (tree + Home), `/page/:id` (three-pane),
+  `/diagnostics`. Verified against `fixtures/test-wiki` AND a manual clone of
+  one of the user's real wikis. Closes Phase-0 leftover item 10.
+. *S1.5 `berrywiki-index` + `/search`.* `SearchIndex` trait, in-memory
+  implementation, search form + ranked results with per-hit context snippets.
+. *S1.6 Live spike part A (read-side, credential-gated, user-in-loop).* Run
+  the read-side experiment set from <<spike>> against a disposable wiki.
+  Flip ❓ rows in the compatibility report to ✅/❌ with dates; confirm or
+  revise ADR-0001 and ADR-0004 on evidence.
+
+*Exit criteria:*
+
+* `cargo test` green in CI including all `berrywiki-git-compat` scenarios;
+  fmt/clippy and all estate lanes enforced on every PR.
+* User navigates a real cloned wiki in the browser: tree, rendered pages,
+  outline, backlinks, diagnostics, search — with an automated test asserting
+  *no `<script>` element in any HTTP response*.
+* Compatibility report contains dated live evidence for every read-side row;
+  ADR-0001 and ADR-0004 moved from Proposed/Provisional to Accepted, or
+  revised with the recorded fallback chosen.
+* Repo public with all CI lanes green; invariants ledger exists.
+
+*Test requirements:* golden-HTML fixture tests (render); in-process HTTP
+tests via `tower::ServiceExt` asserting on returned HTML — no browser
+automation needed because there is no JS; proptest suite for INV-1 (metadata
+round-trip/idempotence/unknown-preservation/never-panic) with failure seeds
+committed.
+
+=== Phase 2 — Edit in BerryWiki (user pushes with plain git)
+
+*Goal:* BerryWiki replaces the GitHub web editor for authoring; the user
+keeps using terminal git for sync. A genuinely usable increment that
+de-risks the editor before sync exists.
+
+*Slices:*
+
+. *S2.1 Edit loop.* `GET /page/:id/edit` (source textarea; source is
+  canonical), POST preview (server round-trips through `berrywiki-render`
+  into the same page shell), POST save via `LocalFolderStore::update_page`.
+  Round-trip test: saving unchanged source produces a zero-byte diff.
+. *S2.2 Drafts.* Idle-autosave form posts to the XDG state dir keyed by
+  repo hash + page id; visible save-state; restore-on-open banner;
+  kill-mid-edit recovery test; `berrywiki drafts` list/GC subcommand.
+. *S2.3 Create + delete.* `/create` form (title, parent picker, optional
+  template body); delete for leaf pages with confirm step (store's
+  has-children refusal surfaced); sidebar regenerated in the same logical
+  operation.
+. *S2.4 ChangeSet planner + journaled apply (the one real engine gap).*
+  Pure `plan_move`/`plan_rename` in `berrywiki-core` computing surgical span
+  edits from the existing code-fence-aware link extractor; journaled apply
+  in the store per <<decisions>> (journal written before any mutation;
+  git-restore rollback; startup recovery rules). Property tests: applying
+  any generated plan preserves acyclicity, id/filename uniqueness, and
+  resolves every previously-resolving link (INV-5 ledger entry updated).
+. *S2.5 Move/rename UI.* Form with new-parent select + position + optional
+  retitle, showing a *dry-run diff preview* (files to be touched, links to
+  be rewritten) before confirm. Case-only renames two-step.
+. *S2.6 Link insertion helper.* `<datalist>`-backed page picker on the edit
+  screen emitting the correct link form (per Phase 1 spike evidence).
+  Honest scope note: `<datalist>` attaches to an `<input>`, so this is a
+  side-picker with copy-in, not inline completion inside the textarea —
+  inline completion is an enhancement-era item.
+
+*Exit criteria:*
+
+* User authors real wiki content in BerryWiki daily and pushes via terminal
+  git; GitHub renders results correctly (spot-checked against spike
+  evidence — *the general rendering claim remains unverified beyond the
+  spiked rows*).
+* Editing an unrelated page never churns other files or metadata bytes
+  (byte-diff test in CI).
+* Move of a page with 10+ inbound links across the fixture rewrites every
+  link, regenerates the sidebar, and leaves zero new diagnostics — as one
+  journaled transaction with a tested mid-failure abort path (crash injected
+  between each FileOp).
+* An unsaved draft survives a killed process and is offered for restore.
+
+*Test requirements:* store-level integration tests on temp dirs;
+crash-injection matrix over the journal protocol; property tests for planner
+invariants; byte-stability golden tests; "hostile edit" tests (mangle
+metadata, hand-rename files) proving graceful degradation to diagnostics.
+
+=== Phase 3 — Sync from the app (THE daily-use gate)
+
+*Goal:* full read-edit-commit-pull-push loop inside BerryWiki against real
+public and private GitHub wikis, with the no-data-loss rules enforced by
+construction and live-verified. After this phase the user has stopped using
+GitHub's editor entirely.
+
+*Slices:*
+
+. *S3.1 `berrywiki-git`.* Closed command enum → argv; porcelain-v2 `-z`
+  parsers (property-tested); `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, minimum
+  git 2.30 startup check; repo-level advisory lockfile serialising all
+  mutating ops; GIT_ASKPASS self-re-exec token injection; redaction on every
+  error path. *Audit test:* enumerate all constructible commands, assert no
+  forbidden flag can appear. Entire surface integration-tested against the
+  `berrywiki-git-compat` sandbox. Write *ADR-0006 (git engine)* with harness
+  evidence attached. CI gains a two-git-version matrix (2.30-era + latest).
+. *S3.2 `GitWikiStore` + SyncState.* Composes `LocalFolderStore` over a
+  managed clone (`~/.local/share/berrywiki/clones/<host>/<repo>` on first
+  `serve <https-url>`). Explicit SyncState (Clean/Dirty/Ahead/Behind/
+  Diverged/Conflicted) computed from fetch + ahead/behind; push reachable
+  only from Ahead — fetch-before-push enforced by the type surface, not
+  convention. Status strip in the UI.
+. *S3.3 Commit workflow.* `/changes` page (porcelain-parsed change list;
+  regenerated `_Sidebar.md` grouped with the operation that caused it),
+  message box, atomic logical commit. Rule: tree operations and their
+  sidebar regeneration always land in the same commit (asserted by a
+  harness test inspecting the commit).
+. *S3.4 Sync operations + conflict flow.* Fetch button with remote-change
+  banner; Pull as `merge --ff-only` when Behind; Diverged routes to
+  `/conflicts`: `ConflictReport` classification (base/ours/theirs via
+  `git show :1:/:2:/:3:`), sidebar conflicts auto-regenerated from the
+  merged graph, body/metadata conflicts shown side-by-side with pick-ours /
+  pick-theirs / hand-edit resolution → resolve → commit; abort always
+  available, provably restoring the pre-pull tree. Force-push is not
+  constructible anywhere.
+. *S3.5 Live spike part B (write-side, credential-gated).* Run the
+  write-side experiment set from <<spike>>. Move ADR-0002 to Accepted on
+  evidence. Wire the credential-gated `#[ignore]` suite into a
+  `workflow_dispatch`-only CI job with an environment-scoped secret (never
+  on fork PRs).
+
+*Exit criteria:*
+
+* *DAILY-USE THRESHOLD MET:* user connects to at least one real private wiki
+  by URL and performs browse → edit → commit → pull → push entirely in
+  BerryWiki *for a week* without touching terminal git or the GitHub editor.
+* Every sandbox conflict scenario passes through the production
+  `berrywiki-git` path (not just the harness), each asserting local work
+  survives (INV-4).
+* Force-push unrepresentability audit test and token-leak-hunting test green.
+* Live write-side evidence recorded with dates; ADR-0002 Accepted;
+  non-fast-forward push and a same-page conflict handled end-to-end in the
+  UI against real GitHub with no lost edits. Until that run, all of this
+  remains *unverified*.
+
+*Test requirements:* sandbox-only integration for the whole engine;
+model-style interleaving tests (local edits vs remote pushes vs sync
+commands across two sandbox clones; invariant: every locally-authored byte
+remains reachable in the working tree, a commit, or an explicit conflict
+artifact); in-process HTTP e2e for the full commit→pull→conflict→resolve
+flow; credential-gated live suite.
+
+=== Phase 4 — Organise it (finish the MVP checklist minus import)
+
+*Goal:* close the remaining MVP items — tags, history, attachments,
+templates — plus the accessibility/keyboard pass.
+
+*Slices:*
+
+. *S4.1 Tags.* Tag editing in the page edit form (metadata already models
+  tags), `/tags` index, tag filter on the tree pane and in search ranking.
+. *S4.2 History view.* `/page/:id/history` from `git log --follow` (survives
+  BerryWiki renames); render any historical version read-only; unified diff
+  between versions (server-rendered `<pre>`, no JS).
+. *S4.3 Attachments.* Upload form → `add_attachment`
+  (`assets/<page-id>/…`, already traversal-proof); insert-link helper
+  emitting relative Markdown; app serves `assets/` locally. *Live spike
+  addendum:* verify attachment links render on GitHub's wiki UI —
+  *unverified until run*; settles the pending attachments ADR row
+  (*ADR required* on the evidence).
+. *S4.4 Templates.* Built-in defaults + user templates from
+  `.berrywiki/templates/*.md` (excluded from the page graph), selectable at
+  create time. (Whether an in-clone dot-directory pollutes GitHub's page
+  list is a spike row — *unverified*.)
+. *S4.5 Accessibility + keyboard pass.* Landmarks, skip-links, focus order,
+  accesskeys for pane switching/edit/save/search, all forms labelled;
+  automated landmark/label assertions on rendered fragments in CI; a manual
+  NVDA smoke script documented in `docs/a11y/` (NVDA only — no macOS device
+  exists in this environment, so no VoiceOver gate).
+
+*Exit criteria:*
+
+* Every MVP checklist item except CherryTree import demonstrably works
+  against the user's real wiki.
+* Attachment row in the compatibility report carries dated evidence.
+* Keyboard-only walkthrough of the full daily loop (navigate → edit →
+  commit → push) succeeds with no pointer use.
+
+=== Phase 5 — CherryTree import, packaging, hardening — declare MVP
+
+*Goal:* migrate the user's actual CherryTree notebooks in, make the binary
+reproducibly installable, complete hardening, and formally declare the MVP.
+
+*Slices:*
+
+. *S5.1 `berrywiki-import` (read side).* `.ctd` XML first (quick-xml), `.ctb`
+  SQLite behind a feature (rusqlite) → neutral `ImportModel`;
+  rich-text→Markdown downconversion with an explicit lossiness table; source
+  opened read-only, byte-hash-verified untouched.
+. *S5.2 Dry-run.* `berrywiki import --dry-run <file>` and an `/import` page
+  producing a machine report (JSON: node count, depth, losses, collisions)
+  and a human Markdown report; nothing written. Fuzz both importer
+  front-ends (never panics; always report-or-diagnostics).
+. *S5.3 Apply.* Pages created through the store (UUIDv7 ids, parent chains,
+  positions, images → `assets/<id>/`), one atomic logical commit,
+  idempotency marker preventing accidental double-import (import twice ==
+  import once, proven by test). Acceptance: import one of the user's *real*
+  CherryTree notebooks.
+. *S5.4 Packaging.* `guix.scm` (primary; cargo-build-system; git as
+  propagated input) building `berrywiki-app`; `flake.nix` fallback; CI gets
+  a `nix flake check` lane as the pragmatic verifier while `guix shell -f
+  guix.scm -- cargo test` is exercised locally; README quickstart;
+  `cargo install --path crates/berrywiki-app` documented as the plain path.
+. *S5.5 Hardening + perf.* cargo-deny/cargo-audit lane; security pass
+  re-running path-traversal and redaction suites plus a review of the upload
+  path; performance sanity run on a synthetic 2,000-page wiki — only if
+  reload/search measurably lags does the FTS5 `SearchIndex` implementation
+  (+ versioned schema + `berrywiki reindex` + differential oracle tests)
+  land now; otherwise it is recorded as a post-MVP trigger with the
+  measurement attached.
+
+*Exit criteria:*
+
+* A real CherryTree notebook imports cleanly: dry-run report reviewed, apply
+  produces a browsable, GitHub-renderable tree in one commit, source file
+  hash unchanged.
+* `guix shell -f guix.scm` builds and runs the binary; nix build verified
+  once.
+* Full CI green including the manual-dispatch live job.
+* *MVP declared:* every checklist item verified against real wikis, the
+  compatibility report fully evidence-backed. Post-MVP backlog recorded:
+  Zim import, AffineScript enhancement layer (gated on ADR-0007), FTS5 at
+  scale, gitoxide re-evaluation, SPARK proofs (see <<spark>>), dual-input
+  DnD contract.
+
+== Risk register
+
+[cols="3,1,1,4,2", options="header"]
+|===
+| Risk | Likelihood | Impact | Mitigation | Trigger / early warning
+
+| The hidden metadata comment is visible or mangled in GitHub's rendered
+  wiki, invalidating ADR-0004 (*currently unverified*)
+| Low
+| High
+| Read-side spike scheduled in Phase 1 before any editing code; format
+  isolated in `core::metadata`; ADR-0004 names the fallback (trailing
+  comment or central `.berrywiki` manifest) — a swap touches one module plus
+  a migration command
+| Spike row ❌ in Phase 1
+
+| Zero-JS UI hits a UX wall (no inline autocomplete, full-page reloads feel
+  heavy) and tempts a doctrine-violating shortcut
+| Medium
+| Medium
+| MVP checklist deliberately mapped to form-based equivalents; drag-drop and
+  inline enhancement explicitly reserved as the first AffineScript-era
+  deliverables over the unchanged HTTP API; ADR-0007 ruling required before
+  any script of any provenance ships
+| User friction reports during the Phase 3 daily-use week
+
+| Link rewriting on move corrupts content (the classic wiki-tool failure)
+| Low
+| High
+| Surgical span edits from the code-fence-aware extractor (never regex over
+  raw text); journal + git-restore rollback; dry-run diff before confirm;
+  property tests asserting no new broken-link diagnostics after any move
+| Any new diagnostic after a fixture move in CI
+
+| Git CLI wrapper misparses output across versions, or a sync bug loses
+  local work
+| Low
+| Critical
+| Parse only porcelain-v2 `-z`; `LC_ALL=C`; min-version 2.30 check;
+  two-git-version CI matrix; force-push unrepresentable (closed enum + audit
+  test + grep gate); ff-only pull; abort provably restores the tree;
+  interleaving suite asserting every locally-authored byte remains reachable
+| Parser property test or interleaving suite failure
+
+| Live verification stalls (user must mint a PAT and hand-create a
+  disposable wiki; `gh` absent; wikis have no create API so the first page
+  is a manual web-UI step)
+| Medium
+| Medium
+| Everything except the two spike slices runs on `LocalFolderStore` + the
+  sandbox, so the build never blocks; spike slices are user-in-loop with a
+  precise checklist; per ADR-0002 nothing is claimed verified without a
+  dated run
+| Spike slice open for more than one phase
+
+| Host instability (WSL RAM exhaustion; no rustup, so no local fmt/clippy)
+| Medium
+| Medium
+| Deliberately small dependency tree (axum, maud, comrak, tokio — no wasm
+  toolchain, no tantivy); lint runs exclusively in CI from S1.1; heavy test
+  runs in CI, not locally
+| Local `cargo build` OOM / fork failures
+
+| Case-only renames or Unicode filenames break Windows-side checkouts of
+  the same wiki
+| Medium
+| Medium
+| Two-step case-only renames through a temp name; explicit case-rename spike
+  row; fixture already covers Unicode/space titles and stays in CI
+| Spike case-rename row ❌
+
+| Per-page `position` metadata causes multi-file churn / merge conflicts in
+  real daily use
+| Medium
+| Low
+| ADR-0004's deferred central-manifest option revisited with real usage
+  data; measure dirtied-files-per-reorder from Phase 2 onward
+| Mean dirtied files per reorder exceeds ~3
+
+| comrak preview diverges from GitHub's actual (gollum) rendering
+| Medium
+| Low
+| Spike evidence bounds the known divergences; a divergence-notes doc if
+  needed; renderer options adjustable; preview is advisory — source is
+  canonical (*fidelity beyond spiked rows is unverified*)
+| User-reported preview mismatches
+
+| AffineScript maturity slips indefinitely, leaving the "temporary" SSR UI
+  permanent
+| High
+| Low
+| Acceptable by design: SSR is doctrine-compliant and accessible, not a
+  compromise; templates thin; all behaviour behind HTTP endpoints so the
+  sunk cost of a later swap stays near zero
+| n/a — tolerated
+|===
+
+[#spike]
+== Live-GitHub spike protocol
+
+[IMPORTANT]
+====
+Everything in this section concerns behaviour that is *unverified* today.
+`gh` is not installed on the dev host and no credentials exist there. The
+`.wiki.git` repo has *no page API*; git clone/commit/push is the only
+interface, and a wiki's first page must be created manually in the GitHub web
+UI before `.wiki.git` exists (a documented bootstrap step in the runbook).
+====
+
+*Credential gating (both parts):* fine-grained PAT (Contents R/W, the one
+disposable repo), provisioned by the user from reasonably-good-token-vault,
+exported as `BERRYWIKI_GITHUB_TOKEN`; live tests are `#[ignore]` unless
+`BERRYWIKI_LIVE_TESTS=1`; skipped *loudly*, never silently passed; a
+`workflow_dispatch`-only CI job uses an environment-scoped secret and never
+runs on fork PRs. Every captured output is scanned for the token by an
+automated redaction test. Open question: whether the CI lane should exist at
+all versus strictly owner-run from WSL (smaller secret surface).
+
+*Setup:* user creates a disposable repo under `metadatastician` and its
+wiki's first page via the web UI. `berrywiki spike` (a `berrywiki-app`
+subcommand) generates the probe pages, runs the automatable checks, and
+emits a JSON + `.adoc` evidence fragment; rendered-UI checks that cannot be
+automated are a human checklist with saved screenshots.
+
+*Part A — read-side (Phase 1, S1.6). Each experiment and the evidence it yields:*
+
+[cols="4,4", options="header"]
+|===
+| Experiment | Evidence yielded
+
+| Push a page whose first content is the `<!-- berrywiki … -->` block; fetch
+  the rendered public HTML and assert the comment is absent
+| Confirms/refutes ADR-0004 metadata invisibility (page view; preview and
+  search-snippet paths by eyeball + screenshot)
+
+| Link matrix: `[[WikiLink]]`, `[[Page#heading]]`, spaces, with/without
+  `.md`, relative Markdown links, links to `--`-separated flat filenames
+| Which link forms GitHub resolves — feeds the link-insertion helper and
+  confirms/revises ADR-0001
+
+| Nested-directory probe: commit `dir/page.md`, observe native wiki
+  behaviour
+| Whether nested dirs are viable, i.e. whether ADR-0001's flat `--` strategy
+  stands or is revised while filenames are still cheap to change
+
+| `_Sidebar.md` nesting-depth ladder (1..8 levels)
+| The depth GitHub honours; whether the generator needs a depth clamp +
+  per-branch "more" pages
+
+| Case-only rename pushed and observed
+| Behaviour of GitHub's backing store on case changes; validates the
+  two-step rename design
+
+| Fresh-wiki default branch name; heading anchor-slug edge cases (Unicode,
+  punctuation)
+| Clone/push defaults for `berrywiki-git`; slug-algorithm parity for the
+  outline pane
+|===
+
+*Part B — write-side (Phase 3, S3.5):*
+
+[cols="4,4", options="header"]
+|===
+| Experiment | Evidence yielded
+
+| Fast-forward push via the production engine
+| Baseline write path works over HTTPS + PAT
+
+| Concurrent edit staged remotely, then push
+| Non-fast-forward rejection is surfaced as Diverged, never auto-resolved
+
+| Full conflict flow: remote and local edit the same page; pull, resolve in
+  the UI, commit, push
+| End-to-end conflict handling against real GitHub with both versions
+  demonstrably preserved (INV-4)
+
+| Auth failure with a revoked token
+| Error surfaced with *zero token bytes* in any output (assertion on
+  captured logs)
+
+| Private wiki clone + round trip
+| Private-repo support over PAT
+
+| `_Sidebar.md` regenerated locally, pushed, re-fetched
+| Sidebar round-trips through GitHub without mangling
+
+| (Phase 4 addendum) attachment under `assets/<page-id>/` pushed; rendered
+  page fetched
+| Whether relative attachment links render in the native wiki UI — settles
+  the attachments ADR row
+|===
+
+Evidence handling: every row lands in `docs/compatibility/github-wiki.adoc`
+with a date and the producing test/screenshot/transcript; ADR statuses change
+only on evidence; the report remains the single ledger of verified-vs-assumed.
+
+== CI & packaging
+
+*GitHub Actions* (all actions SHA-pinned per action-trust-layers doctrine):
+
+* `rust.yml`: fmt `--check` + clippy `--all-targets -D warnings` on pinned
+  stable (the designated lint gate — the WSL host has no rustfmt/clippy);
+  `cargo test` on stable; separate MSRV 1.85 build job.
+* Guard lanes: grep gate (`--force`/`--force-with-lease`/`reset --hard`
+  absent from `src/`); core-zero-dep gate; no-`<script>`-in-responses test;
+  token-redaction scan on live-test artifacts.
+* Two-git-version matrix (2.30-era + latest) for `berrywiki-git` tests, from
+  Phase 3.
+* The 4 required hyperpolymath/standards workflows (names verified against
+  `standards/.meta` at push time); `hypatia-scan` with `--exit-zero`; secret
+  scanner. No third-party AI review bots; the sanctioned review path is
+  Claude Code `/ultrareview`.
+* `live.yml`: `workflow_dispatch`-only credential-gated suite (Phase 3+).
+* cargo-deny/cargo-audit lane from Phase 5.
+* Post-MVP: gnatprove lane (see <<spark>>); scheduled fuzz/mutants lanes if
+  adopted.
+
+*Packaging (estate doctrine: Guix primary, Nix flake fallback):* `guix.scm`
+at the repo root (cargo-build-system; git as a propagated input) building
+`berrywiki-app`; `flake.nix` mirroring it; local verification via
+`guix shell -f guix.scm -- cargo test` in WSL, with a `nix flake check` CI
+lane as the pragmatic remote verifier (Guix-on-Actions is slow). `cargo
+install --path crates/berrywiki-app` documented as the undoctored path.
+Dependency additions are per-slice and deliberately minimal; if FTS5 lands,
+rusqlite uses the `bundled` feature so packaging stays hermetic (with a
+system-sqlite variant considered for the Guix package).
+
+[#spark]
+== SPARK proof roadmap
+
+SPARK enters *post-MVP*, never on the MVP critical path — proof effort does
+not advance daily use, and the estate default "Rust → Rust/SPARK" is
+explicitly opportunistic. Two judges independently flagged the one design
+that put gnatprove inside the MVP gate as the proof-before-product pattern
+the estate's own SPARK-theatre cleanup exists to prevent. The MVP prepares
+the ground without paying for it:
+
+* *Invariants ledger from Phase 1* (`docs/proofs/invariants.adoc`, INV-1..6)
+  cross-referenced to Rust tests, under the *demote-or-gate* discipline: no
+  "proven" or "verified" language anywhere in docs or README until a green
+  gnatprove CI lane gates that specific claim; until then the ledger says
+  "tested, proof scheduled".
+* Proof-friendly structure for free: core stays zero-dep and pure; the
+  ChangeSet planner is data-in/data-out with no closures in its interface;
+  frozen golden vectors (metadata round-trips, sidebar outputs, planner
+  outputs) accumulate as the future differential corpus.
+
+*Post-MVP insertion order* (GNAT 14.2 / gnatprove 14.1.1 via Alire, already
+provisioned on the WSL host):
+
+. *Metadata block grammar* (INV-1): SPARK reference implementation with
+  proved parse/serialise round-trip, idempotence, termination; AoRTE
+  (silver) minimum, gold contracts on the named lemmas.
+. *Path-safety kernel* (INV-6): `validate_component`/root-containment from
+  `berrywiki-store/paths.rs` — small, security-critical, pure.
+. *Forest builder* (INV-2): proved acyclicity + total deterministic sibling
+  order.
+. *Move state machine* (INV-5) and the git argv constructor (supports INV-4)
+  as the ambitious later targets.
+
+*Mechanism:* not a port of the crates. Small SPARK reference implementations
+in `proofs/spark/`, bound to the Rust engine by a CI differential harness
+demanding byte-identical outputs over the shared golden corpus plus
+property-generated inputs — proofs of the specification, plus continuous
+evidence the Rust implementation refines it. The vcl-ut FFI swap-in pattern
+(shipping the proven SPARK parser behind Rust FFI) is recorded as an option,
+not scheduled. Full-engine SPARK translation is explicitly *not* planned.
+
+== Explicit non-goals
+
+* v1 spec non-goals, reaffirmed: realtime collaboration, mobile-first UI,
+  plugins, end-to-end encryption, self-hosted Gollum, graph visualisation,
+  AI content generation.
+* No client-side script of any provenance (handwritten, generated, or glue)
+  before the ADR-0007 doctrine ruling — enforced by the no-`<script>` CI
+  test.
+* No TUI as a product surface (the `berrywiki check`/`sidebar`/`spike` CLI
+  covers terminal workflows).
+* No wasm toolchain in the MVP; no Leptos/Dioxus/Yew.
+* No gitoxide or libgit2 in the MVP (post-MVP re-evaluation recorded).
+* No tantivy; no persistent search index unless the Phase 5 measurement
+  triggers it.
+* No SPARK proof work on the MVP critical path; no "proven" claims before a
+  gating gnatprove lane.
+* No drag-and-drop before the AffineScript era; no second move code path
+  when it arrives (dual-input-one-path contract).
+* No contributions of BerryWiki-support patches to third-party repos.
+* No third-party AI review bots on the repository.
+
+== Open questions (honestly labelled)
+
+. *Generated-JS-glue doctrine (blocking the post-MVP enhancement layer, not
+  the MVP):* is wasm-bindgen-style compiler-generated JS glue acceptable
+  under the estate JS ban, or must the AffineScript→typed-wasm layer avoid
+  it entirely? Parked by the SSR choice; requires an explicit user ruling
+  recorded as ADR-0007 before any enhancement work starts.
+. *Sidebar depth (unverified):* how deep does GitHub's rendered sidebar
+  honour nested lists in `_Sidebar.md`? Spike part A answers; the generator
+  may need a depth clamp + "more" pages.
+. *Default branch (unverified):* fresh `.wiki.git` default branch name
+  (`master` historically vs `main`) and whether it varies — affects
+  `berrywiki-git` defaults; spike row exists.
+. *Position churn:* does per-page `position` metadata cause painful
+  multi-file churn in real use? Revisit ADR-0004's deferred central manifest
+  when mean dirtied-files-per-reorder exceeds ~3, measured from Phase 2.
+. *Preview fidelity (unverified beyond spiked rows):* how closely does
+  comrak's GFM output match GitHub's wiki (gollum) pipeline, and what
+  divergence is tolerable before a divergence-notes doc or renderer
+  adjustments?
+. *Serving model:* manual `berrywiki serve` per session vs a WSL systemd
+  user service on a fixed port (mirrored networking makes either reachable)
+  — decide after the Phase 3 daily-use week.
+. *Attachment rendering (unverified):* relative-path behaviour of
+  `assets/<page-id>/` links in the rendered wiki — Phase 4 spike addendum
+  settles the pending attachments ADR.
+. *CherryTree formats:* `.ctb` (SQLite) vs `.ctd` (XML) prevalence in the
+  user's real notebooks — determines whether the rusqlite-backed reader is
+  needed for MVP import or stays a feature flag.
+. *proptest placement:* dev-dependency inside `berrywiki-core` vs a separate
+  test-only crate, against the "zero deps" guarantee (the CI gate checks
+  `[dependencies]` only, so a dev-dependency is arguably compliant — confirm).
+. *Index location for a multi-machine user:* XDG cache is per-machine; is a
+  rebuild-per-machine acceptable, or should the location be Syncthing-aware?
+  Only relevant if FTS5 lands.
+. *Standards workflow names:* exact current names/pins of the 4 required
+  hyperpolymath/standards workflows for a new metadatastician-org repo —
+  verify against `standards/.meta` at push time (known doc drift).
+. *Spike hosting:* which account hosts the disposable spike wiki
+  (metadatastician proposed) and whether the `workflow_dispatch` live CI
+  lane should exist at all versus strictly owner-run from WSL.
+. *Templates location (partly unverified):* `.berrywiki/templates/` inside
+  the clone (visible to plain-git users; rendering side-effects need spike
+  evidence) vs XDG (invisible, weakening "usable without BerryWiki").
+
+[#critique-appendix]
+== Critique appendix (adversarial review, unresolved)
+
+Three critics (feasibility, doctrine, spec-coverage) reviewed the synthesis.
+The revision that would fold these in did not run. Findings are consolidated
+below (near-duplicates merged); each must be resolved before the affected
+slice is executed.
+
+=== Major — must resolve before the slice is built
+
+. *Zero-JS idle-autosave is infeasible.* A zero-`<script>` SSR app has no
+  client mechanism to detect idleness or auto-submit a form, so the Phase-2
+  exit criterion "an unsaved draft survives a killed process" and the
+  never-lose-a-keystroke promise cannot hold as written. Options: explicit
+  Save/Save-draft actions with clear unsaved-state indication; accept that
+  drafts are server-side per submit; or reopen the client-script question via
+  ADR-0007 *before* promising autosave. Do not ship a trust-critical feature
+  that cannot work.
+. *Non-leaf move/rename is a subtree cascade.* Under ADR-0001 flat
+  `Parent--Child.md` filenames, moving or renaming a page changes the filename
+  of *every descendant*, not just the page. The move planner design, its test
+  matrix and the effort estimate model only the single moved page. Re-scope
+  the transactional-move slice to a subtree operation (validate → compute all
+  descendant renames → rewrite all inbound links → single commit) with tests
+  over multi-level subtrees.
+. *Journal rollback can discard local work (INV-4 breach).* Recovering a
+  half-applied operation via `git restore`/`reset --hard` of journaled paths
+  destroys uncommitted local edits — worst in Phase 2, where BerryWiki never
+  commits, so "HEAD" predates all user work. Redesign recovery to never touch
+  unrelated dirty state (e.g. operate only on temp files + atomic rename,
+  reconcile forward, never hard-reset the working tree).
+. *App-private state must not live inside the clone.* `.berrywiki/journal.json`
+  (and any lock/state) inside the canonical wiki clone can be committed and
+  pushed by a plain-git user — a direct "usable without BerryWiki" breach, and
+  it contradicts the plan's own never-inside-the-clone rule for the index and
+  drafts. Move journal/lock/state to the XDG cache location keyed by repo
+  identity, as already done for the search index.
+. *Fine-grained PAT vs `.wiki.git` is unverified.* The credential design bakes
+  in fine-grained-PAT access to the wiki repo, historically unsupported by
+  GitHub, and only exercises it at S3.5 — after the whole sync engine is built
+  on it. Add an auth row to the *read-side* spike (Phase 1) that actually
+  clones a private `.wiki.git` with the chosen credential, and treat the token
+  type as unverified until then (ADR-0002 already gates this).
+. *No stale-write / external-modification guard.* Phase 2's operating model is
+  a running server plus concurrent terminal git in the same working tree, yet
+  nothing detects that a page changed on disk between read and write. Add
+  mtime/hash precondition checks (compare-and-swap on save) and a reload path.
+. *Guix packaging is under-sized and CI-unverified.* The estate-primary Guix
+  path is one Phase-5 slice but is MVP-gating; `git` as a "propagated input"
+  is the wrong mechanism for a binary's runtime dependency, and packaging the
+  full axum+tokio crate tree under `cargo-build-system` is a real cost with no
+  risk-register row — while CI only ever builds the Nix fallback. Give Guix
+  its own slice + risk row, and add a Guix build lane to CI.
+. *Silently dropped spec items.* Backup/export (upstream Phase 4), the
+  controlled rich editor, and the command palette appear in no phase and no
+  non-goals list. Record each explicitly as either a scheduled slice, a
+  post-MVP backlog item, or a declared non-goal.
+
+=== Minor — should address
+
+* *Zero-JS gate under-enforces.* Asserting "no `<script>`" misses inline
+  `on*=` handlers and `javascript:` URLs, and collides with GitHub-accepted
+  inline wiki HTML. State comrak's raw-HTML policy (`unsafe_` off, or
+  sanitised) and enforce a real HTML-safety check, not a substring scan that
+  false-positives on escaped code-fence examples.
+* *Quiet MVP redefinitions.* "Link autocomplete" (a `<datalist>` side picker,
+  not inline) and "remote-change detection" (a manual fetch button, nothing
+  proactive) are narrowed from the MVP checklist, yet Phase 5 declares "every
+  checklist item verified". Record the re-scope, or deliver the checklist item.
+* *Leaf-only delete* is narrowed from the spec's unqualified delete without a
+  recorded scope decision (no subtree-delete / reparent-then-delete flow).
+* *No error-quality or observability requirements* anywhere, despite the spec's
+  actionable-errors and structured-logging sections. Add them.
+* *Demote-or-gate language slip:* "provably/proven" is used for
+  merely harness-tested behaviour; reserve it for a gating `gnatprove` lane.
+* *AsciiDoc-by-default slip:* the S5.2 import report is specified as Markdown;
+  technical reports are AsciiDoc (Markdown is for wiki/community-health files).
+* *Grep gates false-positive:* the `--force`/`reset --hard` source scan will
+  match the force-push audit test and the command-enum docs (tests live in
+  `src/` here). Scope the gate to exclude tests/docs or assert on the enum.
+* *Textarea CRLF:* browsers normalise textarea newlines to CRLF; without a
+  stated newline policy the "zero-byte diff" round-trip criterion will churn.
+* *GIT_ASKPASS* answers both username and password prompts with the token; fix
+  the username path rather than forbidding it.
+* *Stale repo facts:* the executive summary cites "four commits" and "six
+  conflict tests" — the repo has more (and `conflicts.rs` has 7 `#[test]`s).
+  Refresh before ratifying.

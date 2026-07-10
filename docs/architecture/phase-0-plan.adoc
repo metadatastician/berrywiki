@@ -42,7 +42,7 @@ Markdown?* — and it builds the parts that do not depend on live GitHub access.
 | 7 | Fixture wiki (`fixtures/test-wiki/`) | *Done*
 | 8 | Unit + fixture-integration tests (35 passing) | *Done*
 | 9 | `LocalFolderStore` (read + safe write, path-traversal-proof) | *Done*
-| 10 | Read-only three-pane prototype (tree / viewer / backlinks / diagnostics) | *Next (blocked on ADR-0005 UI choice)*
+| 10 | Read-only three-pane prototype (tree / viewer / backlinks / diagnostics) | *Next (ADR-0005 chose zero-JS SSR; awaiting ratification — package P1-serve)*
 | 11 | Git conflict-detection test harness (no data loss) | *Done (`berrywiki-git-compat`, 7 tests)*
 | 12 | `GitHubWikiStore` behind the interface (not faked) | *Next*
 | 13 | Compatibility report filled with real evidence | *In progress (local verified; GitHub unverified)*

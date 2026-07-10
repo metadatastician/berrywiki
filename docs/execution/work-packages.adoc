@@ -1,0 +1,155 @@
+= BerryWiki Work-Package Register
+:toc: macro
+:toclevels: 2
+:sectnums:
+
+toc::[]
+
+Each work package is a unit of executable work tagged with the Claude tier that
+should run it and the triggers that force an escalation. Tiers map to the agent
+definitions in `.claude/agents/` (`berrywiki-opus`, `berrywiki-sonnet`,
+`berrywiki-haiku`). The phase structure follows
+link:../architecture/implementation-plan.adoc[the implementation plan] — which
+is a *critic-reviewed draft*: packages that a critique-appendix finding gates
+carry a *Blocked-by* note and must not start until that finding is resolved.
+
+== Tiering principle
+
+[cols="1,3,2", options="header"]
+|===
+| Tier | Gets | Escalates when
+| *opus* | irreversible / subtle: sync engine, conflict UX, transactional
+subtree move + link rewriting, rich-editor round-trip, import semantics, SPARK,
+live-spike interpretation | never — this is the top tier; instead it *slows
+down* and proves
+| *sonnet* | scoped builds against a settled design: UI panes, search, read
+explorer, CI/packaging, importer plumbing | the work touches git history / data
+safety, needs a subtree cascade, contradicts an ADR, or leans on an unverified
+GitHub assumption
+| *haiku* | mechanical, checklist-driven: fixtures, doc/report sync, lint,
+boilerplate, ADR skeletons, search-and-replace | any judgement, ambiguity, test
+failure it cannot mechanically fix, or contact with git/sync/data safety
+|===
+
+== Done (Phase 0)
+
+[cols="1,3,1", options="header"]
+|===
+| Package | Summary | Tier used
+| P0-core | `berrywiki-core` engine (metadata, graph, backlinks, sidebar) | opus
+| P0-store | `berrywiki-store` + `LocalFolderStore`, hardened against 20 review findings | opus
+| P0-git | `berrywiki-git-compat` no-data-loss harness (7 tests) | opus
+| P0-fixtures | fixture wiki | haiku
+|===
+
+== Phase 1 — Read-only explorer (SSR)
+
+[cols="1,1,4,3", options="header"]
+|===
+| ID | Tier | Contract | Escalation triggers / Blocked-by
+
+| P1-render | sonnet | `berrywiki-render` crate: comrak GFM → HTML with an
+explicit, stated raw-HTML safety policy. Deterministic. | *Blocked-by* critique
+minor "raw-HTML policy / no-`<script>` gate". Escalate if GitHub parity turns
+out to need a custom renderer (→ opus + live spike).
+| P1-serve | sonnet | `berrywiki serve`: axum + maud three-pane SSR over a
+`WikiStore`; `/search` `/diagnostics`; zero `<script>`. | Escalate if any
+interactive requirement seems to need client script (→ ADR-0007 question, opus).
+| P1-noscript-gate | haiku | CI assertion that responses ship no script (element
+*and* inline `on*=` / `javascript:`). | Escalate: the correct check is not a
+substring scan (critique minor) — needs sonnet to define it.
+| P1-ci | sonnet | GitHub Actions: fmt + clippy + test (fmt/clippy absent
+locally), two-git-version matrix. Estate `standards` conventions. | Escalate if
+`.github/workflows/**` needs a `workflow`-scoped token the runner lacks.
+| P1-spike-read | opus | Live-GitHub *read-side* spike: clone a real private
+`.wiki.git`, record link/filename/metadata-invisibility/sidebar evidence into
+the compatibility report. **Includes the auth row** (does the chosen credential
+actually clone a wiki?). | *Blocked-by* critique major "fine-grained PAT vs
+`.wiki.git` unverified". Credential-gated; never fake results.
+|===
+
+== Phase 2 — In-app editing + drafts (still user-pushes-with-git)
+
+[cols="1,1,4,3", options="header"]
+|===
+| ID | Tier | Contract | Escalation triggers / Blocked-by
+
+| P2-edit | sonnet | Source editor + preview; create/update/delete via the
+store; explicit Save / Save-draft actions with visible unsaved state. |
+*Blocked-by* critique major "zero-JS idle-autosave infeasible" — the draft
+model must be redesigned (opus) before this ships an autosave promise.
+| P2-move | opus | Transactional *subtree* move/rename: validate → compute all
+descendant renames → rewrite inbound links → regenerate sidebar → single
+commit; never half-moved. | *Blocked-by* critique major "non-leaf move is a
+subtree cascade". This is inherently opus.
+| P2-stale-guard | opus | Compare-and-swap on save (mtime/hash precondition) +
+reload path, for the server-plus-terminal-git operating model. | *Blocked-by*
+critique major "no stale-write protection".
+| P2-app-state | opus | Move journal/lock/index/drafts to XDG cache keyed by
+repo identity — never inside the clone. | *Blocked-by* critique major
+".berrywiki/ inside the clone breaches usable-without-app".
+|===
+
+== Phase 3 — In-app sync (commit / pull / push / conflict)
+
+[cols="1,1,4,3", options="header"]
+|===
+| ID | Tier | Contract | Escalation triggers / Blocked-by
+
+| P3-gitengine | opus | Typed wrapper over the git CLI: closed command enum,
+force-push *unrepresentable* (audit test), `LC_ALL=C`, porcelain-v2-z, min git
+2.30. | Inherently opus. The grep gate must not false-positive on the audit test
+(critique minor).
+| P3-sync | opus | fetch-before-push, non-fast-forward detection, atomic logical
+commits; recovery that *never* hard-resets a dirty tree. | *Blocked-by* critique
+major "journal rollback discards local work". Gate: one week of real private-wiki
+use without terminal git.
+| P3-conflict | opus | Conflict classification (`git show :1:/:2:/:3:`), page
+conflicts surfaced (never auto-merged); sidebar conflicts auto-resolved by
+regeneration only. | Inherently opus. Metadata conflicts are surfaced, never
+unioned.
+| P3-spike-write | opus | Live-GitHub *write-side* spike: concurrent push
+rejection, conflict shape, default branch. | Credential-gated; never fake.
+|===
+
+== Phase 4 — Tags, history, attachments, accessibility
+
+[cols="1,1,4,3", options="header"]
+|===
+| ID | Tier | Contract | Escalation triggers
+| P4-tags | sonnet | Tag index + filter UI. | git contact → opus.
+| P4-history | sonnet | Per-page revision list via git log (read-only). | —
+| P4-attach | sonnet | Attachment upload UI over the store's id-keyed dirs;
+schedule the missing attachment-conflict integration test. | conflict-flow
+contact → opus.
+| P4-a11y | sonnet | Keyboard-only walkthrough + NVDA smoke script as exit
+criteria. | —
+| P4-backup | sonnet | Backup/export (a dropped spec item — restore it here or
+declare a non-goal). | —
+|===
+
+== Phase 5 — Import, packaging, MVP declaration
+
+[cols="1,1,4,3", options="header"]
+|===
+| ID | Tier | Contract | Escalation triggers
+| P5-import-ct | opus | CherryTree importer: neutral model, dry-run, machine +
+AsciiDoc report, never touches the source. | Conversion semantics are subtle →
+opus. Report is AsciiDoc, not Markdown (critique minor).
+| P5-import-zim | sonnet | Zim importer reusing the neutral model + writer. |
+Escalate novel conversion semantics → opus.
+| P5-guix | opus | Guix package (estate-primary) + Nix fallback; correct
+runtime-dep mechanism for `git`; a CI Guix lane. | *Blocked-by* critique major
+"Guix under-sized / CI only builds Nix".
+| P5-spark | opus | Differential SPARK proofs of the invariants ledger (metadata
+grammar → forest builder → move state machine); nothing labelled "proven"
+without a green `gnatprove` CI lane. | Post-MVP; inherently opus.
+|===
+
+== Cross-cutting standing packages
+
+* *X-fixtures* (haiku): extend the fixture wiki as new cases are needed.
+* *X-docs* (haiku): keep the compatibility report, this register and ADRs in
+  sync with reality; AsciiDoc only.
+* *X-review* (opus): adversarial review of each merged slice (the pattern that
+  found the 20 store findings).

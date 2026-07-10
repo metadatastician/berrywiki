@@ -1,0 +1,209 @@
+= ADR-0005: UI technology for the MVP
+:sectnums:
+
+== Status
+
+*Proposed* — awaiting user ratification. Nothing in this decision depends on
+unverified live-GitHub behaviour, but the decision's *revisit triggers*
+(<<revisit>>) do reference spike evidence.
+
+== Context
+
+BerryWiki needs a usable interface now, and the constraint set is unusual:
+
+* *TypeScript is banned and plain JavaScript is to be avoided*
+  (link:0003-implementation-language.adoc[ADR-0003]; estate doctrine:
+  RS/TS/JS-layer work migrates to AffineScript→typed-wasm).
+* *The AffineScript web UI is deferred* — the language cannot yet parse its
+  own stdlib; it must not be planned as shipping soon (ADR-0003).
+* *An unresolved doctrine question:* Rust→wasm frameworks (Leptos, Dioxus,
+  Yew) emit *compiler-generated* JS glue via wasm-bindgen. Whether generated
+  glue falls under the JS ban has never been ruled on by the user.
+* *The development host cannot build wasm:* WSL distro Rust 1.85 at
+  `/usr/bin`, no rustup, therefore no `wasm32-unknown-unknown` target
+  locally. Any wasm-based UI would make CI the only build environment for
+  the interactive layer — a broken inner dev loop for a single developer.
+* *The daily product question is rendering fidelity:* "does my page render
+  the way GitHub's wiki will render it?" GitHub's wiki output is HTML with
+  tables, images, task lists and real formatting. (Exact GitHub rendering
+  behaviour is *unverified* until the live spike runs; but whatever it turns
+  out to be, it is HTML.)
+* *Accessibility is a hard Phase-4 requirement:* keyboard navigation and
+  screen-reader support.
+* *Phase-3 ambitions* (drag-and-drop tree, controlled rich editor) pull
+  towards richer client interactivity — but the MVP checklist itself
+  requires none of it: move/rename, search and link autocomplete all have
+  form-based equivalents.
+* *The AffineScript transition path matters:* the UI layer must be thin and
+  swappable so the eventual AffineScript→typed-wasm front end replaces a
+  shell, not a product.
+
+== Decision
+
+The MVP UI is a *zero-JavaScript, server-side-rendered web application*:
+
+* *Stack:* axum 0.8 (HTTP), maud (templates), comrak (GFM Markdown→HTML in a
+  dedicated `berrywiki-render` crate), tokio. Single binary
+  `berrywiki serve <path|url>` listening on localhost; reachable from the
+  Windows browser via WSL2 mirrored networking.
+* *Layout:* three panes — navigation tree | rendered page | heading outline
+  + backlinks — plus `/search`, `/diagnostics`, `/changes`, `/conflicts`.
+* *Interactivity:* plain HTML forms, links, `<datalist>` pickers and
+  accesskeys. No `<script>` element ever ships; CI enforces this with an
+  automated assertion over every HTTP response, turning the doctrine into a
+  mechanical check rather than a convention.
+* *Consequted scope:* drag-and-drop and inline-in-textarea autocomplete are
+  explicitly deferred to the AffineScript era; moves are form/keyboard
+  operations with a dry-run diff preview; link autocomplete is a
+  `<datalist>`-backed side picker.
+* The `berrywiki` CLI (`check`, `sidebar`, `spike`, later `reindex`,
+  `import`) covers terminal workflows; it is tooling, not a second UI.
+
+The generated-JS-glue doctrine question is deliberately *parked, not
+answered*: the SSR MVP ships no JS of any provenance, so nothing depends on
+the ruling. A formal user ruling (to be recorded as ADR-0007) is required
+before the post-MVP enhancement layer starts.
+
+== Alternatives considered
+
+=== (a) Rust TUI (ratatui three-pane app)
+
+Two of the five candidate designs proposed this. Genuine strengths: zero JS
+of any provenance (no doctrine exposure at all), keyboard-first by
+construction, headlessly testable (TestBackend snapshots, exhaustive
+key-event tables), tiny packaging closure.
+
+*Rejected as the primary surface* because a terminal cannot answer the daily
+question. ratatui cannot render tables, images, or GitHub-faithful
+formatting; every design that chose it either deferred faithful preview
+indefinitely or bolted on a post-MVP SSR viewer — i.e. conceded the point.
+Terminal screen-reader support is also markedly weaker than semantic HTML.
+The judges' product lens scored both TUI plans down for exactly this. The
+TUI's real virtues (keyboard-first flows, enumerable commands) are adopted
+in SSR form: accesskeys, keyboard-completable forms, and a keyboard-only
+walkthrough as a Phase-4 exit criterion.
+
+=== (b) Rust→wasm web UI (Leptos / Dioxus / Yew)
+
+The strongest end-state UX of any option: hydrated ARIA treeview, popup
+autocomplete, command palette, pointer drag-and-drop — one candidate design
+built its whole plan on Leptos SSR + hydration.
+
+*Rejected now, on three independent grounds:*
+
+. *Doctrine:* wasm-bindgen ships machine-generated JS glue to the browser.
+  Whether generated JS falls under the ban is precisely the unresolved
+  question; making the MVP's core interaction layer depend on a favourable
+  ruling that has not been given is a contested reading of user doctrine
+  made load-bearing. Two judges independently marked this as a fatal flaw.
+. *Toolchain:* the dev host has no rustup and thus no wasm32 target; the
+  entire hydration layer would be buildable only in CI, destroying the
+  inner dev loop on a machine with documented RAM-exhaustion issues.
+. *Transition economics:* it would sink the largest Rust-UI investment of
+  any option into exactly the layer the estate has earmarked for
+  AffineScript, making the eventual swap either wasteful or de facto never.
+
+What survives from this direction: the *dual-input-one-path contract* —
+whenever pointer drag-and-drop eventually ships (AffineScript era), it must
+drive the identical plan/apply path as the keyboard/form flow, with a
+differential test asserting byte-identical commits from both input methods.
+
+=== (c) Server-side-rendered HTML — the chosen option
+
+Considered in two flavours. *Zero-script SSR* (chosen): every claimed
+weakness has a form-based equivalent for the actual MVP checklist, and it is
+the only option with no doctrine ambiguity whatsoever.
+*SSR-with-minimal-client-script* was rejected outright: "minimal handwritten
+JS" is a doctrine breach on day one, and there is no principled stopping
+point once the first script tag ships.
+
+=== (d) Native desktop (Dioxus-desktop / egui / iced / Slint)
+
+Pure Rust and JS-free, but: immediate-mode or macro-heavy view layers resist
+the headless in-process testing that SSR gets for free; AccessKit coverage
+is not yet mature enough to bet a hard accessibility requirement on; the
+packaging closure (GL/windowing) is heavier under Guix; rendering fidelity
+is no better than SSR (both use an HTML renderer or fake one); and it shares
+option (b)'s throwaway-investment problem for the AffineScript transition.
+Rejected.
+
+=== (e) Staged combination (TUI first, web later)
+
+Superficially attractive but it double-builds UI: every screen would be
+written twice before the AffineScript layer even starts. The chosen SSR
+design achieves the staging benefit differently — the *server and its HTTP
+endpoints are the stable layer*, and enhancement/replacement happens on top
+of them exactly once, in AffineScript.
+
+=== The generated-JS-glue question, explicitly
+
+Positions in the candidate designs ranged from "rule it acceptable now, in
+our own ADR, and build on it" (rejected — self-authored ratification of a
+contested doctrine reading) through "force the ruling with a timeboxed wasm
+spike pre-MVP" (rejected — the spike is unbuildable on the local toolchain,
+and a ruling is a user decision, not an artifact) to "park it" (adopted).
+This ADR takes no position on the ruling itself. It records only that: (1)
+the MVP is deliberately structured so the answer does not matter yet; (2) an
+explicit user ruling, recorded as ADR-0007 with whatever evidence the user
+wants, is a *hard gate* on starting any client-script work, including
+AffineScript-generated or wasm-bindgen-generated output.
+
+== Consequences
+
+* *Doctrine safety:* no JS of any provenance ships; the CI
+  no-`<script>` assertion makes compliance machine-checked.
+* *Rendering fidelity:* comrak GFM gives an HTML preview in the same medium
+  GitHub renders. Exact parity with GitHub's wiki pipeline is *unverified*
+  until the live spike; known divergences will be documented and bounded,
+  and source remains canonical regardless.
+* *Accessibility:* semantic HTML, landmarks, labelled forms, browser-native
+  keyboard navigation and screen-reader behaviour — the strongest baseline
+  of any candidate, with an NVDA smoke script (no VoiceOver gate: no macOS
+  device exists in this environment) and a keyboard-only walkthrough as
+  Phase-4 exit criteria.
+* *Testability:* no browser automation needed. The whole app is exercised
+  in-process via `tower::ServiceExt` with assertions on returned HTML,
+  because there is no client state to drive.
+* *Dev-loop viability:* builds and runs on the actual host (distro Rust
+  1.85, no rustup) with a small dependency tree — no wasm toolchain, no
+  node, no bundler.
+* *UX ceiling accepted:* full-page form flows; no pointer drag-and-drop; no
+  inline completion inside the textarea; autocomplete is a `<datalist>`
+  side picker. These are explicitly recorded as the first deliverables of
+  the AffineScript enhancement layer, not silent losses.
+* *AffineScript migration seam:* all logic lives server-side behind HTTP
+  endpoints; maud templates are thin and dumb. When AffineScript→typed-wasm
+  matures (and ADR-0007 is ruled), it either progressively enhances the
+  served pages (drag-and-drop via the dual-input-one-path contract, inline
+  autocomplete, live preview) or replaces the front end wholesale — in both
+  cases against the unchanged HTTP API, touching zero engine, store, git,
+  or index code. If AffineScript slips indefinitely, the SSR UI is not
+  stranded scaffolding: it is doctrine-compliant, accessible, and complete
+  for the MVP checklist on its own.
+* *Serving model:* localhost binary per session for now; a WSL systemd user
+  service on a fixed port is an open question to be decided after a week of
+  real Phase-3 use.
+
+[#revisit]
+== What evidence would trigger revisiting this decision
+
+* *ADR-0007 is ruled* (either way) on generated JS glue — the enhancement
+  layer's shape follows the ruling; a rejection also permanently forecloses
+  option (b) as a fallback.
+* *AffineScript reaches base-language completion* with a usable typed-wasm
+  (or Deno-ESM) target — starts the enhancement/replacement work on the
+  existing HTTP API.
+* *The Phase-3 daily-use week surfaces a UX wall* that form-based flows
+  demonstrably cannot clear (recorded friction, not vibes) — would
+  accelerate the enhancement layer or force an interim rethink, but never a
+  handwritten-JS shortcut.
+* *Live spike evidence (currently unverified) shows comrak preview
+  divergence from GitHub's rendering* severe enough that the preview
+  misleads — would trigger renderer replacement or a divergence-notes
+  regime, within the same SSR architecture.
+* *A screen-reader failure of the SSR UI in real use* (considered unlikely
+  for semantic HTML, but the NVDA script is the check) — would trigger an
+  accessibility-first remediation pass ahead of any feature work.
+* *rustup or a wasm-capable toolchain landing on the dev host* weakens the
+  toolchain argument against option (b), but does not by itself weaken the
+  doctrine or transition-economics arguments.
