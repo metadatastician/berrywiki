@@ -1,0 +1,16 @@
+[package]
+name = "berrywiki-store"
+description = "Storage adapters for BerryWiki: the WikiStore trait and the LocalFolderStore implementation with safe writes and path-traversal defence."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Only the engine. No git/GitHub/network dependencies in this crate yet;
+# GitHubWikiStore will live behind the same trait and carry its own deps.
+[dependencies]
+berrywiki-core = { path = "../berrywiki-core" }
+
+[lints.rust]
+unsafe_code = "forbid"
