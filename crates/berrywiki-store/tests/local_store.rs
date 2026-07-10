@@ -250,6 +250,101 @@ fn sidebar_regeneration_is_write_if_changed() {
 }
 
 #[test]
+fn page_titled_sidebar_cannot_clobber_generated_sidebar() {
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    store
+        .create_page(CreatePageInput {
+            id: "sb-trap".to_string(),
+            title: "_Sidebar".to_string(),
+            parent_id: None,
+            position: 0,
+            kind: PageKind::Page,
+            tags: vec![],
+            body: "# _Sidebar\n\nprecious content\n".to_string(),
+        })
+        .unwrap();
+
+    // The page landed on a NON-reserved filename and is fully readable…
+    assert!(dir.join("Sidebar.md").exists());
+    let page = store.read_page("sb-trap").unwrap();
+    assert!(page.body.contains("precious content"));
+
+    // …and the real _Sidebar.md is the generated sidebar, not page content.
+    let sidebar = fs::read_to_string(dir.join("_Sidebar.md")).unwrap();
+    assert!(sidebar.starts_with("# Notebook"));
+    assert!(!sidebar.contains("precious content"));
+}
+
+#[test]
+fn create_rejects_hostile_or_empty_ids() {
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    for bad in ["", "a/ok", "../x", "a b", ".hidden"] {
+        let err = store
+            .create_page(create_input(bad, "Innocent Title", None))
+            .unwrap_err();
+        assert!(
+            matches!(err, StoreError::InvalidName { .. }),
+            "id {bad:?} must be rejected, got: {err}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn planted_symlink_at_temp_path_cannot_redirect_writes() {
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+
+    // Hostile repo content: a symlink sitting exactly where safe_write puts
+    // its temp file, pointing at a victim outside the wiki root.
+    let victim = dir.parent().unwrap().join(format!(
+        "berrywiki-victim-{}.txt",
+        std::process::id()
+    ));
+    fs::write(&victim, "untouched").unwrap();
+    let tmp_path = dir.join(format!("Teaching.md.tmp-{}", std::process::id()));
+    std::os::unix::fs::symlink(&victim, &tmp_path).unwrap();
+
+    store
+        .update_page(TEACHING_ID, "# Teaching\n\nnew body\n")
+        .unwrap();
+
+    // The victim was never written through; the page updated correctly.
+    assert_eq!(fs::read_to_string(&victim).unwrap(), "untouched");
+    let content = fs::read_to_string(dir.join("Teaching.md")).unwrap();
+    assert!(content.contains("new body"));
+    let _ = fs::remove_file(&victim);
+}
+
+#[test]
+fn reload_ignores_symlinked_pages() {
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    #[cfg(unix)]
+    {
+        // A dangling symlink and a link to an outside file: neither may enter
+        // the graph as content.
+        std::os::unix::fs::symlink("/nonexistent/target.md", dir.join("Dangling.md")).unwrap();
+        let outside = dir.parent().unwrap().join(format!(
+            "berrywiki-outside-{}.md",
+            std::process::id()
+        ));
+        fs::write(&outside, "# Smuggled\n").unwrap();
+        std::os::unix::fs::symlink(&outside, dir.join("Smuggled.md")).unwrap();
+        store.reload().unwrap();
+        assert!(!store.list_pages().iter().any(|p| p.title == "Smuggled"));
+        assert!(!store.list_pages().iter().any(|p| p.path == "Dangling.md"));
+        let _ = fs::remove_file(&outside);
+    }
+    #[cfg(not(unix))]
+    {
+        store.reload().unwrap();
+    }
+}
+
+#[test]
 fn reload_picks_up_external_edits() {
     let dir = scratch_wiki();
     let mut store = LocalFolderStore::open(&dir).unwrap();

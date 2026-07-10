@@ -81,15 +81,48 @@ impl LocalFolderStore {
     }
 
     /// Atomic write: temp file in the same directory, then rename over.
+    ///
+    /// The temp file is opened with `create_new` (O_CREAT|O_EXCL), which
+    /// refuses to follow a pre-existing entry — including a dangling symlink
+    /// planted at the temp path by hostile repo content. Any such leftover is
+    /// removed (the symlink itself, never its target) and creation retried
+    /// once. The final `rename` replaces the target *entry*, so a symlink at
+    /// the target is replaced, not followed.
     fn safe_write(&self, relative: &str, content: &[u8]) -> Result<()> {
+        use std::io::Write;
+
         let target = self.resolve(relative)?;
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)
                 .map_err(|e| StoreError::io(format!("creating directory for {relative:?}"), e))?;
         }
-        let tmp = target.with_extension(format!("tmp-{}", std::process::id()));
-        fs::write(&tmp, content)
+        let tmp_name = format!(
+            "{}.tmp-{}",
+            target
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            std::process::id()
+        );
+        let tmp = target.with_file_name(&tmp_name);
+
+        let open = |p: &Path| fs::OpenOptions::new().write(true).create_new(true).open(p);
+        let mut file = match open(&tmp) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                // Stale temp or planted symlink: remove the entry, retry once.
+                fs::remove_file(&tmp)
+                    .map_err(|e| StoreError::io(format!("clearing stale temp for {relative:?}"), e))?;
+                open(&tmp)
+                    .map_err(|e| StoreError::io(format!("creating temp file for {relative:?}"), e))?
+            }
+            Err(e) => {
+                return Err(StoreError::io(format!("creating temp file for {relative:?}"), e))
+            }
+        };
+        file.write_all(content)
             .map_err(|e| StoreError::io(format!("writing temp file for {relative:?}"), e))?;
+        drop(file);
         fs::rename(&tmp, &target).map_err(|e| {
             let _ = fs::remove_file(&tmp);
             StoreError::io(format!("renaming temp file into {relative:?}"), e)
@@ -163,6 +196,9 @@ impl LocalFolderStore {
             return Ok(name);
         }
         let suffixed = with_id_suffix(&name, id);
+        // The suffix embeds caller-supplied id characters: re-validate the
+        // final name rather than trusting the pre-suffix validation.
+        validate_component(&suffixed)?;
         if self.root.join(&suffixed).exists() {
             return Err(StoreError::InvalidName {
                 name: suffixed,
@@ -192,7 +228,13 @@ impl WikiStore for LocalFolderStore {
         for entry in entries {
             let entry = entry.map_err(|e| StoreError::io("listing the wiki folder", e))?;
             let path = entry.path();
-            if !path.is_file() {
+            // Symlinks are never managed content: `is_file()` follows links
+            // (so a link to an outside file would be silently ingested) and
+            // dangling links would otherwise linger invisibly.
+            let file_type = entry
+                .file_type()
+                .map_err(|e| StoreError::io("inspecting a wiki folder entry", e))?;
+            if file_type.is_symlink() || !path.is_file() {
                 continue;
             }
             let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
@@ -231,6 +273,9 @@ impl WikiStore for LocalFolderStore {
     }
 
     fn create_page(&mut self, input: CreatePageInput) -> Result<String> {
+        // Ids flow into filenames, attachment directories and metadata:
+        // reject anything but BerryWiki's own id alphabet up front.
+        crate::paths::validate_page_id(&input.id)?;
         if self.graph.get(&input.id).is_some() {
             return Err(StoreError::DuplicateId(input.id));
         }

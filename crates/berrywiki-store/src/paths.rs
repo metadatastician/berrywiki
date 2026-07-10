@@ -87,7 +87,46 @@ pub fn file_slug(title: &str) -> String {
             prev_dash = false;
         }
     }
-    collapsed.trim_matches('-').to_string()
+    // Leading underscores are stripped so no title can ever produce GitHub's
+    // reserved control filenames (`_Sidebar.md`, `_Footer.md`) — a page named
+    // "_Sidebar" would otherwise be silently clobbered by sidebar regeneration.
+    collapsed
+        .trim_matches('-')
+        .trim_start_matches(|c| c == '_' || c == '-')
+        .to_string()
+}
+
+/// Filenames the wiki reserves for generated/control files. A *page* must
+/// never be written to these names (the store itself writes them separately).
+const RESERVED_PAGE_NAMES: &[&str] = &["_sidebar.md", "_footer.md"];
+
+/// Validate an id supplied by the caller before it is used in filenames,
+/// attachment directories or metadata. Deliberately strict: ids are
+/// BerryWiki-generated (UUIDs in production, short slugs in tests), never
+/// arbitrary user text.
+pub fn validate_page_id(id: &str) -> Result<()> {
+    let reject = |reason: &str| {
+        Err(StoreError::InvalidName {
+            name: id.to_string(),
+            reason: reason.to_string(),
+        })
+    };
+    if id.is_empty() {
+        return reject("empty page id");
+    }
+    if id.len() > 128 {
+        return reject("page id longer than 128 bytes");
+    }
+    if id.starts_with('.') {
+        return reject("page id may not start with a dot");
+    }
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    {
+        return reject("page id may only contain ASCII alphanumerics, '-', '_' and '.'");
+    }
+    Ok(())
 }
 
 /// Build a flat page filename from ancestor titles + own title (ADR-0001),
@@ -111,6 +150,14 @@ pub fn page_filename(ancestor_titles: &[String], title: &str) -> Result<String> 
     segments.push(own);
     let name = format!("{}.md", segments.join("--"));
     validate_component(&name)?;
+    // Defence in depth: file_slug already strips leading underscores, but no
+    // caller path may ever route a page onto a reserved control filename.
+    if RESERVED_PAGE_NAMES.iter().any(|r| name.eq_ignore_ascii_case(r)) {
+        return Err(StoreError::InvalidName {
+            name,
+            reason: "reserved wiki control filename".to_string(),
+        });
+    }
     Ok(name)
 }
 
@@ -168,5 +215,27 @@ mod tests {
     #[test]
     fn id_suffix_is_short_and_stable() {
         assert_eq!(with_id_suffix("Plan.md", "0195f6ec-e256"), "Plan--e256.md");
+    }
+
+    #[test]
+    fn titles_cannot_produce_reserved_control_filenames() {
+        // Leading underscores are stripped by the slug…
+        assert_eq!(file_slug("_Sidebar"), "Sidebar");
+        assert_eq!(file_slug("_Footer"), "Footer");
+        assert_eq!(page_filename(&[], "_Sidebar").unwrap(), "Sidebar.md");
+        // …and an underscore-only title fails cleanly rather than vanishing.
+        assert!(page_filename(&[], "_").is_err());
+    }
+
+    #[test]
+    fn page_ids_are_strictly_validated() {
+        assert!(validate_page_id("0195f6ec-36a2-7a42-b519-5f558842e256").is_ok());
+        assert!(validate_page_id("new-child-1").is_ok());
+        assert!(validate_page_id("").is_err());
+        assert!(validate_page_id("a/ok").is_err());
+        assert!(validate_page_id("../x").is_err());
+        assert!(validate_page_id("a b").is_err());
+        assert!(validate_page_id(".hidden").is_err());
+        assert!(validate_page_id("id\u{0}nul").is_err());
     }
 }
