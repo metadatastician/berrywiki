@@ -1,0 +1,21 @@
+[package]
+name = "berrywiki-cli"
+description = "The `berrywiki` command-line tool: inspect (check) and regenerate the sidebar of a wiki folder. Tooling, not a second UI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Zero third-party dependencies: only the workspace crates. Argument parsing is
+# hand-rolled to keep the tool buildable on the offline distro toolchain.
+[dependencies]
+berrywiki-core = { path = "../berrywiki-core" }
+berrywiki-store = { path = "../berrywiki-store" }
+
+[[bin]]
+name = "berrywiki"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_code = "forbid"

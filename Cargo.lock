@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "berrywiki-cli"
+version = "0.0.1"
+dependencies = [
+ "berrywiki-core",
+ "berrywiki-store",
+]
+
+[[package]]
 name = "berrywiki-core"
 version = "0.0.1"
 
