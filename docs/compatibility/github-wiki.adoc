@@ -42,6 +42,24 @@ link:../decisions/0002-authentication-strategy.adoc[ADR-0002].
 | Unicode + spaces in titles resolve by title | ✅ | fixture `Sandbox — Ünïcode & Spaces`
 |===
 
+== Local git behaviour (verified via `berrywiki-git-compat`)
+
+Reproduced with the git CLI (2.47.3) against a bare local remote + two clones,
+hermetic config. These verify *git semantics BerryWiki relies on*, not
+GitHub-specific server behaviour (which stays in the next section).
+
+[cols="3,1,3", options="header"]
+|===
+| Behaviour | Tag | Evidence
+
+| Fetch-before-push reveals remote commits (`rev-list HEAD..origin/main`) | ✅ | `remote_change_is_detected_before_push`
+| Non-fast-forward push is rejected; local commit + working tree untouched | ✅ | `non_fast_forward_push_is_rejected_and_local_commit_survives`
+| Non-overlapping page edits merge cleanly, both edits retained | ✅ | `non_overlapping_changes_merge_cleanly`
+| Same-page conflict keeps BOTH versions in markers; `git status --porcelain` lists `UU <path>`; `merge --abort` restores local exactly | ✅ | `same_page_conflict_preserves_both_versions_and_aborts_safely`
+| `_Sidebar.md` conflicts like any file → strategy: abort, merge pages, regenerate | ✅ | `sidebar_conflict_behaves_like_any_page_conflict`
+| Remote delete vs local edit = modify/delete conflict; local content kept on disk | ✅ | `remote_delete_of_locally_edited_page_keeps_local_content`
+|===
+
 == Live GitHub Wiki behaviour (UNVERIFIED — Phase 0 spike targets)
 
 Each row below is a concrete test to run against a disposable

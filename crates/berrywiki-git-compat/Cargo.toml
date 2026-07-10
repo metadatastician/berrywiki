@@ -1,0 +1,16 @@
+[package]
+name = "berrywiki-git-compat"
+description = "Phase 0 git-compatibility harness: reproduces remote-change, non-fast-forward and merge-conflict situations against the git CLI and proves local work is never lost. Test support only — deliberately NOT the production git engine (that choice is an open ADR)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Shells out to the `git` binary on purpose: this crate produces *evidence*
+# about git behaviour for the compatibility report. The production sync engine
+# (git CLI vs gitoxide vs libgit2) is decided by ADR after the plan lands.
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
