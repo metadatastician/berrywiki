@@ -631,26 +631,77 @@ fn external_modification_is_refused_as_stale_write() {
     assert!(fs::read_to_string(dir.join("Teaching.md")).unwrap().contains("another process"));
 }
 
-#[test]
-fn crashed_move_is_recovered_on_open() {
-    // Simulate a crash AFTER a move wrote its new file but BEFORE it deleted the
-    // old one. Opening the store rolls the operation forward (never a
-    // working-tree reset) and cleans up, without losing content.
-    let dir = scratch_wiki();
-    let journal_path = LocalFolderStore::open(&dir)
+/// Build one journal line for `old -> new`, stamping the old file's *current*
+/// fingerprint (as move_page does), so recovery treats it as an unchanged
+/// stale copy safe to delete.
+fn journal_line(dir: &std::path::Path, old_rel: &str, new_rel: &str) -> String {
+    let m = fs::metadata(dir.join(old_rel)).unwrap();
+    let mtime = m
+        .modified()
+        .unwrap()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!("{} {} {}\t{}\n", mtime, m.len(), old_rel, new_rel)
+}
+
+fn journal_path_for(dir: &std::path::Path) -> std::path::PathBuf {
+    LocalFolderStore::open(dir)
         .unwrap()
         .appstate()
         .expect("app state resolved")
-        .journal_path();
+        .journal_path()
+}
 
+#[test]
+fn crashed_move_is_recovered_on_open() {
+    // Crash AFTER the new file was written but BEFORE the old one was deleted:
+    // roll forward (delete the unchanged stale old file), never a tree reset.
+    let dir = scratch_wiki();
+    let jp = journal_path_for(&dir);
     fs::copy(dir.join("Home.md"), dir.join("Home-moved.md")).unwrap();
-    fs::write(&journal_path, "N Home-moved.md\nO Home.md\n").unwrap();
+    fs::write(&jp, journal_line(&dir, "Home.md", "Home-moved.md")).unwrap();
 
     let store = LocalFolderStore::open(&dir).unwrap();
     assert!(!dir.join("Home.md").exists(), "stale old file cleaned up on open");
     assert!(dir.join("Home-moved.md").exists(), "moved content preserved");
-    assert!(!journal_path.exists(), "journal cleared after recovery");
+    assert!(!jp.exists(), "journal cleared after recovery");
     assert_eq!(store.read_page(HOME_ID).unwrap().path, "Home-moved.md");
+}
+
+#[test]
+fn recovery_preserves_an_old_file_edited_after_the_crash() {
+    // Review finding #1: the user edits the old file directly between the crash
+    // and reopening. Recovery must NOT delete it — its fingerprint no longer
+    // matches the journalled one, so it is kept, not destroyed.
+    let dir = scratch_wiki();
+    let jp = journal_path_for(&dir);
+    fs::copy(dir.join("Home.md"), dir.join("Home-moved.md")).unwrap();
+    let line = journal_line(&dir, "Home.md", "Home-moved.md"); // fingerprint AS OF NOW
+    fs::write(dir.join("Home.md"), "# Home\n\nEDITED AFTER THE CRASH — unique work\n").unwrap();
+    fs::write(&jp, line).unwrap();
+
+    let _ = LocalFolderStore::open(&dir).unwrap(); // runs recovery
+    assert!(dir.join("Home.md").exists(), "post-crash edit must be preserved");
+    assert!(fs::read_to_string(dir.join("Home.md")).unwrap().contains("EDITED AFTER THE CRASH"));
+}
+
+#[test]
+fn recovery_completes_inbound_link_rewrites() {
+    // Review finding #2/#7: a crash after the affected rename but before an
+    // unaffected page's link was rewritten. Recovery heals the link so nothing
+    // dangles to the deleted old stem.
+    let dir = scratch_wiki();
+    let jp = journal_path_for(&dir);
+    fs::copy(dir.join("Teaching--Course-A.md"), dir.join("Research--Course-A.md")).unwrap();
+    fs::write(dir.join("Linker.md"), "# Linker\n\nsee [[Teaching--Course-A]]\n").unwrap();
+    fs::write(&jp, journal_line(&dir, "Teaching--Course-A.md", "Research--Course-A.md")).unwrap();
+
+    let _ = LocalFolderStore::open(&dir).unwrap();
+    assert!(!dir.join("Teaching--Course-A.md").exists(), "stale old file removed");
+    assert!(dir.join("Research--Course-A.md").exists());
+    let linker = fs::read_to_string(dir.join("Linker.md")).unwrap();
+    assert!(linker.contains("[[Research--Course-A]]"), "dangling link healed: {linker}");
 }
 
 #[test]

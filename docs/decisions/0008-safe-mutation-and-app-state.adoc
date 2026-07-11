@@ -1,0 +1,105 @@
+= ADR-0008: Safe mutation, crash recovery, and app-state location
+:sectnums:
+
+== Status
+
+*Accepted* (2026-07-11). Resolves three Phase-2/3 critique findings together,
+because they are one concern: mutating a wiki safely without losing content or
+polluting the clone.
+
+== Context
+
+Three linked problems from the plan review:
+
+. *Journal rollback loses local work.* The plan recovered interrupted
+  operations by `git restore`/`reset --hard` to `HEAD`, which discards *any*
+  uncommitted edit — including work unrelated to the failed operation.
+. *No stale-write guard.* Phase 2's model is a running server plus concurrent
+  terminal git in the same working tree, yet nothing detected that a file
+  changed on disk between load and write; a save could silently clobber it.
+. *App-state inside the clone.* A journal/lock/index inside the wiki clone
+  could be committed and pushed by a plain-git user — a "usable without
+  BerryWiki" breach. (Drafts already moved out under ADR-0006.)
+
+== Decision
+
+=== App-state lives outside the clone (`berrywiki-appstate`)
+
+All BerryWiki-private state — drafts, the operation journal, the repository
+lock, the search index — lives under the XDG *state* directory, in a directory
+keyed by a stable hash of the wiki's canonical path. Nothing app-private is
+ever written inside the clone, so a plain-git user cannot commit it.
+
+=== Repository lock — deferred (not yet needed)
+
+The Git rules require single-writer locking so two *server* operations cannot
+mutate the same clone at once. There is **no concurrent-writer surface today**
+(the server is read-only; the CLI is single-shot), so locking is *deferred*
+rather than shipped. An initial hand-rolled pid lock file was removed after
+review: it was never acquired (false safety) and its stale-reclaim was racy.
+When in-app mutation / a long-running server lands, locking will use an OS
+advisory lock (`flock`, auto-released on process death — no stale-lock problem)
+acquired around the writing session. Tracked as a work package.
+
+=== Stale-write guard (optimistic concurrency)
+
+The store fingerprints every page file (`mtime` + length) at load. Before
+overwriting or deleting a file, it re-checks the fingerprint; a mismatch means
+the file changed on disk since load (external editor / concurrent git), so the
+write is *refused* with an actionable `StaleWrite` error rather than clobbering
+the change. The store re-fingerprints on every reload, so its own writes never
+trip the guard. (Fingerprint, not full-content hash, is the pragmatic choice;
+an edit that preserves both mtime and length within one tick is the documented
+blind spot.)
+
+=== Roll-forward journal (not `git reset`)
+
+Multi-file operations (currently the subtree move) write ALL new files first,
+then delete obsolete old files. Before any write, the journal records each
+rename (old path, new path) *plus the old file's fingerprint*. On the next open,
+recovery (in the store, which has the link-rewrite logic) reads the journal and:
+
+* if all new files are present (content is safe) → *rolls forward*: deletes each
+  old file **only if its fingerprint is unchanged** since the operation began
+  (a changed old file is a post-crash "wiki without the app" edit and is kept,
+  not destroyed), then completes the inbound-link rewrites;
+* otherwise (writes were incomplete, so no delete has run and the old files are
+  intact) → *rolls back*: removes the partial new files and un-rewrites any
+  links already pointed at the new stems.
+
+Recovery only ever touches the operation's *own* recorded files and the links
+referencing them — never a blanket working-tree reset — so unrelated uncommitted
+work is never disturbed and no page's content can be lost. The journal is
+cleared durably (directory fsync) so a completed operation cannot resurrect.
+This is the sound replacement for the rejected `git restore` design.
+
+A second adversarial review of the first cut of this design found that the
+existence-only roll-forward could delete a post-crash edit, that the unaffected
+link rewrites were not completed on recovery, and that the pid lock was dead
+racy code; the fingerprint guard, in-store link healing, and lock removal above
+are the fixes.
+
+== Alternatives considered
+
+* *`git reset --hard`/`git restore` for recovery* — rejected: discards unrelated
+  local work (the original finding).
+* *Content-hash staleness* instead of mtime+length — stronger but re-reads every
+  file on every check; deferred as an optional upgrade if the mtime blind spot
+  bites in practice.
+* *OS file locks (`flock`)* instead of a pid lock file — not in std, and the pid
+  lock file gives portable dead-holder recovery; revisit if advisory `flock`
+  semantics are needed.
+
+== Consequences
+
+* No operation can lose content or discard unrelated local edits.
+* Concurrent external edits are surfaced, not clobbered.
+* The clone stays free of app-private files.
+* The store gains an `AppState` (best-effort; if it cannot be resolved the store
+  still works, just without journalled recovery) and runs recovery on open.
+
+== Revisit triggers
+
+* The mtime+length blind spot causes a real lost edit → move to content hashing.
+* A hosted/multi-user deployment needs cross-host locking → replace the pid lock
+  with a coordinated lock (the git remote itself, or a lock service).

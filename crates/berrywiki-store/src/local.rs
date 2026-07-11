@@ -10,7 +10,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use berrywiki_appstate::{journal, AppState, MoveJournal};
+use berrywiki_appstate::journal::RenameEntry;
+use berrywiki_appstate::{AppState, MoveJournal};
 use berrywiki_core::{
     generate_sidebar, serialize_source, Diagnostic, PageGraph, PageMetadata, SidebarOptions,
     WikiPage,
@@ -66,10 +67,6 @@ impl LocalFolderStore {
             return Err(StoreError::RootNotFound(root.display().to_string()));
         }
         let appstate = AppState::for_wiki(&root).ok();
-        if let Some(app) = &appstate {
-            // Complete or roll back an operation interrupted by a crash.
-            let _ = journal::recover(&app.journal_path(), &root);
-        }
         let mut store = LocalFolderStore {
             root,
             graph: PageGraph::build(Vec::new()),
@@ -78,6 +75,9 @@ impl LocalFolderStore {
             appstate,
             fingerprints: HashMap::new(),
         };
+        // Complete or roll back an operation interrupted by a crash, BEFORE the
+        // first load, so the graph is built from a consistent tree.
+        store.recover_interrupted_move()?;
         store.reload()?;
         Ok(store)
     }
@@ -95,6 +95,104 @@ impl LocalFolderStore {
     /// Non-fatal diagnostics from the last load (skipped/unreadable files).
     pub fn load_diagnostics(&self) -> &[Diagnostic] {
         &self.load_diagnostics
+    }
+
+    /// Recover a subtree move interrupted by a crash (called on open, before
+    /// the first load). Content-safe by construction:
+    /// * all new files present → roll forward: delete each old file **only if
+    ///   it is unchanged** since the operation began (matches the journalled
+    ///   fingerprint); a changed old file is a post-crash "wiki without the
+    ///   app" edit and is kept, not destroyed. Then finish the inbound-link
+    ///   rewrites.
+    /// * some new files missing → roll back: remove the partial new files (the
+    ///   old files are all intact) and heal any links already rewritten to the
+    ///   new stems back to the old ones.
+    ///
+    /// Recovery only ever touches the operation's own recorded files and the
+    /// links referencing them — never a working-tree reset.
+    fn recover_interrupted_move(&self) -> Result<()> {
+        let Some(app) = &self.appstate else {
+            return Ok(());
+        };
+        let jp = app.journal_path();
+        let Some(j) = MoveJournal::read(&jp)
+            .map_err(|e| StoreError::io("reading the operation journal", e))?
+        else {
+            return Ok(());
+        };
+
+        let all_new_present = j.entries.iter().all(|e| self.root.join(&e.new_path).exists());
+        let mut forward: HashMap<String, String> = HashMap::new();
+        let mut reverse: HashMap<String, String> = HashMap::new();
+        for e in &j.entries {
+            forward.insert(stem(&e.old_path), stem(&e.new_path));
+            reverse.insert(stem(&e.new_path), stem(&e.old_path));
+        }
+
+        if all_new_present {
+            let new_paths: HashSet<&str> =
+                j.entries.iter().map(|e| e.new_path.as_str()).collect();
+            for e in &j.entries {
+                if new_paths.contains(e.old_path.as_str()) {
+                    continue;
+                }
+                let old_abs = self.root.join(&e.old_path);
+                if let Some((mt, len)) = fingerprint_of(&old_abs) {
+                    if mt == e.old_mtime && len == e.old_len {
+                        let _ = fs::remove_file(&old_abs); // unchanged stale copy
+                    }
+                    // else: edited after the crash — keep it (duplicate-id surfaces).
+                }
+            }
+            self.rewrite_folder_links(&forward)?;
+        } else {
+            for e in &j.entries {
+                let reused_as_old = j.entries.iter().any(|o| o.old_path == e.new_path);
+                if !reused_as_old && self.root.join(&e.new_path).exists() {
+                    let _ = fs::remove_file(self.root.join(&e.new_path));
+                }
+            }
+            self.rewrite_folder_links(&reverse)?;
+        }
+
+        MoveJournal::clear(&jp)
+            .map_err(|e| StoreError::io("clearing the operation journal", e))?;
+        Ok(())
+    }
+
+    /// Rewrite stem references across every page file (used by recovery to
+    /// complete or undo the inbound-link rewrites). Idempotent.
+    fn rewrite_folder_links(&self, map: &HashMap<String, String>) -> Result<()> {
+        if map.is_empty() {
+            return Ok(());
+        }
+        let entries = fs::read_dir(&self.root)
+            .map_err(|e| StoreError::io("listing the wiki folder for link repair", e))?;
+        for entry in entries {
+            let entry =
+                entry.map_err(|e| StoreError::io("listing the wiki folder for link repair", e))?;
+            if entry.file_type().map(|t| t.is_symlink()).unwrap_or(false) {
+                continue;
+            }
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if !name.ends_with(".md") || name == SIDEBAR_FILE || name == FOOTER_FILE {
+                continue;
+            }
+            let Ok(source) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let rewritten = rewrite_links(&source, map);
+            if rewritten != source {
+                self.safe_write(&name, rewritten.as_bytes())?;
+            }
+        }
+        Ok(())
     }
 
     /// Refuse to write/delete a file that changed on disk since it was loaded.
@@ -660,23 +758,36 @@ impl WikiStore for LocalFolderStore {
             self.check_not_stale(old)?;
         }
 
-        // Journal the rename set (new + old paths) BEFORE any write, so a crash
-        // is recoverable: content is in the new files; recovery finishes the
-        // deletes (or rolls back partial writes) — never a working-tree reset.
+        // Journal the rename set BEFORE any write, so a crash is recoverable.
+        // Each entry carries the old file's current fingerprint, so recovery
+        // can distinguish a stale leftover from a post-crash user edit and
+        // never deletes the latter. (Affected old files were just stale-checked
+        // via `deletes`, so these fingerprints are current.)
         let journal_path = self.appstate.as_ref().map(|a| a.journal_path());
-        let journaled: Vec<(String, String)> = affected
+        let entries: Vec<RenameEntry> = affected
             .iter()
             .filter(|id| old_path_of[*id] != new_path_of[*id])
-            .map(|id| (old_path_of[id].clone(), new_path_of[id].clone()))
+            .map(|id| {
+                let old_path = old_path_of[id].clone();
+                let (old_mtime, old_len) = self
+                    .fingerprints
+                    .get(&old_path)
+                    .copied()
+                    .or_else(|| fingerprint_of(&self.root.join(&old_path)))
+                    .unwrap_or((0, 0));
+                RenameEntry {
+                    old_path,
+                    new_path: new_path_of[id].clone(),
+                    old_mtime,
+                    old_len,
+                }
+            })
             .collect();
         if let Some(jp) = &journal_path {
-            if !journaled.is_empty() {
-                MoveJournal {
-                    new_paths: journaled.iter().map(|(_, n)| n.clone()).collect(),
-                    old_paths: journaled.iter().map(|(o, _)| o.clone()).collect(),
-                }
-                .write(jp)
-                .map_err(|e| StoreError::io("writing the move journal", e))?;
+            if !entries.is_empty() {
+                MoveJournal { entries }
+                    .write(jp)
+                    .map_err(|e| StoreError::io("writing the move journal", e))?;
             }
         }
 

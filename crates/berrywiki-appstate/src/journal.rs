@@ -1,58 +1,60 @@
-//! A crash-recovery journal for multi-file operations (e.g. a subtree move).
+//! A crash-recovery journal for multi-file operations (the subtree move).
 //!
 //! # Why not `git restore` / `reset --hard`
 //!
 //! The rejected design recovered by resetting the working tree to `HEAD`,
-//! which would silently discard *any* uncommitted local edit — including work
-//! unrelated to the failed operation. That violates "never lose local work".
+//! discarding *any* uncommitted edit — including work unrelated to the failed
+//! operation. That violates "never lose local work".
 //!
-//! # The sound design
+//! # What this module stores
 //!
-//! An operation writes ALL its new files first, then deletes obsolete old
-//! files. Because content is written before anything is deleted, at any crash
-//! point either:
+//! Just the *data*: for each renamed file, its old path, new path, and the
+//! old file's fingerprint (`mtime`, length) captured before the operation
+//! began. Recovery *policy* lives in the store (it needs the link-rewriting
+//! logic), and uses these fingerprints so it never deletes an old file that
+//! was edited on disk after the crash (a "wiki without the app" edit).
 //!
-//! * all new files exist (deletes may be partial) → **roll forward**: finish
-//!   the pending deletes; or
-//! * some new files are missing (so no delete has happened yet, since deletes
-//!   run only after every write) → **roll back**: remove the partial new files;
-//!   the old files are all still present.
-//!
-//! Recovery only ever touches the operation's *own* recorded files — never a
-//! blanket working-tree reset — so unrelated local edits are never disturbed,
-//! and no page's content can be lost.
+//! An operation writes ALL its new files first, then deletes old files, so at
+//! any crash point either all new files exist (content is safe → the store
+//! rolls forward, deleting only *unchanged* old files) or some are missing (no
+//! delete has run → the store rolls back the partial new files). Recovery only
+//! ever touches the operation's own recorded files, never a working-tree reset.
 
-use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
-/// The recorded intent of a move-like operation: the new files it creates and
-/// the old files it will delete once all writes succeed. Paths are relative to
-/// the wiki root.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// One recorded rename: old → new, plus the old file's pre-operation
+/// fingerprint so recovery can tell a stale leftover from a fresh edit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameEntry {
+    pub old_path: String,
+    pub new_path: String,
+    pub old_mtime: u128,
+    pub old_len: u64,
+}
+
+/// The recorded intent of a move-like operation.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MoveJournal {
-    pub new_paths: Vec<String>,
-    pub old_paths: Vec<String>,
+    pub entries: Vec<RenameEntry>,
 }
 
 impl MoveJournal {
-    /// Atomically write the journal (temp + rename), so it is never read
-    /// half-written.
+    /// Atomically write the journal (temp + fsync + rename).
     pub fn write(&self, journal_path: &Path) -> io::Result<()> {
         if let Some(parent) = journal_path.parent() {
             fs::create_dir_all(parent)?;
         }
         let mut body = String::new();
-        for p in &self.new_paths {
-            body.push_str("N ");
-            body.push_str(p);
-            body.push('\n');
-        }
-        for p in &self.old_paths {
-            body.push_str("O ");
-            body.push_str(p);
-            body.push('\n');
+        for e in &self.entries {
+            // "<mtime> <len> <old_path>\t<new_path>". Filenames never contain a
+            // tab or newline (validated), so this parses unambiguously even if a
+            // path contained spaces.
+            body.push_str(&format!(
+                "{} {} {}\t{}\n",
+                e.old_mtime, e.old_len, e.old_path, e.new_path
+            ));
         }
         let tmp = journal_path.with_extension("journal.tmp");
         {
@@ -60,7 +62,9 @@ impl MoveJournal {
             f.write_all(body.as_bytes())?;
             f.sync_all()?;
         }
-        fs::rename(&tmp, journal_path)
+        fs::rename(&tmp, journal_path)?;
+        fsync_parent(journal_path);
+        Ok(())
     }
 
     /// Read the journal, or `None` if there is none.
@@ -70,54 +74,54 @@ impl MoveJournal {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e),
         };
-        let mut j = MoveJournal::default();
+        let mut entries = Vec::new();
         for line in text.lines() {
-            if let Some(p) = line.strip_prefix("N ") {
-                j.new_paths.push(p.to_string());
-            } else if let Some(p) = line.strip_prefix("O ") {
-                j.old_paths.push(p.to_string());
+            if let Some(entry) = parse_line(line) {
+                entries.push(entry);
             }
         }
-        Ok(Some(j))
+        Ok(Some(MoveJournal { entries }))
     }
 
-    /// Remove the journal (operation committed or recovered).
+    /// Remove the journal durably (also fsync the directory, so a successful
+    /// operation's cleared journal does not resurrect after a power loss).
     pub fn clear(journal_path: &Path) -> io::Result<()> {
         match fs::remove_file(journal_path) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                fsync_parent(journal_path);
+                Ok(())
+            }
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e),
         }
     }
 }
 
-/// Recover an interrupted operation, if a journal exists. Returns whether a
-/// recovery was performed. Never touches files outside the journal's own lists.
-pub fn recover(journal_path: &Path, wiki_root: &Path) -> io::Result<bool> {
-    let Some(j) = MoveJournal::read(journal_path)? else {
-        return Ok(false);
-    };
-    let new_set: HashSet<&String> = j.new_paths.iter().collect();
-    let all_new_present = j.new_paths.iter().all(|p| wiki_root.join(p).exists());
+fn parse_line(line: &str) -> Option<RenameEntry> {
+    let (left, new_path) = line.split_once('\t')?;
+    let mut parts = left.splitn(3, ' ');
+    let old_mtime = parts.next()?.parse().ok()?;
+    let old_len = parts.next()?.parse().ok()?;
+    let old_path = parts.next()?.to_string();
+    if old_path.is_empty() || new_path.is_empty() {
+        return None;
+    }
+    Some(RenameEntry {
+        old_path,
+        new_path: new_path.to_string(),
+        old_mtime,
+        old_len,
+    })
+}
 
-    if all_new_present {
-        // Roll forward: the content is safely in the new files; finish deletes.
-        for old in &j.old_paths {
-            if !new_set.contains(old) {
-                let _ = fs::remove_file(wiki_root.join(old));
-            }
-        }
-    } else {
-        // Roll back: writes were incomplete, so no delete has run yet and the
-        // old files are intact. Remove the partial new files only.
-        for new in &j.new_paths {
-            if !j.old_paths.contains(new) {
-                let _ = fs::remove_file(wiki_root.join(new));
-            }
+/// Best-effort directory fsync so a rename/remove is durable. Unsupported on
+/// some platforms/filesystems; a failure is not fatal.
+fn fsync_parent(path: &Path) {
+    if let Some(parent) = path.parent() {
+        if let Ok(dir) = fs::File::open(parent) {
+            let _ = dir.sync_all();
         }
     }
-    MoveJournal::clear(journal_path)?;
-    Ok(true)
 }
 
 #[cfg(test)]
@@ -127,80 +131,68 @@ mod tests {
 
     static C: AtomicUsize = AtomicUsize::new(0);
 
-    fn scratch() -> std::path::PathBuf {
+    fn jp() -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!(
             "bw-journal-{}-{}",
             std::process::id(),
             C.fetch_add(1, Ordering::SeqCst)
         ));
         fs::create_dir_all(&d).unwrap();
-        d
+        d.join("op.journal")
     }
 
     #[test]
-    fn write_read_round_trip() {
-        let dir = scratch();
-        let jp = dir.join("op.journal");
+    fn write_read_round_trip_with_fingerprints() {
+        let p = jp();
         let j = MoveJournal {
-            new_paths: vec!["A--x.md".into(), "A--y.md".into()],
-            old_paths: vec!["x.md".into(), "y.md".into()],
+            entries: vec![
+                RenameEntry {
+                    old_path: "Plan.md".into(),
+                    new_path: "Team--Plan.md".into(),
+                    old_mtime: 123456789,
+                    old_len: 42,
+                },
+                RenameEntry {
+                    old_path: "Plan--Notes.md".into(),
+                    new_path: "Team--Plan--Notes.md".into(),
+                    old_mtime: 987654321,
+                    old_len: 7,
+                },
+            ],
         };
-        j.write(&jp).unwrap();
-        assert_eq!(MoveJournal::read(&jp).unwrap().unwrap(), j);
-        MoveJournal::clear(&jp).unwrap();
-        assert!(MoveJournal::read(&jp).unwrap().is_none());
+        j.write(&p).unwrap();
+        assert_eq!(MoveJournal::read(&p).unwrap().unwrap(), j);
     }
 
     #[test]
-    fn roll_forward_completes_deletes_when_new_files_present() {
-        let dir = scratch();
-        let root = dir.join("wiki");
-        fs::create_dir_all(&root).unwrap();
-        // New files exist (content is safe); an old file still lingers.
-        fs::write(root.join("A--x.md"), "content-x").unwrap();
-        fs::write(root.join("x.md"), "content-x").unwrap(); // stale duplicate
-        let jp = dir.join("op.journal");
+    fn clear_removes_and_read_is_none() {
+        let p = jp();
         MoveJournal {
-            new_paths: vec!["A--x.md".into()],
-            old_paths: vec!["x.md".into()],
+            entries: vec![RenameEntry {
+                old_path: "a.md".into(),
+                new_path: "b.md".into(),
+                old_mtime: 1,
+                old_len: 1,
+            }],
         }
-        .write(&jp)
+        .write(&p)
         .unwrap();
-
-        assert!(recover(&jp, &root).unwrap());
-        assert!(root.join("A--x.md").exists(), "new file kept");
-        assert!(!root.join("x.md").exists(), "stale old file cleaned up");
-        assert!(MoveJournal::read(&jp).unwrap().is_none(), "journal cleared");
+        MoveJournal::clear(&p).unwrap();
+        assert!(MoveJournal::read(&p).unwrap().is_none());
+        MoveJournal::clear(&p).unwrap(); // idempotent
     }
 
     #[test]
-    fn roll_back_removes_partial_new_files_keeping_old() {
-        let dir = scratch();
-        let root = dir.join("wiki");
-        fs::create_dir_all(&root).unwrap();
-        // Writes were incomplete: only one of two new files got written; both
-        // old files are still present (no delete had run).
-        fs::write(root.join("A--x.md"), "content-x").unwrap(); // partial new
-        fs::write(root.join("x.md"), "content-x").unwrap(); // old, intact
-        fs::write(root.join("y.md"), "content-y").unwrap(); // old, intact
-        let jp = dir.join("op.journal");
-        MoveJournal {
-            new_paths: vec!["A--x.md".into(), "A--y.md".into()], // A--y.md never written
-            old_paths: vec!["x.md".into(), "y.md".into()],
-        }
-        .write(&jp)
-        .unwrap();
-
-        assert!(recover(&jp, &root).unwrap());
-        // Partial new file removed; both old files (all content) preserved.
-        assert!(!root.join("A--x.md").exists(), "partial new file rolled back");
-        assert!(root.join("x.md").exists(), "old content preserved");
-        assert!(root.join("y.md").exists(), "old content preserved");
+    fn missing_journal_reads_none() {
+        assert!(MoveJournal::read(&jp()).unwrap().is_none());
     }
 
     #[test]
-    fn recover_is_noop_without_a_journal() {
-        let dir = scratch();
-        assert!(!recover(&dir.join("none.journal"), &dir).unwrap());
+    fn malformed_lines_are_skipped() {
+        let p = jp();
+        fs::write(&p, "garbage without a tab\n1 2 ok.md\tnew.md\n").unwrap();
+        let j = MoveJournal::read(&p).unwrap().unwrap();
+        assert_eq!(j.entries.len(), 1);
+        assert_eq!(j.entries[0].old_path, "ok.md");
     }
 }

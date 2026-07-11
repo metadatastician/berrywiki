@@ -87,12 +87,14 @@ model must be redesigned (opus) before this ships an autosave promise.
 descendant renames → rewrite inbound links → regenerate sidebar → single
 commit; never half-moved. | *Blocked-by* critique major "non-leaf move is a
 subtree cascade". This is inherently opus.
-| P2-stale-guard | opus | Compare-and-swap on save (mtime/hash precondition) +
-reload path, for the server-plus-terminal-git operating model. | *Blocked-by*
-critique major "no stale-write protection".
-| P2-app-state | opus | Move journal/lock/index/drafts to XDG cache keyed by
-repo identity — never inside the clone. | *Blocked-by* critique major
-".berrywiki/ inside the clone breaches usable-without-app".
+| P2-stale-guard | *DONE* | Store fingerprints (mtime+len) every file at load;
+update/delete/move refuse a `StaleWrite` if a file changed on disk since load.
+Critique major resolved (ADR-0008). | Blind spot: an edit preserving both mtime
+and length within one tick (documented) → content-hash upgrade if it bites.
+| P2-app-state | *DONE* | `berrywiki-appstate`: XDG-state home keyed by a stable
+repo hash for drafts/journal/lock/index; repo lock with dead-holder recovery.
+Nothing app-private in the clone. Critique major resolved (ADR-0008). | Wire the
+search index + draft dir through it when those land.
 |===
 
 == Phase 3 — In-app sync (commit / pull / push / conflict)
@@ -106,9 +108,11 @@ force-push *unrepresentable* (audit test), `LC_ALL=C`, porcelain-v2-z, min git
 2.30. | Inherently opus. The grep gate must not false-positive on the audit test
 (critique minor).
 | P3-sync | opus | fetch-before-push, non-fast-forward detection, atomic logical
-commits; recovery that *never* hard-resets a dirty tree. | *Blocked-by* critique
-major "journal rollback discards local work". Gate: one week of real private-wiki
-use without terminal git.
+commits; recovery that *never* hard-resets a dirty tree. | Recovery approach
+settled: roll-forward journal (ADR-0008), NOT `git reset` — the "journal
+rollback discards local work" major is resolved at the store layer. Remaining:
+the git commit/push layer itself. Gate: one week of real private-wiki use
+without terminal git.
 | P3-conflict | opus | Conflict classification (`git show :1:/:2:/:3:`), page
 conflicts surfaced (never auto-merged); sidebar conflicts auto-resolved by
 regeneration only. | Inherently opus. Metadata conflicts are surfaced, never
@@ -149,6 +153,18 @@ runtime-dep mechanism for `git`; a CI Guix lane. | *Blocked-by* critique major
 | P5-spark | opus | Differential SPARK proofs of the invariants ledger (metadata
 grammar → forest builder → move state machine); nothing labelled "proven"
 without a green `gnatprove` CI lane. | Post-MVP; inherently opus.
+|===
+
+== Deferred
+
+[cols="1,1,4", options="header"]
+|===
+| ID | Tier | Contract
+| X-lock | opus | Repository single-writer lock, needed when in-app mutation / a
+long-running server creates a concurrent-writer surface (Git rules). Implement
+with an OS advisory lock (`flock`, auto-released on process death) around the
+writing session — NOT a pid lock file (the first attempt was removed:
+never-acquired + racy stale-reclaim, per the ADR-0008 review).
 |===
 
 == Cross-cutting standing packages

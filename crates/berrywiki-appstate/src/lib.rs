@@ -16,10 +16,16 @@
 use std::path::{Path, PathBuf};
 
 pub mod journal;
-pub mod lock;
 
 pub use journal::MoveJournal;
-pub use lock::RepoLock;
+
+// NOTE: repository locking (single-writer enforcement) is intentionally NOT
+// implemented here yet. An earlier hand-rolled pid lock file had reclaim races
+// and, more importantly, nothing acquired it — false safety. There is no
+// concurrent-writer surface today (the server is read-only; the CLI is
+// single-shot). When in-app mutation / a long-running server lands, add locking
+// with an OS advisory lock (`flock`, auto-released on process death) rather than
+// a pid file. Tracked in docs/execution/work-packages.adoc.
 
 /// Stable 64-bit FNV-1a hash. Hand-rolled (not `DefaultHasher`, whose output is
 /// not guaranteed stable across Rust versions) so the app-state location does
@@ -97,11 +103,6 @@ impl AppState {
         self.root.join("operation.journal")
     }
 
-    /// Path of the repository lock file.
-    pub fn lock_path(&self) -> PathBuf {
-        self.root.join("repo.lock")
-    }
-
     /// Search-index directory (disposable derived data).
     pub fn index_dir(&self) -> PathBuf {
         self.root.join("index")
@@ -130,6 +131,6 @@ mod tests {
         assert!(!app.root().starts_with(&wiki), "app state must not be inside the clone");
         assert!(app.drafts_dir().starts_with(app.root()));
         assert!(app.journal_path().starts_with(app.root()));
-        assert!(app.lock_path().starts_with(app.root()));
+        assert!(app.index_dir().starts_with(app.root()));
     }
 }
