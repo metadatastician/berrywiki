@@ -7,6 +7,7 @@ name = "berrywiki-cli"
 version = "0.0.1"
 dependencies = [
  "berrywiki-core",
+ "berrywiki-github",
  "berrywiki-serve",
  "berrywiki-store",
 ]
@@ -18,6 +19,14 @@ version = "0.0.1"
 [[package]]
 name = "berrywiki-git-compat"
 version = "0.0.1"
+
+[[package]]
+name = "berrywiki-github"
+version = "0.0.1"
+dependencies = [
+ "berrywiki-git-compat",
+ "berrywiki-store",
+]
 
 [[package]]
 name = "berrywiki-render"

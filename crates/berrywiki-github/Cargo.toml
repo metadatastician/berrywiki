@@ -1,0 +1,20 @@
+[package]
+name = "berrywiki-github"
+description = "GitHub Wiki read adapter: clone/update a <repo>.wiki.git working copy and expose it through berrywiki-store's LocalFolderStore. Credential-gated; the live GitHub path is never faked as verified."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Shells out to the `git` binary (as the git-compat harness does). No network
+# crates: the whole point is to reuse LocalFolderStore over a maintained clone.
+[dependencies]
+berrywiki-store = { path = "../berrywiki-store" }
+
+[dev-dependencies]
+# Reuse the bare-remote + clones sandbox to test clone/update without GitHub.
+berrywiki-git-compat = { path = "../berrywiki-git-compat" }
+
+[lints.rust]
+unsafe_code = "forbid"

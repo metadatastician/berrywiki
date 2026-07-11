@@ -23,15 +23,17 @@ USAGE:
     berrywiki check <folder>
     berrywiki sidebar <folder> [--write]
     berrywiki serve <folder> [--addr 127.0.0.1:8080]
+    berrywiki serve --github <owner/repo> [--cache dir] [--addr host:port]
     berrywiki --help
 
 COMMANDS:
     check      Load the wiki and print its tree + diagnostics. Exit code 1 if
                any error-level diagnostic is found, else 0.
     sidebar    Print the generated _Sidebar.md, or regenerate it with --write.
-    serve      Start a zero-JavaScript, read-only web explorer for the wiki
-               (three-pane: tree | page | outline/backlinks). Blocks until
-               interrupted.
+    serve      Start a zero-JavaScript, read-only web explorer (three-pane:
+               tree | page | outline/backlinks). Serve a local folder, or mirror
+               a GitHub wiki with --github (token via BERRYWIKI_GITHUB_TOKEN for
+               private wikis). Blocks until interrupted.
 ";
 
 /// Run the CLI. Returns the process exit code. All output (including error
@@ -40,7 +42,7 @@ pub fn run(args: &[String], out: &mut dyn Write) -> io::Result<i32> {
     match args.first().map(String::as_str) {
         Some("check") => cmd_check(first_path(&args[1..]), out),
         Some("sidebar") => cmd_sidebar(first_path(&args[1..]), has_flag(&args[1..], "--write"), out),
-        Some("serve") => cmd_serve(first_path(&args[1..]), flag_value(&args[1..], "--addr"), out),
+        Some("serve") => cmd_serve(&args[1..], out),
         Some("--help") | Some("-h") | Some("help") | None => {
             write!(out, "{USAGE}")?;
             Ok(0)
@@ -155,12 +157,47 @@ fn cmd_sidebar(path: Option<&str>, write: bool, out: &mut dyn Write) -> io::Resu
     }
 }
 
-fn cmd_serve(path: Option<&str>, addr: Option<&str>, out: &mut dyn Write) -> io::Result<i32> {
-    let Some(path) = path else {
-        writeln!(out, "usage: berrywiki serve <folder> [--addr host:port]")?;
+fn cmd_serve(args: &[String], out: &mut dyn Write) -> io::Result<i32> {
+    let addr = flag_value(args, "--addr").unwrap_or("127.0.0.1:8080");
+
+    // `--github <owner/repo|url>` mirrors the wiki into a cache dir and serves
+    // it; otherwise a local folder is served directly.
+    if let Some(repo) = flag_value(args, "--github") {
+        let cache = match flag_value(args, "--cache") {
+            Some(c) => std::path::PathBuf::from(c),
+            None => default_mirror_dir(repo),
+        };
+        // Token from the environment only — never a CLI arg (avoids logs/history).
+        let token = std::env::var("BERRYWIKI_GITHUB_TOKEN").ok();
+        let wiki = match berrywiki_github::GitHubWiki::open(repo, &cache, token.as_deref()) {
+            Ok(w) => w,
+            Err(e) => {
+                writeln!(out, "error: {e}")?;
+                return Ok(2);
+            }
+        };
+        writeln!(
+            out,
+            "BerryWiki: mirrored {repo} into {}; serving at http://{addr}  (read-only; Ctrl-C to stop)",
+            cache.display()
+        )?;
+        out.flush()?;
+        return match berrywiki_serve::serve(wiki.store(), addr) {
+            Ok(()) => Ok(0),
+            Err(e) => {
+                writeln!(out, "server error: {e}")?;
+                Ok(2)
+            }
+        };
+    }
+
+    let Some(path) = first_path(args) else {
+        writeln!(
+            out,
+            "usage: berrywiki serve <folder> [--addr host:port]\n       berrywiki serve --github <owner/repo> [--cache dir] [--addr host:port]"
+        )?;
         return Ok(2);
     };
-    let addr = addr.unwrap_or("127.0.0.1:8080");
     let store = match LocalFolderStore::open(path) {
         Ok(s) => s,
         Err(e) => {
@@ -180,6 +217,20 @@ fn cmd_serve(path: Option<&str>, addr: Option<&str>, out: &mut dyn Write) -> io:
             Ok(2)
         }
     }
+}
+
+/// Default mirror cache directory, keyed by repo and kept OUTSIDE any wiki
+/// clone (per the "app state not inside the clone" rule). Uses XDG cache when
+/// available, else the system temp dir.
+fn default_mirror_dir(repo: &str) -> std::path::PathBuf {
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let slug: String = repo
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    base.join("berrywiki").join("mirrors").join(slug)
 }
 
 #[cfg(test)]
