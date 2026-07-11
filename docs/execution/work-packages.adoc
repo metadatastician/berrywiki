@@ -103,16 +103,22 @@ search index + draft dir through it when those land.
 |===
 | ID | Tier | Contract | Escalation triggers / Blocked-by
 
-| P3-gitengine | opus | Typed wrapper over the git CLI: closed command enum,
-force-push *unrepresentable* (audit test), `LC_ALL=C`, porcelain-v2-z, min git
-2.30. | Inherently opus. The grep gate must not false-positive on the audit test
-(critique minor).
-| P3-sync | opus | fetch-before-push, non-fast-forward detection, atomic logical
-commits; recovery that *never* hard-resets a dirty tree. | Recovery approach
-settled: roll-forward journal (ADR-0008), NOT `git reset` — the "journal
-rollback discards local work" major is resolved at the store layer. Remaining:
-the git commit/push layer itself. Gate: one week of real private-wiki use
-without terminal git.
+| P3-gitengine | *DONE* | `berrywiki-git`: `GitRepo` over a *closed* set of git
+invocations; history-overwriting / working-tree-discarding operations
+*unrepresentable* — proven structurally by a source-scan audit test (needles
+live in the test, not the scanned source, so no false-positive) AND
+behaviourally (a rejected push leaves the remote tip asserted-unchanged).
+`LC_ALL=C`, porcelain `-z`, hermetic config, `GIT_TERMINAL_PROMPT=0`, explicit
+identity, `with_env` credential seam. ADR-0009. 11 behavioural + 2 audit tests
+vs. `GitSandbox`. | Validated against a local bare remote only (ADR-0002);
+live-GitHub auth/rejection shape is P3-spike-write.
+| P3-sync | *PARTIAL* | fetch-before-push, non-fast-forward detection, atomic
+logical commits; recovery that *never* rewinds a dirty tree. | Git layer DONE
+(`fetch`/`divergence`/`fast_forward_to_upstream`/`push` in `berrywiki-git`);
+recovery settled as the roll-forward journal (ADR-0008), NOT a working-tree
+reset. Remaining: wire the engine to the store (commit-on-save, the
+fetch→integrate→push orchestration, conflict hand-off to P3-conflict) and the
+edit UI. Gate: one week of real private-wiki use without terminal git.
 | P3-conflict | opus | Conflict classification (`git show :1:/:2:/:3:`), page
 conflicts surfaced (never auto-merged); sidebar conflicts auto-resolved by
 regeneration only. | Inherently opus. Metadata conflicts are surfaced, never

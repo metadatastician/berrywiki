@@ -25,6 +25,13 @@ name = "berrywiki-draft"
 version = "0.0.1"
 
 [[package]]
+name = "berrywiki-git"
+version = "0.0.1"
+dependencies = [
+ "berrywiki-git-compat",
+]
+
+[[package]]
 name = "berrywiki-git-compat"
 version = "0.0.1"
 

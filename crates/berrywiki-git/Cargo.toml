@@ -1,0 +1,20 @@
+[package]
+name = "berrywiki-git"
+description = "Deliberately small, safe wrapper over the git CLI for BerryWiki's sync layer: commit / fetch / divergence / fast-forward / push. History-overwriting and working-tree-discarding operations are structurally unrepresentable (see tests/audit.rs and ADR-0009). Zero runtime dependencies."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Shells out to the `git` binary. The set of invocations is closed and audited
+# (tests/audit.rs): no code path can express force-push or a history/worktree
+# reset. Zero runtime dependencies — only the standard library.
+[dependencies]
+
+[dev-dependencies]
+# The evidence sandbox (bare remote + two clones) is our integration fixture.
+berrywiki-git-compat = { path = "../berrywiki-git-compat" }
+
+[lints.rust]
+unsafe_code = "forbid"

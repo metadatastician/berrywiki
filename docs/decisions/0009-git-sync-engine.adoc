@@ -1,0 +1,105 @@
+= ADR-0009: The git sync engine
+:sectnums:
+
+== Status
+
+*Accepted* (2026-07-11). Implements work packages P3-gitengine and the
+git-facing half of P3-sync. Builds on the roll-forward recovery model of
+ADR-0008 and the evidence gathered in `crates/berrywiki-git-compat`.
+
+== Context
+
+BerryWiki must let a user commit, integrate and publish wiki changes without
+dropping to a terminal, against a plain `.wiki.git` remote. The non-negotiable
+git rules (repo `CLAUDE.md`) are: never force-push, never discard local work,
+fetch before push, atomic logical commits. The Phase-0 harness already proved
+what real git does in the dangerous situations (non-fast-forward push, same-page
+conflict, modify/delete); this ADR records how the *production* engine is built
+so those rules cannot be violated even by a future careless edit.
+
+The remaining open choice from earlier phases — git CLI vs. a library
+(`gitoxide`/`libgit2`) — is settled here in favour of the *CLI*: the host has no
+Rust git library available under the 1.85 toolchain wall, the CLI's behaviour is
+exactly what the compatibility harness measured, and shelling out keeps the
+dependency surface at zero. The cost is text parsing, which we contain with
+`LC_ALL=C` and porcelain/`-z` output.
+
+== Decision
+
+A new crate, `berrywiki-git`, exposes one type, `GitRepo`, with a *closed* set
+of operations:
+
+* `open` — verify the path is a working tree (`rev-parse --is-inside-work-tree`).
+* `head`, `status`, `is_clean`, `divergence` — read-only inspection.
+* `commit_all(message)` — stage everything and commit, returning `None` when
+  there is nothing to commit (never an empty commit).
+* `fetch` — update remote-tracking refs; the working tree is untouched.
+* `fast_forward_to_upstream` — advance to the fetched upstream *fast-forward
+  only*; a diverged history yields `NeedsManualMerge` with local untouched.
+* `push` — publish local commits; a moved-on remote yields
+  `RejectedNonFastForward` with the remote untouched.
+
+=== Destructive operations are unrepresentable
+
+Every git invocation is a fixed argument list built from string literals in
+`src/lib.rs`. No method, and no reachable code path, appends a flag or
+subcommand that overwrites remote history or discards uncommitted work. The
+guarantee is made *structural* two ways:
+
+. *Source audit* (`tests/audit.rs`): the engine source is embedded with
+  `include_str!` and scanned; the build fails if it ever contains a
+  history-overwriting or working-tree-discarding git token. The forbidden
+  tokens live only in the test, which the scan does not read, so they cannot
+  trip their own check.
+. *Behavioural proof* (`tests/engine.rs`): after the remote moves on, a push is
+  rejected *and the remote tip is asserted unchanged*, while the local commit
+  survives. This is what "force-push is unrepresentable" looks like from the
+  outside — not just that we avoided the flag, but that history was not
+  rewritten.
+
+=== Hermetic execution
+
+Each invocation runs with `LC_ALL=C`; user and system git config neutralised
+(`GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM=/dev/null`) so no ambient alias, hook or
+signing setting can change behaviour; `GIT_TERMINAL_PROMPT=0` so a missing
+credential fails fast rather than hanging; `GIT_OPTIONAL_LOCKS=0`; and an
+explicit author/committer identity so a commit never depends on ambient
+`user.*`. Credentials for a real remote are injected by the caller through
+`with_env` (e.g. a `GIT_ASKPASS` helper and a token), which survives config
+neutralisation because it is environment, not config — this is the seam
+`berrywiki-github` will use for the live write spike.
+
+== Alternatives considered
+
+* *A git library (`gitoxide`/`libgit2`)* — no CLI parsing, richer types; rejected
+  for now: unavailable under the local 1.85 toolchain, larger dependency and
+  audit surface, and its behaviour would still need validating against the CLI
+  evidence. Revisit if parsing fragility bites.
+* *A runtime allow-list check inside one `run()` chokepoint* — reject any
+  argument outside a permitted set at run time. Rejected as the *primary*
+  mechanism: it would require the forbidden tokens to appear in the source (to
+  name what to reject), defeating the source audit. The closed-literal design
+  plus the audit is stronger — the tokens are simply absent.
+* *`push --force-with-lease` for a "safe" overwrite* — still replaces the remote
+  tip; out of scope for a wiki whose rule is never to overwrite. A rejected push
+  is surfaced to the user, who integrates first.
+
+== Consequences
+
+* The engine cannot lose local work or overwrite the remote; this is enforced by
+  tests, not documentation.
+* Conflict *resolution* is deliberately not here — `push`/`fast_forward` only
+  ever report a conflict/divergence; classifying and surfacing it is P3-conflict.
+* Behaviour is validated only against a local bare remote (per ADR-0002). The
+  live-GitHub write path (auth, concurrent rejection shape) remains the
+  credential-gated P3-spike-write.
+* Text parsing is locale- and porcelain-pinned; a future git that changes an
+  un-pinned human string (e.g. the "Everything up-to-date" push message) would
+  need a parser touch-up, caught by these tests.
+
+== Revisit triggers
+
+* Parsing a human-readable git string proves fragile across git versions → move
+  that path to a porcelain/plumbing form or adopt a library.
+* The live write spike reveals an auth or rejection shape the parser misreads →
+  extend `PushOutcome` and the stderr classification.
