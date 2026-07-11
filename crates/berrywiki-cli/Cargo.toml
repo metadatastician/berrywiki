@@ -12,6 +12,7 @@ repository.workspace = true
 [dependencies]
 berrywiki-core = { path = "../berrywiki-core" }
 berrywiki-store = { path = "../berrywiki-store" }
+berrywiki-serve = { path = "../berrywiki-serve" }
 
 [[bin]]
 name = "berrywiki"

@@ -5,6 +5,7 @@ members = [
     "crates/berrywiki-core",
     "crates/berrywiki-git-compat",
     "crates/berrywiki-render",
+    "crates/berrywiki-serve",
     "crates/berrywiki-store",
 ]
 

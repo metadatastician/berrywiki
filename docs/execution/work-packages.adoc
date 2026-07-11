@@ -53,12 +53,14 @@ failure it cannot mechanically fix, or contact with git/sync/data safety
 tests. comrak default features off (rustc-1.85 compat). Divergence recorded in
 the compatibility report. | Residual: GitHub parity unverified until the live
 spike (→ opus); syntax highlighting deferred behind a feature.
-| P1-serve | sonnet | `berrywiki serve`: axum + maud three-pane SSR over a
-`WikiStore`; `/search` `/diagnostics`; zero `<script>`. | Escalate if any
-interactive requirement seems to need client script (→ ADR-0007 question, opus).
-| P1-noscript-gate | haiku | CI assertion that responses ship no script (element
-*and* inline `on*=` / `javascript:`). | Escalate: the correct check is not a
-substring scan (critique minor) — needs sonnet to define it.
+| P1-serve | *DONE* | `berrywiki serve`: zero-dep `std::net` three-pane SSR
+(tree | rendered page | outline/backlinks) over a `WikiStore`; `/`, `/page/<id>`,
+`/search`, `/diagnostics`; testable pure `route()`; 9 tests + curl-verified.
+std::net not axum (ADR-0005 amendment). | Follow-ups: outline anchors don't jump
+yet; no `_Footer`; single-threaded (fine for single user).
+| P1-noscript-gate | *PARTIAL* | Every `route()` response asserted script-free
+in tests (element + inline `on*=` + `javascript:`). | Remaining: promote to a
+CI gate; the render layer already blocks raw HTML at the source.
 | P1-ci | sonnet | GitHub Actions: fmt + clippy + test (fmt/clippy absent
 locally), two-git-version matrix. Estate `standards` conventions. | Escalate if
 `.github/workflows/**` needs a `workflow`-scoped token the runner lacks.

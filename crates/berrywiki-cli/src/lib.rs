@@ -22,12 +22,16 @@ berrywiki — inspect and maintain a wiki folder
 USAGE:
     berrywiki check <folder>
     berrywiki sidebar <folder> [--write]
+    berrywiki serve <folder> [--addr 127.0.0.1:8080]
     berrywiki --help
 
 COMMANDS:
     check      Load the wiki and print its tree + diagnostics. Exit code 1 if
                any error-level diagnostic is found, else 0.
     sidebar    Print the generated _Sidebar.md, or regenerate it with --write.
+    serve      Start a zero-JavaScript, read-only web explorer for the wiki
+               (three-pane: tree | page | outline/backlinks). Blocks until
+               interrupted.
 ";
 
 /// Run the CLI. Returns the process exit code. All output (including error
@@ -36,6 +40,7 @@ pub fn run(args: &[String], out: &mut dyn Write) -> io::Result<i32> {
     match args.first().map(String::as_str) {
         Some("check") => cmd_check(first_path(&args[1..]), out),
         Some("sidebar") => cmd_sidebar(first_path(&args[1..]), has_flag(&args[1..], "--write"), out),
+        Some("serve") => cmd_serve(first_path(&args[1..]), flag_value(&args[1..], "--addr"), out),
         Some("--help") | Some("-h") | Some("help") | None => {
             write!(out, "{USAGE}")?;
             Ok(0)
@@ -55,6 +60,14 @@ fn first_path(args: &[String]) -> Option<&str> {
 
 fn has_flag(args: &[String], flag: &str) -> bool {
     args.iter().any(|a| a == flag)
+}
+
+/// Value following `--flag` (e.g. `--addr 127.0.0.1:9000`), if present.
+fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1))
+        .map(String::as_str)
 }
 
 fn cmd_check(path: Option<&str>, out: &mut dyn Write) -> io::Result<i32> {
@@ -139,6 +152,33 @@ fn cmd_sidebar(path: Option<&str>, write: bool, out: &mut dyn Write) -> io::Resu
         let sidebar = generate_sidebar(store.graph(), &SidebarOptions::default());
         write!(out, "{sidebar}")?;
         Ok(0)
+    }
+}
+
+fn cmd_serve(path: Option<&str>, addr: Option<&str>, out: &mut dyn Write) -> io::Result<i32> {
+    let Some(path) = path else {
+        writeln!(out, "usage: berrywiki serve <folder> [--addr host:port]")?;
+        return Ok(2);
+    };
+    let addr = addr.unwrap_or("127.0.0.1:8080");
+    let store = match LocalFolderStore::open(path) {
+        Ok(s) => s,
+        Err(e) => {
+            writeln!(out, "error: {e}")?;
+            return Ok(2);
+        }
+    };
+    writeln!(
+        out,
+        "BerryWiki: serving {path} at http://{addr}  (read-only; Ctrl-C to stop)"
+    )?;
+    out.flush()?;
+    match berrywiki_serve::serve(&store, addr) {
+        Ok(()) => Ok(0),
+        Err(e) => {
+            writeln!(out, "server error: {e}")?;
+            Ok(2)
+        }
     }
 }
 

@@ -1,0 +1,21 @@
+[package]
+name = "berrywiki-serve"
+description = "Zero-JavaScript server-side-rendered read-only explorer for BerryWiki (ADR-0005): a testable route() core plus a small std::net blocking server. No async runtime, no web framework — deliberately buildable on the host's rustc 1.85."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# No third-party dependencies: the HTTP server is hand-rolled on std::net for a
+# single-user localhost tool. This keeps it buildable on the offline rustc-1.85
+# host and avoids betting the async (axum/tokio) tree on that toolchain. The
+# HTTP surface is the stable seam; the library can be swapped later without
+# touching engine/store/render (ADR-0005 stack amendment).
+[dependencies]
+berrywiki-core = { path = "../berrywiki-core" }
+berrywiki-store = { path = "../berrywiki-store" }
+berrywiki-render = { path = "../berrywiki-render" }
+
+[lints.rust]
+unsafe_code = "forbid"

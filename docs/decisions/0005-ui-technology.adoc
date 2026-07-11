@@ -69,6 +69,22 @@ answered*: the SSR MVP ships no JS of any provenance, so nothing depends on
 the ruling. A formal user ruling (to be recorded as ADR-0007) is required
 before the post-MVP enhancement layer starts.
 
+[NOTE]
+.Amendment (2026-07-11): server library
+====
+The Phase-1 explorer (`berrywiki-serve`) is implemented on **`std::net` with a
+hand-rolled blocking server and zero third-party dependencies**, not axum +
+tokio as the stack bullet suggested. Reason: the host's rustc 1.85 already
+forced trimming comrak's features (its `darling 0.23` transitive dep needs
+rustc 1.88), so betting the whole async axum/tokio tree on 1.85 was an
+avoidable risk for a *single-user, read-only, localhost* tool. std::net is
+strictly safer here and better serves the ADR's own "small dependency tree"
+goal. This does **not** change the decision (zero-JS SSR) or the seam: routing
+is a pure `route(path, query) -> Response` function behind an HTTP surface, so
+axum/tokio can replace the transport later — if async, streaming or middleware
+justify it — without touching engine, store, render or templates.
+====
+
 == Alternatives considered
 
 === (a) Rust TUI (ratatui three-pane app)

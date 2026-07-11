@@ -7,6 +7,7 @@ name = "berrywiki-cli"
 version = "0.0.1"
 dependencies = [
  "berrywiki-core",
+ "berrywiki-serve",
  "berrywiki-store",
 ]
 
@@ -23,6 +24,15 @@ name = "berrywiki-render"
 version = "0.0.1"
 dependencies = [
  "comrak",
+]
+
+[[package]]
+name = "berrywiki-serve"
+version = "0.0.1"
+dependencies = [
+ "berrywiki-core",
+ "berrywiki-render",
+ "berrywiki-store",
 ]
 
 [[package]]
