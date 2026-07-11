@@ -1,0 +1,14 @@
+[package]
+name = "berrywiki-appstate"
+description = "App-private state that must live OUTSIDE the wiki clone (ADR-0008): canonical XDG-state paths keyed by repo identity, a repository lock, and a roll-forward operation journal for crash recovery that never discards unrelated local work."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Zero dependencies: stable FNV hash for the repo key, std filesystem only.
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"

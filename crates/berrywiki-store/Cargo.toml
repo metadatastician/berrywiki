@@ -11,6 +11,7 @@ repository.workspace = true
 # GitHubWikiStore will live behind the same trait and carry its own deps.
 [dependencies]
 berrywiki-core = { path = "../berrywiki-core" }
+berrywiki-appstate = { path = "../berrywiki-appstate" }
 
 [lints.rust]
 unsafe_code = "forbid"

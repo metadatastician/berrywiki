@@ -8,11 +8,27 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
+use berrywiki_appstate::{journal, AppState, MoveJournal};
 use berrywiki_core::{
     generate_sidebar, serialize_source, Diagnostic, PageGraph, PageMetadata, SidebarOptions,
     WikiPage,
 };
+
+/// (mtime-nanos, length) fingerprint used to detect external modification.
+type Fingerprint = (u128, u64);
+
+fn fingerprint_of(abs: &Path) -> Option<Fingerprint> {
+    let m = fs::metadata(abs).ok()?;
+    let mtime = m
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    Some((mtime, m.len()))
+}
 
 use crate::error::StoreError;
 use crate::paths::{page_filename, validate_component, with_id_suffix};
@@ -29,10 +45,18 @@ pub struct LocalFolderStore {
     /// Non-fatal problems encountered while loading (e.g. an unreadable or
     /// non-UTF-8 file that was skipped). Surfaced to the UI, never fatal.
     load_diagnostics: Vec<Diagnostic>,
+    /// Out-of-clone app state (journal, lock, drafts). `None` if it could not
+    /// be resolved; the store still works, just without journalled recovery.
+    appstate: Option<AppState>,
+    /// Per-page-path fingerprint captured at the last load, for stale-write
+    /// detection (external editor / concurrent terminal git).
+    fingerprints: HashMap<String, Fingerprint>,
 }
 
 impl LocalFolderStore {
-    /// Open a wiki folder and build the initial graph.
+    /// Open a wiki folder and build the initial graph. Recovers any operation
+    /// interrupted by a crash before loading (roll-forward/targeted-rollback,
+    /// never a blanket working-tree reset).
     pub fn open(root: impl Into<PathBuf>) -> Result<Self> {
         let root: PathBuf = root.into();
         let root = root
@@ -41,11 +65,18 @@ impl LocalFolderStore {
         if !root.is_dir() {
             return Err(StoreError::RootNotFound(root.display().to_string()));
         }
+        let appstate = AppState::for_wiki(&root).ok();
+        if let Some(app) = &appstate {
+            // Complete or roll back an operation interrupted by a crash.
+            let _ = journal::recover(&app.journal_path(), &root);
+        }
         let mut store = LocalFolderStore {
             root,
             graph: PageGraph::build(Vec::new()),
             sidebar_options: SidebarOptions::default(),
             load_diagnostics: Vec::new(),
+            appstate,
+            fingerprints: HashMap::new(),
         };
         store.reload()?;
         Ok(store)
@@ -56,9 +87,28 @@ impl LocalFolderStore {
         &self.root
     }
 
+    /// Out-of-clone app state (drafts dir, lock path, …), if resolved.
+    pub fn appstate(&self) -> Option<&AppState> {
+        self.appstate.as_ref()
+    }
+
     /// Non-fatal diagnostics from the last load (skipped/unreadable files).
     pub fn load_diagnostics(&self) -> &[Diagnostic] {
         &self.load_diagnostics
+    }
+
+    /// Refuse to write/delete a file that changed on disk since it was loaded.
+    /// A path with no recorded fingerprint (e.g. a brand-new page) is allowed.
+    fn check_not_stale(&self, relpath: &str) -> Result<()> {
+        if let Some(stored) = self.fingerprints.get(relpath) {
+            let current = fingerprint_of(&self.root.join(relpath));
+            if current.as_ref() != Some(stored) {
+                return Err(StoreError::StaleWrite {
+                    path: relpath.to_string(),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Validate a prospective parent: it must exist and be *managed* (have
@@ -354,9 +404,15 @@ impl WikiStore for LocalFolderStore {
         names.sort();
 
         let mut pages = Vec::with_capacity(names.len());
+        let mut fingerprints = HashMap::with_capacity(names.len());
         for name in names {
             match fs::read_to_string(self.root.join(&name)) {
-                Ok(source) => pages.push(WikiPage::parse(name, source)),
+                Ok(source) => {
+                    if let Some(fp) = fingerprint_of(&self.root.join(&name)) {
+                        fingerprints.insert(name.clone(), fp);
+                    }
+                    pages.push(WikiPage::parse(name, source));
+                }
                 // A single unreadable/non-UTF-8 file must not make the whole
                 // wiki unopenable — skip it with a diagnostic (non-negotiable
                 // "malformed input degrades, never crashes").
@@ -371,6 +427,7 @@ impl WikiStore for LocalFolderStore {
         }
         self.graph = PageGraph::build(pages);
         self.load_diagnostics = load_diagnostics;
+        self.fingerprints = fingerprints;
         Ok(())
     }
 
@@ -445,6 +502,7 @@ impl WikiStore for LocalFolderStore {
         self.ensure_unambiguous(id)?;
         let page = self.page(id)?;
         let path = page.path.clone();
+        self.check_not_stale(&path)?;
         let meta = page.metadata.clone();
         let source = serialize_source(meta.as_ref(), new_body);
         self.safe_write(&path, source.as_bytes())?;
@@ -582,19 +640,59 @@ impl WikiStore for LocalFolderStore {
             }
         }
 
+        // Old files to delete: affected paths that changed and are not reused
+        // as some page's new path (so a just-written file is never removed).
+        let new_paths: HashSet<&str> = new_path_of.values().map(String::as_str).collect();
+        let deletes: Vec<String> = affected
+            .iter()
+            .filter(|id| old_path_of[*id] != new_path_of[*id])
+            .map(|id| old_path_of[id].clone())
+            .filter(|old| !new_paths.contains(old.as_str()))
+            .collect();
+
+        // Fail fast if any file we would overwrite or delete changed on disk
+        // since load (external editor / concurrent terminal git). Done BEFORE
+        // any mutation, so a stale file aborts with nothing written.
+        for (path, _) in &writes {
+            self.check_not_stale(path)?;
+        }
+        for old in &deletes {
+            self.check_not_stale(old)?;
+        }
+
+        // Journal the rename set (new + old paths) BEFORE any write, so a crash
+        // is recoverable: content is in the new files; recovery finishes the
+        // deletes (or rolls back partial writes) — never a working-tree reset.
+        let journal_path = self.appstate.as_ref().map(|a| a.journal_path());
+        let journaled: Vec<(String, String)> = affected
+            .iter()
+            .filter(|id| old_path_of[*id] != new_path_of[*id])
+            .map(|id| (old_path_of[id].clone(), new_path_of[id].clone()))
+            .collect();
+        if let Some(jp) = &journal_path {
+            if !journaled.is_empty() {
+                MoveJournal {
+                    new_paths: journaled.iter().map(|(_, n)| n.clone()).collect(),
+                    old_paths: journaled.iter().map(|(o, _)| o.clone()).collect(),
+                }
+                .write(jp)
+                .map_err(|e| StoreError::io("writing the move journal", e))?;
+            }
+        }
+
+        // Apply: all writes (new content) first, then deletes.
         for (path, bytes) in &writes {
             self.safe_write(path, bytes)?;
         }
-        // Delete old affected files whose path changed and is not reused as a
-        // new path (so a just-written file is never removed).
-        let new_paths: HashSet<&str> = new_path_of.values().map(String::as_str).collect();
-        for id in &affected {
-            let old = &old_path_of[id];
-            if old != &new_path_of[id] && !new_paths.contains(old.as_str()) {
-                let abs = self.resolve(old)?;
-                fs::remove_file(&abs)
-                    .map_err(|e| StoreError::io(format!("removing old file {old:?}"), e))?;
-            }
+        for old in &deletes {
+            let abs = self.resolve(old)?;
+            fs::remove_file(&abs)
+                .map_err(|e| StoreError::io(format!("removing old file {old:?}"), e))?;
+        }
+
+        // Operation complete — retire the journal.
+        if let Some(jp) = &journal_path {
+            let _ = MoveJournal::clear(jp);
         }
 
         self.reload()?;
@@ -613,6 +711,7 @@ impl WikiStore for LocalFolderStore {
                 child_count: children.len(),
             });
         }
+        self.check_not_stale(&path)?;
         let abs = self.resolve(&path)?;
         fs::remove_file(&abs)
             .map_err(|e| StoreError::io(format!("deleting page file {path:?}"), e))?;

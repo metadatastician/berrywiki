@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "berrywiki-appstate"
+version = "0.0.1"
+
+[[package]]
 name = "berrywiki-cli"
 version = "0.0.1"
 dependencies = [
@@ -52,6 +56,7 @@ dependencies = [
 name = "berrywiki-store"
 version = "0.0.1"
 dependencies = [
+ "berrywiki-appstate",
  "berrywiki-core",
 ]
 

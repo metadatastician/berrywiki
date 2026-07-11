@@ -612,6 +612,48 @@ fn reload_is_deterministic() {
 }
 
 #[test]
+fn external_modification_is_refused_as_stale_write() {
+    // Guards the server + concurrent-terminal-git scenario: a file edited on
+    // disk after we loaded it must not be silently clobbered.
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    fs::write(
+        dir.join("Teaching.md"),
+        "# Teaching\n\nedited by another process — clearly a different length\n",
+    )
+    .unwrap();
+
+    match store.update_page(TEACHING_ID, "# Teaching\n\nour edit\n") {
+        Err(StoreError::StaleWrite { .. }) => {}
+        other => panic!("expected StaleWrite, got {other:?}"),
+    }
+    // The external change is intact; our write was refused.
+    assert!(fs::read_to_string(dir.join("Teaching.md")).unwrap().contains("another process"));
+}
+
+#[test]
+fn crashed_move_is_recovered_on_open() {
+    // Simulate a crash AFTER a move wrote its new file but BEFORE it deleted the
+    // old one. Opening the store rolls the operation forward (never a
+    // working-tree reset) and cleans up, without losing content.
+    let dir = scratch_wiki();
+    let journal_path = LocalFolderStore::open(&dir)
+        .unwrap()
+        .appstate()
+        .expect("app state resolved")
+        .journal_path();
+
+    fs::copy(dir.join("Home.md"), dir.join("Home-moved.md")).unwrap();
+    fs::write(&journal_path, "N Home-moved.md\nO Home.md\n").unwrap();
+
+    let store = LocalFolderStore::open(&dir).unwrap();
+    assert!(!dir.join("Home.md").exists(), "stale old file cleaned up on open");
+    assert!(dir.join("Home-moved.md").exists(), "moved content preserved");
+    assert!(!journal_path.exists(), "journal cleared after recovery");
+    assert_eq!(store.read_page(HOME_ID).unwrap().path, "Home-moved.md");
+}
+
+#[test]
 fn reload_picks_up_external_edits() {
     let dir = scratch_wiki();
     let mut store = LocalFolderStore::open(&dir).unwrap();

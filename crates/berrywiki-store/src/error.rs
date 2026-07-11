@@ -36,6 +36,9 @@ pub enum StoreError {
     InvalidName { name: String, reason: String },
     /// An attachment with this filename already exists for the page.
     DuplicateAttachment { page: String, filename: String },
+    /// A file changed on disk since it was loaded (external editor, concurrent
+    /// terminal git). The write was refused to avoid clobbering that change.
+    StaleWrite { path: String },
     /// Underlying I/O failure. Local work on other pages is unaffected.
     Io { context: String, source: io::Error },
 }
@@ -106,6 +109,12 @@ impl fmt::Display for StoreError {
                 f,
                 "Attachment {filename:?} already exists for page {page:?}. \
                  Nothing was overwritten; rename the file and retry."
+            ),
+            StoreError::StaleWrite { path } => write!(
+                f,
+                "File {path:?} changed on disk since it was loaded, so the write \
+                 was refused to avoid overwriting that change. Nothing was \
+                 changed; reload and reapply your edit."
             ),
             StoreError::Io { context, source } => write!(
                 f,
