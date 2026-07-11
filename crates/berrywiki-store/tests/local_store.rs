@@ -185,6 +185,76 @@ fn move_refuses_cycles() {
 }
 
 #[test]
+fn move_nonleaf_cascades_descendant_filenames() {
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    // Teaching has Course A -> Assessment Plan beneath it. Move it under Research.
+    store
+        .move_page(MovePageInput {
+            id: TEACHING_ID.to_string(),
+            new_parent_id: Some(RESEARCH_ID.to_string()),
+            new_position: 5,
+        })
+        .unwrap();
+
+    // The whole subtree's filenames are recomputed…
+    assert!(dir.join("Research--Teaching.md").exists());
+    assert!(dir.join("Research--Teaching--Course-A.md").exists());
+    assert!(dir.join("Research--Teaching--Course-A--Assessment-Plan.md").exists());
+    // …and the old ones are gone (no orphans).
+    assert!(!dir.join("Teaching.md").exists());
+    assert!(!dir.join("Teaching--Course-A.md").exists());
+    assert!(!dir.join("Teaching--Course-A--Assessment-Plan.md").exists());
+
+    // Only the moved page is re-parented; descendants keep their (id-based)
+    // parents — just their filenames changed.
+    assert_eq!(store.read_page(TEACHING_ID).unwrap().parent_id(), Some(RESEARCH_ID));
+    assert_eq!(store.read_page(COURSE_A_ID).unwrap().parent_id(), Some(TEACHING_ID));
+    assert_eq!(store.read_page(PLAN_ID).unwrap().parent_id(), Some(COURSE_A_ID));
+    assert_eq!(
+        store.read_page(PLAN_ID).unwrap().path,
+        "Research--Teaching--Course-A--Assessment-Plan.md"
+    );
+    // Content survived the cascade.
+    assert!(store.read_page(PLAN_ID).unwrap().body.contains("## Weighting"));
+}
+
+#[test]
+fn move_rewrites_inbound_links_so_they_still_resolve() {
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    // Baseline: Home links to the Assessment Plan by its (old) stem + heading,
+    // so the plan has a backlink from Home.
+    assert!(store.graph().backlinks_of(PLAN_ID).iter().any(|b| b.from_id == HOME_ID));
+
+    store
+        .move_page(MovePageInput {
+            id: TEACHING_ID.to_string(),
+            new_parent_id: Some(RESEARCH_ID.to_string()),
+            new_position: 5,
+        })
+        .unwrap();
+
+    // Without link rewriting this backlink would break; with it, the inbound
+    // link was updated to the new stem and still resolves.
+    assert!(
+        store.graph().backlinks_of(PLAN_ID).iter().any(|b| b.from_id == HOME_ID),
+        "Home's link to the moved page was rewritten and still resolves"
+    );
+    let home_src = &store.read_page(HOME_ID).unwrap().source;
+    assert!(home_src.contains("Research--Teaching--Course-A--Assessment-Plan"));
+    // No unexpected broken links introduced (the fixture's one deliberate
+    // broken link to "Nonexistent Page" remains the only one).
+    let broken = store
+        .graph()
+        .diagnostics()
+        .iter()
+        .filter(|d| d.code == "link.broken")
+        .count();
+    assert_eq!(broken, 1, "only the pre-existing broken link remains");
+}
+
+#[test]
 fn move_refuses_unmanaged_pages() {
     let dir = scratch_wiki();
     let mut store = LocalFolderStore::open(&dir).unwrap();

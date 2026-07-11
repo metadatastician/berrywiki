@@ -5,6 +5,7 @@
 //! clone of a GitHub `.wiki.git` — without git or network access. Git-aware
 //! adapters compose on top of it later.
 
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -293,6 +294,22 @@ impl LocalFolderStore {
         Ok(suffixed)
     }
 
+    /// The moved page's id plus all descendant ids (pre-order), from the
+    /// current graph. Subtree membership is by parent metadata, so a move does
+    /// not change *which* pages are in the subtree — only their filenames.
+    fn subtree_ids(&self, root_id: &str) -> Vec<String> {
+        let mut out = vec![root_id.to_string()];
+        let mut i = 0;
+        while i < out.len() {
+            let id = out[i].clone();
+            for child in self.graph.children_of(&id) {
+                out.push(child.id.clone());
+            }
+            i += 1;
+        }
+        out
+    }
+
     /// Regenerate the sidebar, writing only when the content changed.
     fn write_sidebar_if_changed(&mut self) -> Result<bool> {
         let content = generate_sidebar(&self.graph, &self.sidebar_options);
@@ -437,15 +454,18 @@ impl WikiStore for LocalFolderStore {
         Ok(())
     }
 
+    /// Re-parent/reposition a page. Because filenames encode the ancestry path
+    /// (ADR-0001), moving a **non-leaf** page renames every descendant too;
+    /// this is a single transactional operation that recomputes the whole
+    /// affected subtree's filenames, rewrites inbound links across the wiki,
+    /// writes-then-deletes (a crash leaves both files, never neither), and
+    /// regenerates the sidebar.
     fn move_page(&mut self, input: MovePageInput) -> Result<()> {
         self.ensure_unambiguous(&input.id)?;
         let page = self.page(&input.id)?;
-        let Some(meta) = page.metadata.clone() else {
+        if page.metadata.is_none() {
             return Err(StoreError::UnmanagedPage(input.id));
-        };
-        let old_path = page.path.clone();
-        let title = page.title.clone();
-        let body = page.body.clone();
+        }
 
         self.check_parent(input.new_parent_id.as_deref())?;
         if let Some(parent) = &input.new_parent_id {
@@ -457,30 +477,114 @@ impl WikiStore for LocalFolderStore {
             }
         }
 
-        let mut new_meta = meta;
-        new_meta.parent_id = input.new_parent_id.clone();
-        new_meta.position = input.new_position;
-
-        let ancestors = self.ancestor_titles(input.new_parent_id.as_deref())?;
-        // Exclude the page's own current file from the collision check, so a
-        // pure reposition (or reparent-and-return) of a suffix-named page is
-        // not rejected as colliding with itself.
-        let new_path = if page_filename(&ancestors, &title)? == old_path {
-            old_path.clone()
-        } else {
-            self.unique_filename(&ancestors, &title, &input.id, Some(&old_path))?
-        };
-
-        let source = serialize_source(Some(&new_meta), &body);
-
-        // Write-then-delete: a crash in between leaves both files (duplicate
-        // id diagnostic, recoverable), never neither.
-        self.safe_write(&new_path, source.as_bytes())?;
-        if new_path != old_path {
-            let old_abs = self.resolve(&old_path)?;
-            fs::remove_file(&old_abs)
-                .map_err(|e| StoreError::io(format!("removing old file {old_path:?}"), e))?;
+        // Intended structure = current parents, with the moved page re-parented.
+        let mut parent_of: HashMap<String, Option<String>> = HashMap::new();
+        let mut title_of: HashMap<String, String> = HashMap::new();
+        for p in self.graph.pages() {
+            parent_of.insert(p.id.clone(), p.parent_id().map(|s| s.to_string()));
+            title_of.insert(p.id.clone(), p.title.clone());
         }
+        parent_of.insert(input.id.clone(), input.new_parent_id.clone());
+
+        // Affected = the moved page + all descendants (subtree membership is
+        // unchanged by the move; only filenames of the subtree change, and only
+        // the moved page's parent metadata changes).
+        let affected = self.subtree_ids(&input.id);
+        let affected_set: HashSet<&str> = affected.iter().map(String::as_str).collect();
+
+        let mut old_path_of: HashMap<String, String> = HashMap::new();
+        for id in &affected {
+            old_path_of.insert(id.clone(), self.graph.get(id).unwrap().path.clone());
+        }
+
+        // Names already on disk that are NOT the affected pages' own files, so
+        // recomputed names avoid colliding with unrelated pages (case-insensitive).
+        let mut taken_ci: HashSet<String> = HashSet::new();
+        if let Ok(entries) = fs::read_dir(&self.root) {
+            for e in entries.flatten() {
+                if let Some(name) = e.file_name().to_str() {
+                    if !old_path_of.values().any(|p| p == name) {
+                        taken_ci.insert(name.to_lowercase());
+                    }
+                }
+            }
+        }
+
+        // Assign new filenames deterministically (sorted by id).
+        let mut ordered = affected.clone();
+        ordered.sort();
+        let mut new_path_of: HashMap<String, String> = HashMap::new();
+        for id in &ordered {
+            let ancestors = intended_ancestor_titles(id, &parent_of, &title_of);
+            let base = page_filename(&ancestors, &title_of[id])?;
+            let name = if taken_ci.contains(&base.to_lowercase()) {
+                let suffixed = with_id_suffix(&base, id);
+                validate_component(&suffixed)?;
+                suffixed
+            } else {
+                base
+            };
+            if taken_ci.contains(&name.to_lowercase()) {
+                return Err(StoreError::InvalidName {
+                    name,
+                    reason: "filename collision during subtree move".to_string(),
+                });
+            }
+            taken_ci.insert(name.to_lowercase());
+            new_path_of.insert(id.clone(), name);
+        }
+
+        // old stem -> new stem for every page whose filename actually changes.
+        let renames: Vec<(String, String)> = affected
+            .iter()
+            .filter(|id| old_path_of[*id] != new_path_of[*id])
+            .map(|id| (stem(&old_path_of[id]), stem(&new_path_of[id])))
+            .collect();
+
+        // Stage every file write, then apply (new files first).
+        let mut writes: Vec<(String, Vec<u8>)> = Vec::new();
+
+        for id in &affected {
+            let page = self.graph.get(id).unwrap();
+            let meta = if id == &input.id {
+                let mut m = page.metadata.clone().unwrap();
+                m.parent_id = input.new_parent_id.clone();
+                m.position = input.new_position;
+                m
+            } else {
+                page.metadata.clone().unwrap()
+            };
+            let body = rewrite_links(&page.body, &renames);
+            let source = serialize_source(Some(&meta), &body);
+            writes.push((new_path_of[id].clone(), source.into_bytes()));
+        }
+
+        // Unaffected pages that link to a renamed page: rewrite in place.
+        for page in self.graph.pages() {
+            if affected_set.contains(page.id.as_str()) {
+                continue;
+            }
+            let rewritten = rewrite_links(&page.source, &renames);
+            if rewritten != page.source {
+                writes.push((page.path.clone(), rewritten.into_bytes()));
+            }
+        }
+
+        for (path, bytes) in &writes {
+            self.safe_write(path, bytes)?;
+        }
+        // Delete old affected files whose path changed and is not reused as a
+        // new path (so a just-written file is never removed).
+        let new_paths: HashSet<&str> = new_path_of.values().map(String::as_str).collect();
+        for id in &affected {
+            let old = &old_path_of[id];
+            if old != &new_path_of[id] && !new_paths.contains(old.as_str()) {
+                let abs = self.resolve(old)?;
+                fs::remove_file(&abs)
+                    .map_err(|e| StoreError::io(format!("removing old file {old:?}"), e))?;
+            }
+        }
+
         self.reload()?;
         self.write_sidebar_if_changed()?;
         Ok(())
@@ -540,6 +644,63 @@ impl WikiStore for LocalFolderStore {
     fn regenerate_sidebar(&mut self) -> Result<bool> {
         self.write_sidebar_if_changed()
     }
+}
+
+/// A page's filename stem (path without the `.md` suffix).
+fn stem(path: &str) -> String {
+    path.strip_suffix(".md").unwrap_or(path).to_string()
+}
+
+/// Ancestor titles (root-first) for `id` under an *intended* parent map, using
+/// the same rule as [`LocalFolderStore::ancestor_titles`]: root pages (parent
+/// `None`) contribute no segment. Bounded so a cycle cannot loop forever.
+fn intended_ancestor_titles(
+    id: &str,
+    parent_of: &HashMap<String, Option<String>>,
+    title_of: &HashMap<String, String>,
+) -> Vec<String> {
+    let mut chain = Vec::new();
+    let mut cursor = parent_of.get(id).cloned().flatten();
+    let mut hops = 0;
+    while let Some(pid) = cursor {
+        let pid_parent = parent_of.get(&pid).cloned().flatten();
+        // Skip root pages' titles (a page directly under a root has no prefix).
+        if pid_parent.is_some() {
+            if let Some(t) = title_of.get(&pid) {
+                chain.push(t.clone());
+            }
+        }
+        cursor = pid_parent;
+        hops += 1;
+        if hops > 64 {
+            break;
+        }
+    }
+    chain.reverse();
+    chain
+}
+
+/// Rewrite inbound links that target a renamed page's old filename stem to its
+/// new stem, for both GitHub-native `[label](stem)` links and friendly
+/// `[[stem]]` wiki links (in every delimiter form). Title-based `[[Title]]`
+/// links are untouched — titles do not change on a move. The `](`/`[[` prefix
+/// plus a trailing delimiter prevents a stem that is a prefix of another from
+/// matching by accident.
+fn rewrite_links(source: &str, renames: &[(String, String)]) -> String {
+    let mut s = source.to_string();
+    for (old, new) in renames {
+        if old == new {
+            continue;
+        }
+        for suffix in [")", " ", "#", "\""] {
+            s = s.replace(&format!("]({old}{suffix}"), &format!("]({new}{suffix}"));
+            s = s.replace(&format!("]({old}.md{suffix}"), &format!("]({new}.md{suffix}"));
+        }
+        for suffix in ["]]", "|", "#"] {
+            s = s.replace(&format!("[[{old}{suffix}"), &format!("[[{new}{suffix}"));
+        }
+    }
+    s
 }
 
 /// True when the body's first non-empty line is a level-1 ATX heading (`# …`).
