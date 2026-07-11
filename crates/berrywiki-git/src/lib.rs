@@ -243,14 +243,37 @@ impl GitRepo {
 
     /// Pending working-tree changes (NUL-delimited porcelain, so unusual file
     /// names are handled).
+    ///
+    /// A rename or copy is a single logical change that git encodes in the `-z`
+    /// stream as *two* NUL-terminated fields — the new path (after the `XY`
+    /// code) and then the original path. We fold those back into one entry
+    /// rendered as `XY <old> -> <new>`, so the count is right and every entry
+    /// keeps its status prefix.
     pub fn status(&self) -> Result<Status, GitError> {
         let out = self.checked("status", &["status", "--porcelain", "-z"])?;
-        let entries = out
-            .stdout
-            .split('\0')
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .collect();
+        let mut fields = out.stdout.split('\0').filter(|s| !s.is_empty());
+        let mut entries = Vec::new();
+        while let Some(record) = fields.next() {
+            // `XY path`: a rename (R) or copy (C) in either status column is
+            // followed by one more field, the original path.
+            let is_rename_or_copy = record
+                .as_bytes()
+                .get(0..2)
+                .map(|xy| xy.contains(&b'R') || xy.contains(&b'C'))
+                .unwrap_or(false);
+            if is_rename_or_copy {
+                if let Some(origin) = fields.next() {
+                    // Split off the fixed `XY ` prefix; the remainder is the new
+                    // path. Byte 3 is always a char boundary (the prefix is
+                    // ASCII status codes plus a space).
+                    let cut = record.len().min(3);
+                    let (prefix, new_path) = record.split_at(cut);
+                    entries.push(format!("{prefix}{origin} -> {new_path}"));
+                    continue;
+                }
+            }
+            entries.push(record.to_string());
+        }
         Ok(Status { entries })
     }
 
@@ -353,10 +376,16 @@ impl GitRepo {
             return Ok(PushOutcome::Pushed);
         }
         let why = pushed.stderr.to_lowercase();
-        if why.contains("non-fast-forward")
-            || why.contains("fetch first")
-            || why.contains("rejected")
-        {
+        // A client-side non-fast-forward — the remote moved on — always carries
+        // one of these parentheticals. We deliberately do NOT key on the bare
+        // word "rejected": a server-side decline is reported as "[remote
+        // rejected]" (a pre-receive/update hook, a protected branch, secret
+        // push-protection), which is a real, non-recoverable error, not the
+        // transient "fetch, integrate, retry" case. Masking it here would throw
+        // away the diagnostic and send the caller into a fruitless retry loop,
+        // so anything that is not clearly a non-fast-forward falls through to a
+        // surfaced error below.
+        if why.contains("non-fast-forward") || why.contains("fetch first") {
             Ok(PushOutcome::RejectedNonFastForward)
         } else if why.contains("no upstream") || why.contains("no configured push destination") {
             Ok(PushOutcome::NoUpstream)

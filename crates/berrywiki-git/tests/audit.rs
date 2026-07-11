@@ -17,16 +17,30 @@ fn engine_source_contains_no_destructive_git_tokens() {
     let hay = ENGINE_SRC.to_lowercase();
     // Each needle names an operation that could overwrite the remote or discard
     // local work. None of them may appear anywhere in the engine.
+    //
+    // The engine writes every git argument as a separately-quoted array element
+    // (`&["merge", "--ff-only", "@{u}"]`), so a destructive token would appear
+    // in the source quoted, e.g. `"checkout"`. Bare needles are used where the
+    // word cannot occur benignly in prose; the two that CAN (`clean` collides
+    // with `is_clean`, `-f` with `--ff-only`) use the quoted form so they match
+    // a real argument without a false positive. An earlier version used
+    // `"checkout -"` / `"clean -"`, which — with a space and dash — could never
+    // match the array style and so silently proved nothing.
     let forbidden = [
-        "--force",          // history-overwriting push / fetch
+        // Remote history overwriting.
+        "--force",          // push/fetch --force (also matches --force-with-lease)
         "force-with-lease", // still replaces the remote tip
-        "--hard",           // discards the working tree and index
-        "reset",            // (with --hard/--merge) rewinds; unused entirely
-        "restore",          // discards uncommitted changes to tracked files
-        "checkout -",       // `checkout -- <path>` / `-f` discards changes
-        "clean -",          // deletes untracked files
+        "\"-f\"",           // short force flag, quoted so as not to hit "--ff-only"
         "+refs",            // force refspec
         "+head",            // force refspec targeting HEAD
+        "--mirror",         // push --mirror can delete remote refs
+        "--delete",         // push --delete removes a remote ref
+        // Local history / working-tree discarding.
+        "--hard",           // reset --hard
+        "reset",            // any reset; the engine uses none
+        "restore",          // discards uncommitted changes to tracked files
+        "checkout",         // checkout -- <path> / -f discards changes; unused
+        "\"clean\"",        // clean -fd deletes untracked (quoted: not `is_clean`)
     ];
     for needle in forbidden {
         assert!(

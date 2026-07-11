@@ -97,6 +97,31 @@ neutralisation because it is environment, not config — this is the seam
   un-pinned human string (e.g. the "Everything up-to-date" push message) would
   need a parser touch-up, caught by these tests.
 
+== Review hardening
+
+An adversarial review (5 finder lenses, each finding double-verified by
+skeptics) confirmed two correctness defects — no data-safety breach, but both
+fixed:
+
+* `push` classified any failed push whose stderr contained the bare word
+  "rejected" as `RejectedNonFastForward`. Server-side declines report as
+  `[remote rejected]` (a pre-receive/update hook, a protected branch, secret
+  push-protection) — real, non-recoverable errors, not a moved-on remote.
+  Masking them discarded the diagnostic and sent the caller into a fruitless
+  fetch/retry loop. `push` now keys only on the non-fast-forward parentheticals
+  (`(non-fast-forward)`, `(fetch first)`); everything else surfaces as
+  `GitError::Git` with the stderr. Regression-tested with a real declining hook.
+* `status` split a rename's two `-z` porcelain fields into two entries, one a
+  prefix-less phantom, over-counting a first-class page-move operation. It now
+  parses the stream as records and folds a rename/copy into one
+  `XY <old> -> <new>` entry.
+
+The review also flagged that the audit's `"checkout -"` / `"clean -"` needles
+could never match the engine's separately-quoted argument style and so proved
+nothing; the needle set was rebuilt to match that style (quoted forms where a
+bare word would collide with prose, e.g. `"clean"` vs `is_clean`) and extended
+to the short force flag, `--mirror` and `--delete`.
+
 == Revisit triggers
 
 * Parsing a human-readable git string proves fragile across git versions → move

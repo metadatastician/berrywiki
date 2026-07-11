@@ -218,3 +218,64 @@ fn push_reports_no_upstream_when_the_branch_has_none() {
         IntegrateOutcome::NoUpstream
     );
 }
+
+/// A server-side decline ("[remote rejected]": a hook, a protected branch,
+/// push-protection) is NOT a non-fast-forward: it must reach the caller as an
+/// error carrying the diagnostic, not be masked as the transient
+/// fetch-and-retry outcome (a review finding — the bare "rejected" substring
+/// used to swallow it).
+#[cfg(unix)]
+#[test]
+fn push_surfaces_a_server_side_decline_as_an_error() {
+    use berrywiki_git::GitError;
+    use std::os::unix::fs::PermissionsExt;
+
+    let sb = GitSandbox::create(&fixture_dir());
+    // A pre-receive hook on the bare remote that declines every push.
+    let hook = sb.remote.join("hooks/pre-receive");
+    fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let repo = GitRepo::open(&sb.ours).expect("open");
+    fs::write(sb.ours.join("Teaching.md"), "# Teaching\n\nours\n").unwrap();
+    let our_head = repo.commit_all("Local edit").unwrap().unwrap();
+
+    match repo.push() {
+        Err(GitError::Git { op, stderr }) => {
+            assert_eq!(op, "push");
+            let s = stderr.to_lowercase();
+            assert!(
+                s.contains("rejected") || s.contains("hook"),
+                "the real diagnostic reaches the caller: {stderr}"
+            );
+        }
+        other => panic!("hook decline must surface as an error, not {other:?}"),
+    }
+    // The failed push left the local commit exactly as it was.
+    assert_eq!(repo.head().unwrap(), our_head, "local commit intact after decline");
+}
+
+/// A staged rename is ONE logical change; porcelain `-z` encodes it as two
+/// NUL-separated fields, which naive splitting would report as two entries with
+/// a prefix-less phantom (a review finding). status() must fold it back.
+#[test]
+fn status_folds_a_staged_rename_into_one_entry() {
+    let sb = GitSandbox::create(&fixture_dir());
+    sb.git(&sb.ours, &["mv", "Research.md", "Research-Renamed.md"]).expect_success("git mv");
+    let repo = GitRepo::open(&sb.ours).expect("open");
+
+    let st = repo.status().unwrap();
+    assert!(!st.is_clean());
+    assert_eq!(st.entries.len(), 1, "a rename is one change, not two: {:?}", st.entries);
+    let entry = &st.entries[0];
+    assert!(entry.starts_with('R'), "keeps the rename status code: {entry}");
+    assert!(
+        entry.contains("Research.md") && entry.contains("Research-Renamed.md"),
+        "shows both the original and the new path: {entry}"
+    );
+    assert!(
+        !st.entries.iter().any(|x| x == "Research.md"),
+        "the original path is not emitted as its own prefix-less entry: {:?}",
+        st.entries
+    );
+}
