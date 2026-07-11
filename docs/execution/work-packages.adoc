@@ -112,13 +112,16 @@ behaviourally (a rejected push leaves the remote tip asserted-unchanged).
 identity, `with_env` credential seam. ADR-0009. 11 behavioural + 2 audit tests
 vs. `GitSandbox`. | Validated against a local bare remote only (ADR-0002);
 live-GitHub auth/rejection shape is P3-spike-write.
-| P3-sync | *PARTIAL* | fetch-before-push, non-fast-forward detection, atomic
-logical commits; recovery that *never* rewinds a dirty tree. | Git layer DONE
-(`fetch`/`divergence`/`fast_forward_to_upstream`/`push` in `berrywiki-git`);
-recovery settled as the roll-forward journal (ADR-0008), NOT a working-tree
-reset. Remaining: wire the engine to the store (commit-on-save, the
-fetch→integrate→push orchestration, conflict hand-off to P3-conflict) and the
-edit UI. Gate: one week of real private-wiki use without terminal git.
+| P3-sync | *DONE* | `berrywiki-sync`: `SyncedStore` wraps store+engine.
+Commit-on-save = one atomic logical commit per mutation (sidebar in the same
+commit, `add -A` on a precondition-clean tree). `ensure_committable` refuses a
+detached HEAD / in-progress merge and checkpoints ordinary dirt as its own
+commit WITHOUT reloading (keeps StaleWrite live). `refresh`/`advance`/`sync`/
+`sync_retrying` run fetch→integrate(ff)→push; a genuine divergence returns
+`Diverged(DivergedHandoff{local,upstream,base,ahead,behind})` untouched — no
+merge, no ff, no push, remote unchanged. ADR-0010; 16 behavioural + 1 structural
+test vs `GitSandbox`. | Live-GitHub write path is P3-spike-write. Edit UI (P2)
+and conflict resolution (P3-conflict) still consume this.
 | P3-conflict | opus | Conflict classification (`git show :1:/:2:/:3:`), page
 conflicts surfaced (never auto-merged); sidebar conflicts auto-resolved by
 regeneration only. | Inherently opus. Metadata conflicts are surfaced, never

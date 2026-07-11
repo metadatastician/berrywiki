@@ -11,6 +11,7 @@ members = [
     "crates/berrywiki-render",
     "crates/berrywiki-serve",
     "crates/berrywiki-store",
+    "crates/berrywiki-sync",
 ]
 
 [workspace.package]

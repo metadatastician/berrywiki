@@ -68,6 +68,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "berrywiki-sync"
+version = "0.0.1"
+dependencies = [
+ "berrywiki-core",
+ "berrywiki-git",
+ "berrywiki-git-compat",
+ "berrywiki-store",
+]
+
+[[package]]
 name = "caseless"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,124 @@
+= ADR-0010: The store⇄git sync layer
+:sectnums:
+
+== Status
+
+*Accepted* (2026-07-11). Implements work package P3-sync (the wiring half). Sits
+on the store's safe-mutation model (ADR-0008) and the git engine (ADR-0009), and
+defines the hand-off contract that P3-conflict builds on. Design settled by a
+three-proposal panel; this records the reconciled decision.
+
+== Context
+
+The store mutates a folder of Markdown; the git engine commits/fetches/pushes.
+Neither depends on the other (each boundary is deliberate: the store has no git
+dependency, the engine is a zero-dependency audited primitive). BerryWiki needs
+their composition — commit each edit, and synchronise with the remote — without
+the user dropping to a terminal, and without ever losing content or force-pushing.
+
+== Decision
+
+A new crate, `berrywiki-sync`, provides `SyncedStore<S: WikiStore>` (concrete
+opener for `LocalFolderStore`), which owns a store and a `GitRepo` over the same
+working tree. It is the first place the two crates meet and the single handle the
+CLI, the future editor UI and P3-conflict consume. It shells out to git *never* —
+all git flows through the audited engine (enforced by a source-scan test).
+
+=== Commit-on-save = one atomic logical commit
+
+Each committing mutation (`create_page`/`update_page`/`move_page`/`delete_page`/
+`add_attachment`) runs the store method — which already regenerates `_Sidebar.md`
+and reloads in the same call — then makes exactly one `commit_all` (`git add -A`).
+Because the store leaves the whole logical change (pages + sidebar + link
+rewrites) consistent on disk before returning, a single `add -A` captures it as
+one commit, with the sidebar in the *same* commit as the tree change.
+
+`add -A` (not a scoped path list) is deliberate: the subtree `move_page` writes an
+unbounded set (every descendant rename, cross-wiki inbound-link rewrites, the
+sidebar), and a path list that missed one would produce a *split* logical commit —
+a worse, silent atomicity failure. Completeness is a property of git's own diff,
+not of a fallible store self-report. App-state lives outside the clone (ADR-0008),
+so `add -A` never sweeps app-private files.
+
+=== The clean-tree precondition
+
+Before any commit, `ensure_committable` runs. It refuses two states outright,
+because committing them would silently lose or corrupt work:
+
+* a *detached HEAD* (checked first, unconditionally — every mutation ends in a
+  commit, and a commit off a branch is unreachable and eventually lost);
+* an *in-progress merge* (unmerged paths — `add -A` would stage conflict markers
+  and commit them as if resolved).
+
+Otherwise, ordinary pending changes (a plain-git terminal edit, or residue from a
+save that crashed after the store write but before its commit) are flushed as
+their *own* checkpoint commit ("Record changes made outside BerryWiki") — never
+discarded, never folded into the next edit. The precondition runs purely at the
+git level and **does not reload the store**: keeping the store's stale-write
+fingerprints from the last load means a later mutation to a page edited outside
+BerryWiki still trips `StaleWrite` rather than clobbering the foreign edit (which,
+by then, is safely committed).
+
+=== The sync cycle and the divergence hand-off
+
+`refresh` (precondition + fetch) then `advance` (act on the fetched divergence)
+compose into `sync`. Because divergence is a clean quadrant of (ahead, behind):
+
+* no upstream → `NoRemote`; equal → `UpToDate`;
+* behind only → `fast_forward_to_upstream` → `Integrated` (the sole tree-changing
+  branch, so the only one that reloads the store);
+* ahead only → `push` → `Published`, or `PushRaced` if the remote moved between
+  our fetch and our push (nothing forced, nothing lost);
+* ahead **and** behind → **`Diverged`**, handed off untouched.
+
+`sync_retrying` re-runs only on `PushRaced`; a race means the remote gained
+commits, so the next fetch makes us `behind` and the pass reclassifies to
+`Diverged` (terminal) — bounded, never force-pushing.
+
+On `Diverged`, sync does nothing but return a `DivergedHandoff{local, upstream,
+base, ahead, behind}`. Guaranteed at return (asserted in tests): no merge started
+(the engine has no merge but fast-forward, so one *cannot* have begun), HEAD is
+our untouched local tip, all local work is committed (not dangling), the divergent
+upstream is already fetched (so P3-conflict works offline from an immutable
+snapshot), and the remote is untouched. Real errors (I/O, auth, server-side
+`[remote rejected]`) are `SyncError`, never outcomes, so a failure degrades with a
+diagnostic and is never silently retried.
+
+=== Engine additions
+
+Three read-only inspection methods were added to `berrywiki-git`
+(`head_of_upstream`, `merge_base_with_upstream`, `current_branch`), each a fixed
+literal-argument list; the source audit still passes. No change to the store.
+
+== Alternatives considered
+
+* *Scoped `commit_paths` / touched-path reporting from the store* — rejected: it
+  duplicates on-disk work the store already does, is fragile for the move cascade
+  (can under-capture → split commit), and buys nothing the clean-tree precondition
+  doesn't. Deferred behind a named trigger (only if a preserve-unrelated-dirt
+  commit is ever needed).
+* *Error on any dirty tree* — rejected: blocks the user on their own harmless
+  terminal edits for no safety gain; checkpointing is safe and reversible.
+* *Fold pending dirt into the op's commit (plain `add -A`, no precondition)* —
+  rejected: mislabels history and muddies the atomic-logical-commit guarantee.
+* *A module in `berrywiki-store` or `-github`* — rejected: it would create the
+  store→git dependency edge each boundary avoids; `-github` is only one consumer.
+
+== Consequences
+
+* One save is one reviewable commit; the sidebar is never in a separate commit.
+* No mutation can lose content or discard unrelated local work; a diverged history
+  is never auto-merged and the remote is never force-updated.
+* Conflict *resolution* is out of scope — sync only detects and hands off. The
+  conflict taxonomy lives entirely behind the opaque `Diverged` variant, so
+  P3-conflict can grow without ever changing this enum.
+* Behaviour is validated against a local bare remote only (ADR-0002); the live
+  write path (auth, real rejection shapes) remains the credential-gated
+  P3-spike-write.
+
+== Revisit triggers
+
+* A concurrent-writer surface appears (long-running server) → the deferred X-lock.
+* A need to commit while preserving an unrelated dirty change → `commit_paths`.
+* `add -A` sweeping stray non-ignored clone junk becomes a real problem → make
+  `ensure_ignore` part of setup, or narrow the staging.

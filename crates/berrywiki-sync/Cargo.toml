@@ -1,0 +1,22 @@
+[package]
+name = "berrywiki-sync"
+description = "Wires BerryWiki's store to its git engine: each completed store mutation becomes one atomic logical commit (sidebar included), and a fetch -> integrate(ff-only) -> push cycle publishes them. A genuinely diverged history is handed off untouched to the conflict layer; nothing is ever force-pushed or auto-merged. Zero runtime dependencies beyond the sibling crates."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The composition seam: berrywiki-store has no git dep and berrywiki-git has no
+# store dep (each boundary is deliberate). This crate is the first place they
+# meet. All git access flows through the audited GitRepo — never raw Command.
+[dependencies]
+berrywiki-core = { path = "../berrywiki-core" }
+berrywiki-store = { path = "../berrywiki-store" }
+berrywiki-git = { path = "../berrywiki-git" }
+
+[dev-dependencies]
+berrywiki-git-compat = { path = "../berrywiki-git-compat" }
+
+[lints.rust]
+unsafe_code = "forbid"

@@ -301,6 +301,32 @@ impl GitRepo {
         })
     }
 
+    /// The commit id at the tip of the fetched upstream (`@{u}`). Call
+    /// [`GitRepo::fetch`] first for it to reflect the remote.
+    pub fn head_of_upstream(&self) -> Result<CommitId, GitError> {
+        let out = self.checked("upstream-head", &["rev-parse", "@{u}"])?;
+        Ok(CommitId(out.stdout.trim().to_string()))
+    }
+
+    /// The best common ancestor of `HEAD` and the fetched upstream — the third
+    /// point a three-way reconciliation needs.
+    pub fn merge_base_with_upstream(&self) -> Result<CommitId, GitError> {
+        let out = self.checked("merge-base", &["merge-base", "HEAD", "@{u}"])?;
+        Ok(CommitId(out.stdout.trim().to_string()))
+    }
+
+    /// The name of the branch `HEAD` points at, or `None` when `HEAD` is not on
+    /// a branch (a detached `HEAD`). An unborn branch (no commits yet) still
+    /// reports its name, so it is correctly not treated as detached.
+    pub fn current_branch(&self) -> Result<Option<String>, GitError> {
+        let out = self.exec("branch-name", &["symbolic-ref", "--short", "--quiet", "HEAD"])?;
+        if out.success {
+            Ok(Some(out.stdout.trim().to_string()))
+        } else {
+            Ok(None)
+        }
+    }
+
     // ----- committing -----
 
     /// Stage every change and commit it, returning the new commit id — or
