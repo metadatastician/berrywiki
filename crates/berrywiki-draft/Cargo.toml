@@ -1,0 +1,14 @@
+[package]
+name = "berrywiki-draft"
+description = "Persistent local draft store for BerryWiki (ADR-0006): explicit, per-page drafts kept OUTSIDE the wiki clone so unsaved edits survive a process kill without silent autosave."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Pure filesystem, no engine coupling: drafts are opaque text keyed by page id.
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"

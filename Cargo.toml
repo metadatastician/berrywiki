@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/berrywiki-cli",
     "crates/berrywiki-core",
+    "crates/berrywiki-draft",
     "crates/berrywiki-git-compat",
     "crates/berrywiki-github",
     "crates/berrywiki-render",

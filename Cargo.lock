@@ -17,6 +17,10 @@ name = "berrywiki-core"
 version = "0.0.1"
 
 [[package]]
+name = "berrywiki-draft"
+version = "0.0.1"
+
+[[package]]
 name = "berrywiki-git-compat"
 version = "0.0.1"
 

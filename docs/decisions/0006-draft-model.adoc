@@ -1,0 +1,72 @@
+= ADR-0006: Draft model (editing without silent autosave)
+:sectnums:
+
+== Status
+
+*Accepted* (2026-07-11). Resolves the load-bearing critique of the Phase-2
+plan: silent idle-autosave is infeasible under the zero-JavaScript SSR UI
+(link:0005-ui-technology.adoc[ADR-0005]).
+
+== Context
+
+The Phase-2 plan promised drafts that "survive a killed process" via
+idle-autosave. But a zero-`<script>` server-rendered app has **no client-side
+mechanism** to detect that the user has gone idle or to auto-submit a form.
+"Never lose a keystroke" as *silent* autosave therefore cannot be implemented
+as written — a trust-critical feature that would not work.
+
+Two further constraints:
+
+* App-private state must **not** live inside the wiki clone (it could be
+  committed/pushed by a plain-git user — a "usable without BerryWiki" breach).
+* Saving to the wiki file and publishing (commit/push) are already separate
+  concepts; a draft is a third state: *pending, not yet written to the page*.
+
+== Decision
+
+Replace silent autosave with **explicit, persistent drafts**:
+
+* The edit view offers three explicit actions: *Save* (write the page source),
+  *Save draft* (persist the pending text without changing the page), and
+  *Discard draft*. The unsaved/draft state is shown clearly; nothing is
+  presented as published until it is.
+* A *Save draft* persists to a **draft store outside the clone**
+  (`berrywiki-draft`, in an XDG-cache directory keyed by repo identity), keyed
+  by page id. Because it is on disk, a saved draft **survives a process kill or
+  restart** — the honest version of the original promise.
+* When a draft exists for a page, opening the editor resumes from the draft
+  with a visible notice (and its saved time); *Save* clears the draft, *Discard*
+  deletes it.
+* Writes are atomic (temp + fsync + rename), matching the store's durability.
+
+The Phase-2 exit criterion is amended accordingly: *"an explicitly saved draft
+survives a killed process"* — not *"an idle editor autosaves"*.
+
+== Alternatives considered
+
+* *Idle-autosave via a tiny inline script* — rejected: any `<script>` breaks the
+  zero-JS doctrine (ADR-0005); there is no principled stopping point.
+* *Autosave via a `<meta http-equiv=refresh>` POST loop* — rejected: it cannot
+  carry the textarea's current contents without script, so it saves nothing
+  useful and fights the browser.
+* *Drafts inside the clone* (e.g. a `.drafts/` dir) — rejected: violates
+  app-state-not-in-clone; a plain-git user could commit half-finished text.
+* *In-memory drafts only* — rejected: does not survive a restart, the whole
+  point.
+
+== Consequences
+
+* The no-data-loss promise is *honest*: an explicit action is required, but once
+  taken the draft is durable and recoverable.
+* The draft store is app-private and never committed.
+* Real idle-autosave remains available to the future AffineScript→typed-wasm
+  enhancement layer (client-side), once
+  link:0005-ui-technology.adoc[ADR-0005]'s parked generated-JS-glue question is
+  ruled (ADR-0007). It would drive the *same* Save-draft endpoint.
+
+== Revisit triggers
+
+* ADR-0007 rules generated client script acceptable → an idle-autosave
+  enhancement can layer on the existing Save-draft path.
+* Real use shows the explicit-save burden causes lost work despite persistence →
+  reconsider the interaction (e.g. save-on-navigation via form submission).
