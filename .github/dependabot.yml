@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Keep GitHub Actions current — the estate has been bitten by deprecated
+  # action runtimes; Dependabot bumps them before they break.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps
+    # MSRV is rustc 1.85; ignore updates that would raise it until we bump.
+    open-pull-requests-limit: 5

@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Minimal permissions (spec: least privilege).
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: rustfmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      # NOTE: rustfmt/clippy cannot run on the dev host (distro Rust, no rustup),
+      # so this is the first place the code is normalised. Before the first push
+      # to a remote, run `cargo fmt --all` on a rustfmt-capable machine — the
+      # initial run may otherwise fail on formatting. clippy runs rustc lints
+      # too, so it also enforces the warning-free build for workspace crates.
+      - name: rustfmt (check)
+        run: cargo fmt --all -- --check
+      - name: clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: test (rust ${{ matrix.rust }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 1.85.0 enforces the declared MSRV (workspace rust-version); stable
+        # catches issues the pinned toolchain would miss.
+        rust: ["1.85.0", "stable"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+      - uses: Swatinem/rust-cache@v2
+      - name: build (locked)
+        run: cargo build --workspace --locked
+      # The full suite includes the no-<script> SSR assertions and the git
+      # conflict / no-data-loss harness, so `cargo test` IS the security and
+      # safety gate.
+      - name: test (locked)
+        run: cargo test --workspace --locked

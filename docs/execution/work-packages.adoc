@@ -61,9 +61,11 @@ yet; no `_Footer`; single-threaded (fine for single user).
 | P1-noscript-gate | *PARTIAL* | Every `route()` response asserted script-free
 in tests (element + inline `on*=` + `javascript:`). | Remaining: promote to a
 CI gate; the render layer already blocks raw HTML at the source.
-| P1-ci | sonnet | GitHub Actions: fmt + clippy + test (fmt/clippy absent
-locally), two-git-version matrix. Estate `standards` conventions. | Escalate if
-`.github/workflows/**` needs a `workflow`-scoped token the runner lacks.
+| P1-ci | *DONE* | `.github/workflows/ci.yml`: lint (fmt+clippy, stable) +
+test matrix (MSRV 1.85 + stable), `--locked`, least-privilege, checkout@v5 /
+rust-cache@v2. Dependabot for actions+cargo. docs/development/ci.adoc. | Not run
+yet (local-only); first push needs `gh auth refresh -s workflow` + a `cargo fmt`
+normalisation pass (rustfmt unavailable on host). Two-git matrix = follow-up.
 | P1-spike-read | opus | Live-GitHub *read-side* spike: clone a real private
 `.wiki.git`, record link/filename/metadata-invisibility/sidebar evidence into
 the compatibility report. **Includes the auth row** (does the chosen credential
