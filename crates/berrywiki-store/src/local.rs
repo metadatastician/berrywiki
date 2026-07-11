@@ -497,45 +497,57 @@ impl WikiStore for LocalFolderStore {
             old_path_of.insert(id.clone(), self.graph.get(id).unwrap().path.clone());
         }
 
-        // Names already on disk that are NOT the affected pages' own files, so
-        // recomputed names avoid colliding with unrelated pages (case-insensitive).
-        let mut taken_ci: HashSet<String> = HashSet::new();
-        if let Ok(entries) = fs::read_dir(&self.root) {
-            for e in entries.flatten() {
-                if let Some(name) = e.file_name().to_str() {
-                    if !old_path_of.values().any(|p| p == name) {
-                        taken_ci.insert(name.to_lowercase());
-                    }
-                }
+        // ALL filenames currently on disk (case-insensitive). read_dir failure
+        // is fatal here — proceeding with an empty set would disable collision
+        // detection and let a recomputed name overwrite an unrelated page.
+        let mut on_disk: HashSet<String> = HashSet::new();
+        for e in fs::read_dir(&self.root)
+            .map_err(|e| StoreError::io("listing the wiki folder for the move", e))?
+        {
+            let e = e.map_err(|e| StoreError::io("listing the wiki folder for the move", e))?;
+            if let Some(name) = e.file_name().to_str() {
+                on_disk.insert(name.to_lowercase());
             }
         }
 
-        // Assign new filenames deterministically (sorted by id).
+        // Assign new filenames deterministically (sorted by id). A page may
+        // reuse ONLY its own current filename; it can never take another page's
+        // (a name stays "taken" even after its owner is reassigned). This keeps
+        // subtree names stable, so siblings never rotate names — which is what
+        // caused link double-rewrites and a crash-window that could lose a
+        // page's only copy.
         let mut ordered = affected.clone();
         ordered.sort();
         let mut new_path_of: HashMap<String, String> = HashMap::new();
+        let mut assigned: HashSet<String> = HashSet::new();
         for id in &ordered {
+            let own_old = old_path_of[id].to_lowercase();
+            let taken = |name_lc: &str| {
+                (on_disk.contains(name_lc) && name_lc != own_old) || assigned.contains(name_lc)
+            };
             let ancestors = intended_ancestor_titles(id, &parent_of, &title_of);
             let base = page_filename(&ancestors, &title_of[id])?;
-            let name = if taken_ci.contains(&base.to_lowercase()) {
+            let name = if taken(&base.to_lowercase()) {
                 let suffixed = with_id_suffix(&base, id);
                 validate_component(&suffixed)?;
+                if taken(&suffixed.to_lowercase()) {
+                    return Err(StoreError::InvalidName {
+                        name: suffixed,
+                        reason: "filename collision during subtree move".to_string(),
+                    });
+                }
                 suffixed
             } else {
                 base
             };
-            if taken_ci.contains(&name.to_lowercase()) {
-                return Err(StoreError::InvalidName {
-                    name,
-                    reason: "filename collision during subtree move".to_string(),
-                });
-            }
-            taken_ci.insert(name.to_lowercase());
+            assigned.insert(name.to_lowercase());
             new_path_of.insert(id.clone(), name);
         }
 
         // old stem -> new stem for every page whose filename actually changes.
-        let renames: Vec<(String, String)> = affected
+        // A map (not a chained replace list): each link target is rewritten by
+        // exactly one lookup, so no rename can chain into another.
+        let rename_map: HashMap<String, String> = affected
             .iter()
             .filter(|id| old_path_of[*id] != new_path_of[*id])
             .map(|id| (stem(&old_path_of[id]), stem(&new_path_of[id])))
@@ -554,7 +566,7 @@ impl WikiStore for LocalFolderStore {
             } else {
                 page.metadata.clone().unwrap()
             };
-            let body = rewrite_links(&page.body, &renames);
+            let body = rewrite_links(&page.body, &rename_map);
             let source = serialize_source(Some(&meta), &body);
             writes.push((new_path_of[id].clone(), source.into_bytes()));
         }
@@ -564,7 +576,7 @@ impl WikiStore for LocalFolderStore {
             if affected_set.contains(page.id.as_str()) {
                 continue;
             }
-            let rewritten = rewrite_links(&page.source, &renames);
+            let rewritten = rewrite_links(&page.source, &rename_map);
             if rewritten != page.source {
                 writes.push((page.path.clone(), rewritten.into_bytes()));
             }
@@ -680,27 +692,103 @@ fn intended_ancestor_titles(
     chain
 }
 
-/// Rewrite inbound links that target a renamed page's old filename stem to its
-/// new stem, for both GitHub-native `[label](stem)` links and friendly
-/// `[[stem]]` wiki links (in every delimiter form). Title-based `[[Title]]`
-/// links are untouched — titles do not change on a move. The `](`/`[[` prefix
-/// plus a trailing delimiter prevents a stem that is a prefix of another from
-/// matching by accident.
-fn rewrite_links(source: &str, renames: &[(String, String)]) -> String {
-    let mut s = source.to_string();
-    for (old, new) in renames {
-        if old == new {
+/// Rewrite inbound links that point at a renamed page's old filename stem to
+/// its new stem, for both GitHub-native `[label](stem)` links and friendly
+/// `[[stem]]` wiki links. Title-based `[[Title]]` links are untouched — titles
+/// do not change on a move.
+///
+/// This is a single left-to-right pass that rewrites each link target by a
+/// single map lookup, so:
+/// * no rewrite can chain into another (a rename map, not sequential replaces);
+/// * targets are matched exactly (after trimming whitespace and an optional
+///   `.md`), matching what the link parser accepts — including
+///   `[x]( stem )` / `[[ stem ]]` with surrounding whitespace — while a stem
+///   that is a prefix of another can never match by accident.
+fn rewrite_links(source: &str, rename: &HashMap<String, String>) -> String {
+    if rename.is_empty() {
+        return source.to_string();
+    }
+    let mut out = String::with_capacity(source.len());
+    let mut rest = source;
+    while !rest.is_empty() {
+        if let Some(inner_len) = rest.strip_prefix("[[").and_then(|r| r.find("]]")) {
+            let inner = &rest[2..2 + inner_len];
+            out.push_str("[[");
+            out.push_str(&rewrite_wiki_target(inner, rename));
+            out.push_str("]]");
+            rest = &rest[2 + inner_len + 2..];
             continue;
         }
-        for suffix in [")", " ", "#", "\""] {
-            s = s.replace(&format!("]({old}{suffix}"), &format!("]({new}{suffix}"));
-            s = s.replace(&format!("]({old}.md{suffix}"), &format!("]({new}.md{suffix}"));
+        if let Some(inner_len) = rest.strip_prefix("](").and_then(|r| r.find(')')) {
+            let inner = &rest[2..2 + inner_len];
+            out.push_str("](");
+            out.push_str(&rewrite_md_target(inner, rename));
+            out.push(')');
+            rest = &rest[2 + inner_len + 1..];
+            continue;
         }
-        for suffix in ["]]", "|", "#"] {
-            s = s.replace(&format!("[[{old}{suffix}"), &format!("[[{new}{suffix}"));
-        }
+        let ch = rest.chars().next().unwrap();
+        out.push(ch);
+        rest = &rest[ch.len_utf8()..];
     }
-    s
+    out
+}
+
+/// Rewrite the inside of a `[[…]]` wiki link. Form: `Target[#anchor][|label]`.
+fn rewrite_wiki_target(inner: &str, rename: &HashMap<String, String>) -> String {
+    let (tpart, label) = match inner.split_once('|') {
+        Some((t, l)) => (t, Some(l)),
+        None => (inner, None),
+    };
+    let (target, anchor) = match tpart.split_once('#') {
+        Some((t, a)) => (t, Some(a)),
+        None => (tpart, None),
+    };
+    let key = target.trim();
+    let key = key.strip_suffix(".md").unwrap_or(key);
+    match rename.get(key) {
+        Some(new) => {
+            let mut s = new.clone();
+            if let Some(a) = anchor {
+                s.push('#');
+                s.push_str(a);
+            }
+            if let Some(l) = label {
+                s.push('|');
+                s.push_str(l);
+            }
+            s
+        }
+        None => inner.to_string(),
+    }
+}
+
+/// Rewrite the inside of a `](…)` Markdown link. Form:
+/// `dest[#anchor][ "title"]`, with optional surrounding whitespace.
+fn rewrite_md_target(inner: &str, rename: &HashMap<String, String>) -> String {
+    let trimmed = inner.trim();
+    // CommonMark separates the destination from an optional title by whitespace.
+    let (dest, title) = match trimmed.find(char::is_whitespace) {
+        Some(idx) => (&trimmed[..idx], &trimmed[idx..]),
+        None => (trimmed, ""),
+    };
+    let (target, anchor) = match dest.split_once('#') {
+        Some((t, a)) => (t, Some(a)),
+        None => (dest, None),
+    };
+    let key = target.strip_suffix(".md").unwrap_or(target);
+    match rename.get(key) {
+        Some(new) => {
+            let mut s = new.clone();
+            if let Some(a) = anchor {
+                s.push('#');
+                s.push_str(a);
+            }
+            s.push_str(title);
+            s
+        }
+        None => inner.to_string(),
+    }
 }
 
 /// True when the body's first non-empty line is a level-1 ATX heading (`# …`).

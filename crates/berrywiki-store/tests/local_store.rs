@@ -255,6 +255,86 @@ fn move_rewrites_inbound_links_so_they_still_resolve() {
 }
 
 #[test]
+fn move_with_duplicate_title_siblings_does_not_rotate_or_corrupt_links() {
+    // Review finding #1/#2/#5: two siblings with the same title (one clean, one
+    // id-suffixed) must keep their own filenames on a move — never swap — so
+    // links stay pointing at the correct page and no page's only copy is lost.
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+
+    // P and M are both NON-roots (under Home): a root contributes no filename
+    // segment, so only a non-root ancestor prefixes its descendants. This makes
+    // the move actually rename the subtree ("M--…" -> "P--M--…").
+    store.create_page(create_input("pp", "P", Some(HOME_ID))).unwrap();
+    store.create_page(create_input("mm", "M", Some(HOME_ID))).unwrap();
+    store.create_page(create_input("child-aaa1", "Notes", Some("mm"))).unwrap(); // -> M--Notes.md
+    store.create_page(create_input("child-bbb2", "Notes", Some("mm"))).unwrap(); // -> M--Notes--bbb2.md
+    assert!(dir.join("M--Notes.md").exists());
+    assert!(dir.join("M--Notes--bbb2.md").exists());
+
+    // A page links to EACH sibling distinctly.
+    let mut linker = create_input("linker", "Linker", None);
+    linker.body = "See [[M--Notes]] and [[M--Notes--bbb2]].\n".to_string();
+    store.create_page(linker).unwrap();
+    assert!(store.graph().backlinks_of("child-aaa1").iter().any(|b| b.from_id == "linker"));
+    assert!(store.graph().backlinks_of("child-bbb2").iter().any(|b| b.from_id == "linker"));
+
+    // Move M under P — both children are renamed, but must not swap identities.
+    store
+        .move_page(MovePageInput {
+            id: "mm".to_string(),
+            new_parent_id: Some("pp".to_string()),
+            new_position: 0,
+        })
+        .unwrap();
+
+    // Both children survive with prefixed-but-still-distinct names.
+    assert_eq!(store.read_page("child-aaa1").unwrap().path, "P--M--Notes.md");
+    assert_eq!(store.read_page("child-bbb2").unwrap().path, "P--M--Notes--bbb2.md");
+    assert!(dir.join("P--M--Notes.md").exists());
+    assert!(dir.join("P--M--Notes--bbb2.md").exists());
+
+    // Crucially: each link still points at ITS OWN page (no double-rewrite
+    // collapsing both onto one). Both backlinks survive and are distinct.
+    assert!(
+        store.graph().backlinks_of("child-aaa1").iter().any(|b| b.from_id == "linker"),
+        "link to the clean sibling preserved"
+    );
+    assert!(
+        store.graph().backlinks_of("child-bbb2").iter().any(|b| b.from_id == "linker"),
+        "link to the suffixed sibling not corrupted onto the other page"
+    );
+}
+
+#[test]
+fn move_rewrites_whitespace_padded_links() {
+    // Review finding #3: links the parser accepts with surrounding whitespace
+    // must be rewritten too, or they dangle after a move.
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    let mut wsp = create_input("wsp", "Whitespace Links", None);
+    wsp.body = "See [[ Teaching--Course-A ]] and [d]( Teaching--Course-A ).\n".to_string();
+    store.create_page(wsp).unwrap();
+    // Baseline: both padded links resolve to Course A.
+    assert!(store.graph().backlinks_of(COURSE_A_ID).iter().any(|b| b.from_id == "wsp"));
+
+    store
+        .move_page(MovePageInput {
+            id: COURSE_A_ID.to_string(),
+            new_parent_id: Some(RESEARCH_ID.to_string()),
+            new_position: 0,
+        })
+        .unwrap();
+
+    // After the move the padded links were rewritten and still resolve.
+    assert!(
+        store.graph().backlinks_of(COURSE_A_ID).iter().any(|b| b.from_id == "wsp"),
+        "whitespace-padded links were rewritten and still resolve"
+    );
+    assert!(store.read_page("wsp").unwrap().source.contains("Research--Course-A"));
+}
+
+#[test]
 fn move_refuses_unmanaged_pages() {
     let dir = scratch_wiki();
     let mut store = LocalFolderStore::open(&dir).unwrap();
