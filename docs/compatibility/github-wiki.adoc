@@ -94,6 +94,23 @@ hypothesis given "native reader must work": flat `--`-separated filenames
 present real directory hierarchy. *Unverified* until the nested-directory test
 runs.
 
+== Rendering fidelity (BerryWiki preview vs GitHub)
+
+BerryWiki renders its preview with comrak GFM (`berrywiki-render`). Known,
+deliberate differences from GitHub's wiki pipeline — all *safety-over-fidelity*
+and none affecting the canonical source:
+
+[cols="3,2", options="header"]
+|===
+| Aspect | BerryWiki policy
+| Raw inline/block HTML | *Escaped/omitted*, never emitted (comrak `unsafe_=false` + `tagfilter`). GitHub renders a *sanitised subset* of inline HTML, so some GitHub-rendered HTML will not appear in BerryWiki's preview. ✅ tested.
+| `javascript:` / `vbscript:` / non-image `data:` link URLs | Rewritten to `#` at the AST level. ✅ tested.
+| Syntax highlighting of code blocks | Not applied (comrak default features off to stay buildable on rustc 1.85). May return behind a feature.
+| Exact GFM parity (tables, task lists, autolinks, footnotes) | comrak GFM; *parity with GitHub's exact output is UNVERIFIED* until the live spike (❓).
+|===
+
+Source remains canonical regardless; the preview is advisory.
+
 == Open questions
 
 * Exact anchor slug algorithm GitHub uses for headings (we implement a

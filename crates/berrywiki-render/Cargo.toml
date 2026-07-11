@@ -1,0 +1,20 @@
+[package]
+name = "berrywiki-render"
+description = "Markdown → HTML rendering for the BerryWiki SSR UI (ADR-0005): GFM via comrak with raw HTML escaped and dangerous link schemes neutralised at the AST level."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# GFM-compatible Markdown → HTML. `default-features = false` drops syntect
+# syntax-highlighting, emoji shortcodes and the CLI — none of which the preview
+# needs — and, crucially, their transitive `darling`/`onig`/`clap` subtrees,
+# keeping the crate buildable on the host's rustc 1.85 (comrak's default tree
+# pulls darling 0.23, which demands rustc 1.88). Source stays canonical; this
+# produces a *preview*. Syntax highlighting can return later behind a feature.
+comrak = { version = "0.53", default-features = false }
+
+[lints.rust]
+unsafe_code = "forbid"

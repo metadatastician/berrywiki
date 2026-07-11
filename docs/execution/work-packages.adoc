@@ -48,10 +48,11 @@ failure it cannot mechanically fix, or contact with git/sync/data safety
 |===
 | ID | Tier | Contract | Escalation triggers / Blocked-by
 
-| P1-render | sonnet | `berrywiki-render` crate: comrak GFM → HTML with an
-explicit, stated raw-HTML safety policy. Deterministic. | *Blocked-by* critique
-minor "raw-HTML policy / no-`<script>` gate". Escalate if GitHub parity turns
-out to need a custom renderer (→ opus + live spike).
+| P1-render | *DONE* | `berrywiki-render`: comrak GFM → HTML; raw HTML escaped
+/omitted, dangerous URL schemes neutralised at the AST level; deterministic; 9
+tests. comrak default features off (rustc-1.85 compat). Divergence recorded in
+the compatibility report. | Residual: GitHub parity unverified until the live
+spike (→ opus); syntax highlighting deferred behind a feature.
 | P1-serve | sonnet | `berrywiki serve`: axum + maud three-pane SSR over a
 `WikiStore`; `/search` `/diagnostics`; zero `<script>`. | Escalate if any
 interactive requirement seems to need client script (→ ADR-0007 question, opus).

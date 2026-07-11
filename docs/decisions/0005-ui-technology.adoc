@@ -3,9 +3,14 @@
 
 == Status
 
-*Proposed* — awaiting user ratification. Nothing in this decision depends on
-unverified live-GitHub behaviour, but the decision's *revisit triggers*
-(<<revisit>>) do reference spike evidence.
+*Accepted* (2026-07-11) as the MVP UI shell. Ratified after a plus/minus/
+interesting review: SSR is the only option that is doctrine-clean, buildable on
+the current host, and keeps the AffineScript door open; the notable minuses are
+deferred UX (drag-and-drop, inline autocomplete, live preview → the AffineScript
+enhancement layer) rather than wrong architecture, and the one that bites now
+(idle-autosave is infeasible without client script) is a Phase-2 draft-model fix,
+not a stack change. Nothing in this decision depends on unverified live-GitHub
+behaviour, but the *revisit triggers* (<<revisit>>) do reference spike evidence.
 
 == Context
 
