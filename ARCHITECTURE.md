@@ -1,47 +1,34 @@
-# Architecture
+# BerryWiki Architecture
 
 ## Overview
+BerryWiki is a deterministic, natively pluggable wiki engine designed for maximum performance, strict data integrity, and unparalleled advanced presentation capabilities. Rather than building a monolith, BerryWiki is split into three highly decoupled, modular layers.
 
-This repository follows a modular, maintainable architecture designed for clarity, scalability, and long-term sustainability.
+## The Three Layers
 
-## Directory Structure
+### 1. The Deterministic Core (`berrywiki-core`)
+**Language:** Rust
+This is the foundational I/O and state management layer. It is built strictly for deterministic atomic updates, rapid parallel parsing, and generating the abstract semantic graph.
+- Handles atomic file/blob writing.
+- Generates and maintains the Semantic Knowledge Graph (RDFa / JSON-LD indices).
+- Tracks broken links natively via a Broken Link Auto-Healer mechanism.
 
-```
-.
-├── src/           # Source code
-├── tests/        # Test suites
-├── docs/         # Documentation
-├── scripts/      # Utility scripts
-├── config/       # Configuration files
-├── LICENSE       # License file
-├── LICENSES/     # Full license texts
-└── README.adoc   # Project documentation
-```
+### 2. The Unified Gateway (`zig-unified-hexdeca-api`)
+**Language:** Zig
+Located in `api/zig-unified-hexdeca-api`, this is the external-facing service layer. 
+- Wraps the Rust core with an extremely low-latency, memory-safe API.
+- Provides endpoints for Git Forgers (like GitHub, GitLab) and external integrations.
+- Makes BerryWiki seamlessly "pluggable" as a headless engine on third-party servers.
 
-## Design Principles
+### 3. The Advanced Presentation Layer (BerryBlocks)
+**Language:** Web / JS / WASM / A2ML
+Rather than being tightly coupled to the engine, the presentation layer is built as a **Standalone Pluggable Component**. This allows the advanced UI to be injected into BerryWiki, `ddraig-ssg`, or any `nextgen-languages` previewer.
+Inspired by `formatrix-docs`, features include:
+- **Switchable Code Blocks:** Toggle blocks by OS, Shell, Language, or Citation Style.
+- **A2ML Variable Substitution:** Interactively toggle between code view and preview, tweaking variables dynamically.
+- **Smart Paste Parsing:** Paste buffers map intelligently into plain text, arrays, matrices, or tuples.
+- **AAA WCAG Accessibility:** Extreme compliance for interactive markdown blocks.
+- **Editor Tooling:** Side-by-side or top-and-bottom preview split-modes, "glyph/block mode" layouts, and live-linting sidebars.
 
-- **Separation of Concerns**: Each module has a single responsibility
-- **Testability**: Code is written to be easily testable
-- **Documentation**: All public APIs are documented
-- **Configuration**: Environment-specific settings are externalized
-
-## Dependencies
-
-- External dependencies are minimized and clearly declared
-- Version pinning is used for reproducibility
-
-## Security Considerations
-
-- Sensitive data is never committed to the repository
-- Secrets are managed through environment variables or secure vaults
-- Regular dependency audits are performed
-
-## Maintainability
-
-- Code follows consistent style guidelines
-- Pull requests require review and CI checks
-- Issues and discussions are tracked transparently
-
----
-
-*Last updated: 2026-07-18*
+## Out-of-the-Box Integrations
+- **SEO Optimization:** BerryWiki ships pre-configured with `git-seo` hooks to ensure maximum search engine visibility for generated static wikis.
+- **Semantic Network:** Every output page automatically renders Obsidian-style network graphs showing page inter-connectivity.
