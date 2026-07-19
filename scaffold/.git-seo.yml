@@ -1,0 +1,19 @@
+# git-seo configuration for BerryWiki Scaffolding
+
+seo:
+  site_name: "BerryWiki Estate"
+  default_author: "hyperpolymath"
+  sitemap: true
+  canonical_base: "https://hyperpolymath.github.io/"
+
+# Enables auto-healing of broken markdown links
+link_healer:
+  enabled: true
+  strategy: "fuzzy-match"
+  auto_commit: false # Create a PR or suggest changes instead
+
+# Inject semantic RDFa / JSON-LD for graph views
+semantic_graph:
+  enabled: true
+  auto_inject_metadata: true
+  default_ontology: "https://schema.org/"
