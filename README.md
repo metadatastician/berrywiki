@@ -28,12 +28,10 @@ Implemented so far:
 
 ## Technology
 
-- **Engine & tooling: Rust** (estate default *Rust → Rust/GNATprove*;
+- **Engine & tooling: Rust** (estate default *Rust/GNATprove*;
   mathematically sound base).
-- **Web UI: AffineScript → typed-wasm, deferred** until the language reaches
-  base-language completion.
-- **Docs:** AsciiDoc (`.adoc`) for technical docs, ADRs, and community-health files;
-  Markdown (`.md`) for wiki content only.
+- **Web UI: typed-wasm**, deferred until the language reaches base-language completion.
+- **Docs:** AsciiDoc (`.adoc`) for technical docs and ADRs; Markdown (`.md`) for wiki content and community-health files.
 
 ## Layout
 
@@ -55,4 +53,4 @@ cargo clippy --all-targets -- -D warnings
 
 ## Licence
 
-Code is under MPL-2.0 and docs are under CC-BY-SA-4.0.
+Dual-licensed under MPL-2.0 for code and CC-BY-SA-4.0 for docs.
