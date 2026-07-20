@@ -802,8 +802,8 @@ system-sqlite variant considered for the Guix package).
 [#spark]
 == SPARK proof roadmap
 
-SPARK enters *post-MVP*, never on the MVP critical path — proof effort does
-not advance daily use, and the estate default "Rust → Rust/SPARK" is
+GNATprove enters *post-MVP*, never on the MVP critical path — proof effort does
+not advance daily use, and the estate default "Rust → Rust/GNATprove" is
 explicitly opportunistic. Two judges independently flagged the one design
 that put gnatprove inside the MVP gate as the proof-before-product pattern
 the estate's own SPARK-theatre cleanup exists to prevent. The MVP prepares

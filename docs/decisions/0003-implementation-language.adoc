@@ -25,11 +25,11 @@ library — it is still being driven toward base-language completion.
 
 == Decision
 
-. *TypeScript is rejected outright.* It is not used anywhere in BerryWiki.
+. *TypeScript is rejected outright.*
 . *The core engine and all Phase-0 tooling are written in Rust.* This matches
-  the _Rust → Rust/SPARK_ default and gives a mature, testable base today. The
+  the _Rust → Rust/GNATprove_ default and gives a mature, testable base today. The
   engine's invariants (deterministic round-trip, acyclic hierarchy,
-  deterministic sidebar) are earmarked for SPARK/Ada proof in a later hardening
+  deterministic sidebar) are earmarked for proof in a later hardening
   phase.
 . *The web UI will be AffineScript → typed-wasm, deferred* until AffineScript
   reaches sufficient maturity. Building the UI in AffineScript now would be
