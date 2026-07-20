@@ -982,7 +982,7 @@ slice is executed.
 * *Demote-or-gate language slip:* "provably/proven" is used for
   merely harness-tested behaviour; reserve it for a gating `gnatprove` lane.
 * *AsciiDoc-by-default slip:* the S5.2 import report is specified as Markdown;
-  technical reports are AsciiDoc (Markdown is for wiki/community-health files).
+  technical reports are AsciiDoc (Markdown is for wiki content only; AsciiDoc for community-health files).
 * *Grep gates false-positive:* the `--force`/`reset --hard` source scan will
   match the force-push audit test and the command-enum docs (tests live in
   `src/` here). Scope the gate to exclude tests/docs or assert on the enum.
