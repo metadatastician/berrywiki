@@ -14,7 +14,7 @@ repository.workspace = true
 # keeping the crate buildable on the host's rustc 1.85 (comrak's default tree
 # pulls darling 0.23, which demands rustc 1.88). Source stays canonical; this
 # produces a *preview*. Syntax highlighting can return later behind a feature.
-comrak = { version = "0.53", default-features = false }
+comrak = { version = "0.54", default-features = false }
 
 [lints.rust]
 unsafe_code = "forbid"

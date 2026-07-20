@@ -36,6 +36,8 @@ jobs:
       - name: clippy (deny warnings)
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@master
   test:
     name: test (rust ${{ matrix.rust }})
     runs-on: ubuntu-latest
