@@ -28,13 +28,12 @@ Implemented so far:
 
 ## Technology
 
-- **Engine & tooling: Rust** (estate default *Rust → Rust/SPARK*; the core's
-  invariants are candidates for SPARK/Ada proof later). TypeScript is **not**
-  used anywhere — see [ADR-0003](docs/decisions/0003-implementation-language.adoc).
+- **Engine & tooling: Rust** (estate default *Rust → Rust/GNATprove*;
+  mathematically sound base).
 - **Web UI: AffineScript → typed-wasm, deferred** until the language reaches
   base-language completion.
-- **Docs:** AsciiDoc (`.adoc`) for technical docs and ADRs; Markdown (`.md`)
-  for wiki content and community-health files.
+- **Docs:** AsciiDoc (`.adoc`) for technical docs, ADRs, and community-health files;
+  Markdown (`.md`) for wiki content only.
 
 ## Layout
 
@@ -56,4 +55,4 @@ cargo clippy --all-targets -- -D warnings
 
 ## Licence
 
-Dual-licensed under MIT OR Apache-2.0.
+Code is under MPL-2.0 and docs are under CC-BY-SA-4.0.
