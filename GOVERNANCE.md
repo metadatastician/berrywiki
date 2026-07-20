@@ -8,6 +8,10 @@ This project is governed by the following principles and structures to ensure tr
 
 ### Maintainers
 
+The current maintainers are:
+- @hyperpolymath (Jonathan D.A. Jewell) - Lead Maintainer
+- @metadatastician - Co-maintainer
+
 Maintainers are responsible for:
 - Reviewing and merging pull requests
 - Managing releases and versioning

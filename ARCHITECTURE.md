@@ -29,6 +29,12 @@ Inspired by `formatrix-docs`, features include:
 - **AAA WCAG Accessibility:** Extreme compliance for interactive markdown blocks.
 - **Editor Tooling:** Side-by-side or top-and-bottom preview split-modes, "glyph/block mode" layouts, and live-linting sidebars.
 
+## Architecture Owners
+
+The following individuals are responsible for the overall architecture and technical direction:
+- @hyperpolymath (Jonathan D.A. Jewell) - Lead Architect
+- @metadatastician - Co-Architect
+
 ## Out-of-the-Box Integrations
 - **SEO Optimization:** BerryWiki ships pre-configured with `git-seo` hooks to ensure maximum search engine visibility for generated static wikis.
 - **Semantic Network:** Every output page automatically renders Obsidian-style network graphs showing page inter-connectivity.

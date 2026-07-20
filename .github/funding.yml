@@ -1,4 +1,23 @@
-# Funding Configuration
-# See: https://docs.github.com/en/repositories/managing-your-repositorys-custom-fields/displaying-a-sponsor-button-in-your-repository
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# Funding platforms for berrywiki project
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
 
+# Primary accounts
+github: hyperpolymath
 github: metadatastician
+
+# Additional funding platforms
+ko_fi: hyperpolymath
+liberapay: hyperpolymath
+opencollective: hyperpolymath
+patreon: hyperpolymath
+buymeacoffee: hyperpolymath
+paypal: hyperpolymath
+
+# Secondary/fallback accounts
+ko_fi: metadatastician
+liberapay: metadatastician
+opencollective: metadatastician
+patreon: metadatastician
+buymeacoffee: metadatastician
+paypal: metadatastician
