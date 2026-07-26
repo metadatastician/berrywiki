@@ -7,6 +7,7 @@ on:
 
 # Minimal permissions (spec: least privilege).
 permissions:
+  actions: read
   contents: read
 
 concurrency:
