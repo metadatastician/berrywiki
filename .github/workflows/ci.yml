@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@77011b6065363453e991777897939c35b0758994 # stable
         with:
           components: rustfmt, clippy
@@ -50,7 +50,7 @@ jobs:
         # catches issues the pinned toolchain would miss.
         rust: ["1.85.0", "stable"]
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@77011b6065363453e991777897939c35b0758994 # master
         with:
           toolchain: ${{ matrix.rust }}
