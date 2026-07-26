@@ -26,12 +26,12 @@ jobs:
       fail-fast: false
     steps:
       - name: Checkout repository
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v7
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@29b1f65c1f735799893313399435a59f54045865 # v3
         with:
-          languages: rust
+          languages: auto
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@29b1f65c1f735799893313399435a59f54045865 # v3

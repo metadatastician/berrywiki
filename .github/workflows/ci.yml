@@ -20,6 +20,7 @@ jobs:
   lint:
     name: rustfmt + clippy
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v7
       - uses: dtolnay/rust-toolchain@77011b6065363453e991777897939c35b0758994 # stable
@@ -41,6 +42,7 @@ jobs:
   test:
     name: test (rust ${{ matrix.rust }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
