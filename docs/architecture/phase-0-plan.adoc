@@ -16,16 +16,13 @@ Markdown?* — and it builds the parts that do not depend on live GitHub access.
 
 == Technology decisions (locked for Phase 0)
 
-* *Engine & tooling: Rust.* Estate default is _Rust → Rust/SPARK_. The core's
-  invariants (deterministic round-trip, acyclic hierarchy, deterministic
-  sidebar) are natural SPARK/Ada proof candidates in a later phase.
+* *Engine & tooling: Rust.* Estate default is _Rust → Rust/GNATprove_.
+  Mathematically sound base.
   See link:../decisions/0003-implementation-language.adoc[ADR-0003].
-* *No TypeScript, anywhere.* The upstream spec's "TypeScript monorepo" was an
-  external artefact and is explicitly rejected.
 * *Web UI: AffineScript → typed-wasm, deferred* until AffineScript reaches
   base-language completion. Not started in Phase 0.
-* *Docs:* AsciiDoc (`.adoc`) for technical docs/ADRs; Markdown (`.md`) for wiki
-  content and community-health files.
+* *Docs:* AsciiDoc (`.adoc`) for technical docs/ADRs and community-health files;
+  Markdown (`.md`) for wiki content only.
 
 == What Phase 0 delivers
 
