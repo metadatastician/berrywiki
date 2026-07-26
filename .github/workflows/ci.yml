@@ -20,6 +20,7 @@ jobs:
   lint:
     name: rustfmt + clippy
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -37,10 +38,11 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@master
+        uses: SonarSource/sonarqube-scan-action@1.0.0
   test:
     name: test (rust ${{ matrix.rust }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -49,7 +51,7 @@ jobs:
         rust: ["1.85.0", "stable"]
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.rust }}
       - uses: Swatinem/rust-cache@v2
