@@ -67,7 +67,10 @@ impl PageGraph {
                 .entry(p.wiki_link_target().to_lowercase())
                 .or_default()
                 .push(idx);
-            by_title.entry(p.title.to_lowercase()).or_default().push(idx);
+            by_title
+                .entry(p.title.to_lowercase())
+                .or_default()
+                .push(idx);
         }
 
         let mut backlinks: HashMap<String, Vec<Backlink>> = HashMap::new();
@@ -137,9 +140,7 @@ impl PageGraph {
                         diagnostics.push(
                             Diagnostic::warning(
                                 "graph.missing-parent",
-                                format!(
-                                    "Parent id {parent:?} not found; page treated as a root."
-                                ),
+                                format!("Parent id {parent:?} not found; page treated as a root."),
                             )
                             .with_page(p.id.clone()),
                         );
@@ -308,7 +309,10 @@ mod tests {
         assert_eq!(roots[0].id, "root");
         let kids = g.children_of("root");
         // position 10 (a) before 20 (b), regardless of input order
-        assert_eq!(kids.iter().map(|k| k.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+        assert_eq!(
+            kids.iter().map(|k| k.id.as_str()).collect::<Vec<_>>(),
+            ["a", "b"]
+        );
     }
 
     #[test]
@@ -338,7 +342,10 @@ mod tests {
         let pages = vec![page("orphan", Some("ghost"), 0, "Orphan", "")];
         let g = PageGraph::build(pages);
         assert_eq!(g.roots().len(), 1);
-        assert!(g.diagnostics().iter().any(|d| d.code == "graph.missing-parent"));
+        assert!(g
+            .diagnostics()
+            .iter()
+            .any(|d| d.code == "graph.missing-parent"));
     }
 
     #[test]
@@ -360,7 +367,10 @@ mod tests {
             page("dup", None, 1, "Second", ""),
         ];
         let g = PageGraph::build(pages);
-        assert!(g.diagnostics().iter().any(|d| d.code == "graph.duplicate-id"));
+        assert!(g
+            .diagnostics()
+            .iter()
+            .any(|d| d.code == "graph.duplicate-id"));
     }
 
     #[test]

@@ -82,7 +82,11 @@ fn creates_child_page_with_hierarchical_filename_and_sidebar() {
     let dir = scratch_wiki();
     let mut store = LocalFolderStore::open(&dir).unwrap();
     store
-        .create_page(create_input("new-child-1", "Reading List", Some(COURSE_A_ID)))
+        .create_page(create_input(
+            "new-child-1",
+            "Reading List",
+            Some(COURSE_A_ID),
+        ))
         .unwrap();
 
     let expected = dir.join("Teaching--Course-A--Reading-List.md");
@@ -200,7 +204,9 @@ fn move_nonleaf_cascades_descendant_filenames() {
     // The whole subtree's filenames are recomputed…
     assert!(dir.join("Research--Teaching.md").exists());
     assert!(dir.join("Research--Teaching--Course-A.md").exists());
-    assert!(dir.join("Research--Teaching--Course-A--Assessment-Plan.md").exists());
+    assert!(dir
+        .join("Research--Teaching--Course-A--Assessment-Plan.md")
+        .exists());
     // …and the old ones are gone (no orphans).
     assert!(!dir.join("Teaching.md").exists());
     assert!(!dir.join("Teaching--Course-A.md").exists());
@@ -208,15 +214,28 @@ fn move_nonleaf_cascades_descendant_filenames() {
 
     // Only the moved page is re-parented; descendants keep their (id-based)
     // parents — just their filenames changed.
-    assert_eq!(store.read_page(TEACHING_ID).unwrap().parent_id(), Some(RESEARCH_ID));
-    assert_eq!(store.read_page(COURSE_A_ID).unwrap().parent_id(), Some(TEACHING_ID));
-    assert_eq!(store.read_page(PLAN_ID).unwrap().parent_id(), Some(COURSE_A_ID));
+    assert_eq!(
+        store.read_page(TEACHING_ID).unwrap().parent_id(),
+        Some(RESEARCH_ID)
+    );
+    assert_eq!(
+        store.read_page(COURSE_A_ID).unwrap().parent_id(),
+        Some(TEACHING_ID)
+    );
+    assert_eq!(
+        store.read_page(PLAN_ID).unwrap().parent_id(),
+        Some(COURSE_A_ID)
+    );
     assert_eq!(
         store.read_page(PLAN_ID).unwrap().path,
         "Research--Teaching--Course-A--Assessment-Plan.md"
     );
     // Content survived the cascade.
-    assert!(store.read_page(PLAN_ID).unwrap().body.contains("## Weighting"));
+    assert!(store
+        .read_page(PLAN_ID)
+        .unwrap()
+        .body
+        .contains("## Weighting"));
 }
 
 #[test]
@@ -225,7 +244,11 @@ fn move_rewrites_inbound_links_so_they_still_resolve() {
     let mut store = LocalFolderStore::open(&dir).unwrap();
     // Baseline: Home links to the Assessment Plan by its (old) stem + heading,
     // so the plan has a backlink from Home.
-    assert!(store.graph().backlinks_of(PLAN_ID).iter().any(|b| b.from_id == HOME_ID));
+    assert!(store
+        .graph()
+        .backlinks_of(PLAN_ID)
+        .iter()
+        .any(|b| b.from_id == HOME_ID));
 
     store
         .move_page(MovePageInput {
@@ -238,7 +261,11 @@ fn move_rewrites_inbound_links_so_they_still_resolve() {
     // Without link rewriting this backlink would break; with it, the inbound
     // link was updated to the new stem and still resolves.
     assert!(
-        store.graph().backlinks_of(PLAN_ID).iter().any(|b| b.from_id == HOME_ID),
+        store
+            .graph()
+            .backlinks_of(PLAN_ID)
+            .iter()
+            .any(|b| b.from_id == HOME_ID),
         "Home's link to the moved page was rewritten and still resolves"
     );
     let home_src = &store.read_page(HOME_ID).unwrap().source;
@@ -265,10 +292,18 @@ fn move_with_duplicate_title_siblings_does_not_rotate_or_corrupt_links() {
     // P and M are both NON-roots (under Home): a root contributes no filename
     // segment, so only a non-root ancestor prefixes its descendants. This makes
     // the move actually rename the subtree ("M--…" -> "P--M--…").
-    store.create_page(create_input("pp", "P", Some(HOME_ID))).unwrap();
-    store.create_page(create_input("mm", "M", Some(HOME_ID))).unwrap();
-    store.create_page(create_input("child-aaa1", "Notes", Some("mm"))).unwrap(); // -> M--Notes.md
-    store.create_page(create_input("child-bbb2", "Notes", Some("mm"))).unwrap(); // -> M--Notes--bbb2.md
+    store
+        .create_page(create_input("pp", "P", Some(HOME_ID)))
+        .unwrap();
+    store
+        .create_page(create_input("mm", "M", Some(HOME_ID)))
+        .unwrap();
+    store
+        .create_page(create_input("child-aaa1", "Notes", Some("mm")))
+        .unwrap(); // -> M--Notes.md
+    store
+        .create_page(create_input("child-bbb2", "Notes", Some("mm")))
+        .unwrap(); // -> M--Notes--bbb2.md
     assert!(dir.join("M--Notes.md").exists());
     assert!(dir.join("M--Notes--bbb2.md").exists());
 
@@ -276,8 +311,16 @@ fn move_with_duplicate_title_siblings_does_not_rotate_or_corrupt_links() {
     let mut linker = create_input("linker", "Linker", None);
     linker.body = "See [[M--Notes]] and [[M--Notes--bbb2]].\n".to_string();
     store.create_page(linker).unwrap();
-    assert!(store.graph().backlinks_of("child-aaa1").iter().any(|b| b.from_id == "linker"));
-    assert!(store.graph().backlinks_of("child-bbb2").iter().any(|b| b.from_id == "linker"));
+    assert!(store
+        .graph()
+        .backlinks_of("child-aaa1")
+        .iter()
+        .any(|b| b.from_id == "linker"));
+    assert!(store
+        .graph()
+        .backlinks_of("child-bbb2")
+        .iter()
+        .any(|b| b.from_id == "linker"));
 
     // Move M under P — both children are renamed, but must not swap identities.
     store
@@ -289,19 +332,33 @@ fn move_with_duplicate_title_siblings_does_not_rotate_or_corrupt_links() {
         .unwrap();
 
     // Both children survive with prefixed-but-still-distinct names.
-    assert_eq!(store.read_page("child-aaa1").unwrap().path, "P--M--Notes.md");
-    assert_eq!(store.read_page("child-bbb2").unwrap().path, "P--M--Notes--bbb2.md");
+    assert_eq!(
+        store.read_page("child-aaa1").unwrap().path,
+        "P--M--Notes.md"
+    );
+    assert_eq!(
+        store.read_page("child-bbb2").unwrap().path,
+        "P--M--Notes--bbb2.md"
+    );
     assert!(dir.join("P--M--Notes.md").exists());
     assert!(dir.join("P--M--Notes--bbb2.md").exists());
 
     // Crucially: each link still points at ITS OWN page (no double-rewrite
     // collapsing both onto one). Both backlinks survive and are distinct.
     assert!(
-        store.graph().backlinks_of("child-aaa1").iter().any(|b| b.from_id == "linker"),
+        store
+            .graph()
+            .backlinks_of("child-aaa1")
+            .iter()
+            .any(|b| b.from_id == "linker"),
         "link to the clean sibling preserved"
     );
     assert!(
-        store.graph().backlinks_of("child-bbb2").iter().any(|b| b.from_id == "linker"),
+        store
+            .graph()
+            .backlinks_of("child-bbb2")
+            .iter()
+            .any(|b| b.from_id == "linker"),
         "link to the suffixed sibling not corrupted onto the other page"
     );
 }
@@ -316,7 +373,11 @@ fn move_rewrites_whitespace_padded_links() {
     wsp.body = "See [[ Teaching--Course-A ]] and [d]( Teaching--Course-A ).\n".to_string();
     store.create_page(wsp).unwrap();
     // Baseline: both padded links resolve to Course A.
-    assert!(store.graph().backlinks_of(COURSE_A_ID).iter().any(|b| b.from_id == "wsp"));
+    assert!(store
+        .graph()
+        .backlinks_of(COURSE_A_ID)
+        .iter()
+        .any(|b| b.from_id == "wsp"));
 
     store
         .move_page(MovePageInput {
@@ -328,10 +389,18 @@ fn move_rewrites_whitespace_padded_links() {
 
     // After the move the padded links were rewritten and still resolve.
     assert!(
-        store.graph().backlinks_of(COURSE_A_ID).iter().any(|b| b.from_id == "wsp"),
+        store
+            .graph()
+            .backlinks_of(COURSE_A_ID)
+            .iter()
+            .any(|b| b.from_id == "wsp"),
         "whitespace-padded links were rewritten and still resolve"
     );
-    assert!(store.read_page("wsp").unwrap().source.contains("Research--Course-A"));
+    assert!(store
+        .read_page("wsp")
+        .unwrap()
+        .source
+        .contains("Research--Course-A"));
 }
 
 #[test]
@@ -375,7 +444,10 @@ fn attachments_are_id_keyed_and_traversal_proof() {
     assert!(dir.join(&att.path).exists());
 
     let dup = store.add_attachment(PLAN_ID, "rubric.pdf", b"other");
-    assert!(matches!(dup.unwrap_err(), StoreError::DuplicateAttachment { .. }));
+    assert!(matches!(
+        dup.unwrap_err(),
+        StoreError::DuplicateAttachment { .. }
+    ));
 
     for evil in ["../evil.pdf", "..", "a/b.pdf", "a\\b.pdf", ".hidden"] {
         let err = store.add_attachment(PLAN_ID, evil, b"x").unwrap_err();
@@ -449,10 +521,10 @@ fn planted_symlink_at_temp_path_cannot_redirect_writes() {
 
     // Hostile repo content: a symlink sitting exactly where safe_write puts
     // its temp file, pointing at a victim outside the wiki root.
-    let victim = dir.parent().unwrap().join(format!(
-        "berrywiki-victim-{}.txt",
-        std::process::id()
-    ));
+    let victim = dir
+        .parent()
+        .unwrap()
+        .join(format!("berrywiki-victim-{}.txt", std::process::id()));
     fs::write(&victim, "untouched").unwrap();
     let tmp_path = dir.join(format!("Teaching.md.tmp-{}", std::process::id()));
     std::os::unix::fs::symlink(&victim, &tmp_path).unwrap();
@@ -477,10 +549,10 @@ fn reload_ignores_symlinked_pages() {
         // A dangling symlink and a link to an outside file: neither may enter
         // the graph as content.
         std::os::unix::fs::symlink("/nonexistent/target.md", dir.join("Dangling.md")).unwrap();
-        let outside = dir.parent().unwrap().join(format!(
-            "berrywiki-outside-{}.md",
-            std::process::id()
-        ));
+        let outside = dir
+            .parent()
+            .unwrap()
+            .join(format!("berrywiki-outside-{}.md", std::process::id()));
         fs::write(&outside, "# Smuggled\n").unwrap();
         std::os::unix::fs::symlink(&outside, dir.join("Smuggled.md")).unwrap();
         store.reload().unwrap();
@@ -529,7 +601,10 @@ fn case_insensitive_filename_collision_is_suffixed() {
     // page landed on a distinct id-suffixed name.
     assert!(!dir.join("research.md").exists());
     let created = &store.read_page("res-lc").unwrap().path;
-    assert!(created.to_lowercase().starts_with("research--"), "got {created}");
+    assert!(
+        created.to_lowercase().starts_with("research--"),
+        "got {created}"
+    );
     assert!(dir.join(created).exists());
 }
 
@@ -539,7 +614,11 @@ fn create_rejects_unmanaged_parent() {
     let dir = scratch_wiki();
     let mut store = LocalFolderStore::open(&dir).unwrap();
     let err = store
-        .create_page(create_input("child-x", "Child", Some("Plain-Legacy-Page.md")))
+        .create_page(create_input(
+            "child-x",
+            "Child",
+            Some("Plain-Legacy-Page.md"),
+        ))
         .unwrap_err();
     assert!(matches!(err, StoreError::UnmanagedParent(_)), "got {err}");
 }
@@ -566,7 +645,10 @@ fn create_preserves_title_when_body_starts_with_h2() {
     input.body = "## A Section\n\ntext\n".to_string();
     store.create_page(input).unwrap();
     let page = store.read_page("h2-body").unwrap();
-    assert_eq!(page.title, "My Real Title", "supplied title kept, not dropped");
+    assert_eq!(
+        page.title, "My Real Title",
+        "supplied title kept, not dropped"
+    );
 }
 
 #[test]
@@ -577,7 +659,10 @@ fn non_utf8_file_is_skipped_not_fatal() {
     let store = LocalFolderStore::open(&dir).unwrap(); // must still open
     assert!(store.list_pages().iter().any(|p| p.title == "Home"));
     assert!(
-        store.load_diagnostics().iter().any(|d| d.code == "store.unreadable-file"),
+        store
+            .load_diagnostics()
+            .iter()
+            .any(|d| d.code == "store.unreadable-file"),
         "the skipped file is surfaced as a diagnostic"
     );
 }
@@ -592,9 +677,15 @@ fn duplicate_id_makes_mutations_refuse_safely() {
     let mut store = LocalFolderStore::open(&dir).unwrap();
 
     let err = store.update_page(PLAN_ID, "# x\n").unwrap_err();
-    assert!(matches!(err, StoreError::AmbiguousId(_)), "update refused: {err}");
+    assert!(
+        matches!(err, StoreError::AmbiguousId(_)),
+        "update refused: {err}"
+    );
     let err = store.delete_page(PLAN_ID).unwrap_err();
-    assert!(matches!(err, StoreError::AmbiguousId(_)), "delete refused: {err}");
+    assert!(
+        matches!(err, StoreError::AmbiguousId(_)),
+        "delete refused: {err}"
+    );
     // Both files still on disk — nothing was acted on.
     assert!(dir.join("Twin.md").exists());
     assert!(dir.join("Teaching--Course-A--Assessment-Plan.md").exists());
@@ -628,7 +719,9 @@ fn external_modification_is_refused_as_stale_write() {
         other => panic!("expected StaleWrite, got {other:?}"),
     }
     // The external change is intact; our write was refused.
-    assert!(fs::read_to_string(dir.join("Teaching.md")).unwrap().contains("another process"));
+    assert!(fs::read_to_string(dir.join("Teaching.md"))
+        .unwrap()
+        .contains("another process"));
 }
 
 /// Build one journal line for `old -> new`, stamping the old file's *current*
@@ -663,8 +756,14 @@ fn crashed_move_is_recovered_on_open() {
     fs::write(&jp, journal_line(&dir, "Home.md", "Home-moved.md")).unwrap();
 
     let store = LocalFolderStore::open(&dir).unwrap();
-    assert!(!dir.join("Home.md").exists(), "stale old file cleaned up on open");
-    assert!(dir.join("Home-moved.md").exists(), "moved content preserved");
+    assert!(
+        !dir.join("Home.md").exists(),
+        "stale old file cleaned up on open"
+    );
+    assert!(
+        dir.join("Home-moved.md").exists(),
+        "moved content preserved"
+    );
     assert!(!jp.exists(), "journal cleared after recovery");
     assert_eq!(store.read_page(HOME_ID).unwrap().path, "Home-moved.md");
 }
@@ -678,12 +777,21 @@ fn recovery_preserves_an_old_file_edited_after_the_crash() {
     let jp = journal_path_for(&dir);
     fs::copy(dir.join("Home.md"), dir.join("Home-moved.md")).unwrap();
     let line = journal_line(&dir, "Home.md", "Home-moved.md"); // fingerprint AS OF NOW
-    fs::write(dir.join("Home.md"), "# Home\n\nEDITED AFTER THE CRASH — unique work\n").unwrap();
+    fs::write(
+        dir.join("Home.md"),
+        "# Home\n\nEDITED AFTER THE CRASH — unique work\n",
+    )
+    .unwrap();
     fs::write(&jp, line).unwrap();
 
     let _ = LocalFolderStore::open(&dir).unwrap(); // runs recovery
-    assert!(dir.join("Home.md").exists(), "post-crash edit must be preserved");
-    assert!(fs::read_to_string(dir.join("Home.md")).unwrap().contains("EDITED AFTER THE CRASH"));
+    assert!(
+        dir.join("Home.md").exists(),
+        "post-crash edit must be preserved"
+    );
+    assert!(fs::read_to_string(dir.join("Home.md"))
+        .unwrap()
+        .contains("EDITED AFTER THE CRASH"));
 }
 
 #[test]
@@ -693,15 +801,33 @@ fn recovery_completes_inbound_link_rewrites() {
     // dangles to the deleted old stem.
     let dir = scratch_wiki();
     let jp = journal_path_for(&dir);
-    fs::copy(dir.join("Teaching--Course-A.md"), dir.join("Research--Course-A.md")).unwrap();
-    fs::write(dir.join("Linker.md"), "# Linker\n\nsee [[Teaching--Course-A]]\n").unwrap();
-    fs::write(&jp, journal_line(&dir, "Teaching--Course-A.md", "Research--Course-A.md")).unwrap();
+    fs::copy(
+        dir.join("Teaching--Course-A.md"),
+        dir.join("Research--Course-A.md"),
+    )
+    .unwrap();
+    fs::write(
+        dir.join("Linker.md"),
+        "# Linker\n\nsee [[Teaching--Course-A]]\n",
+    )
+    .unwrap();
+    fs::write(
+        &jp,
+        journal_line(&dir, "Teaching--Course-A.md", "Research--Course-A.md"),
+    )
+    .unwrap();
 
     let _ = LocalFolderStore::open(&dir).unwrap();
-    assert!(!dir.join("Teaching--Course-A.md").exists(), "stale old file removed");
+    assert!(
+        !dir.join("Teaching--Course-A.md").exists(),
+        "stale old file removed"
+    );
     assert!(dir.join("Research--Course-A.md").exists());
     let linker = fs::read_to_string(dir.join("Linker.md")).unwrap();
-    assert!(linker.contains("[[Research--Course-A]]"), "dangling link healed: {linker}");
+    assert!(
+        linker.contains("[[Research--Course-A]]"),
+        "dangling link healed: {linker}"
+    );
 }
 
 #[test]
@@ -710,7 +836,11 @@ fn reload_picks_up_external_edits() {
     let mut store = LocalFolderStore::open(&dir).unwrap();
     // Simulate an external editor adding a page (the "usable without the
     // app" guarantee in reverse).
-    fs::write(dir.join("Hand-Written.md"), "# Hand Written\n\nvia $EDITOR\n").unwrap();
+    fs::write(
+        dir.join("Hand-Written.md"),
+        "# Hand Written\n\nvia $EDITOR\n",
+    )
+    .unwrap();
     store.reload().unwrap();
     assert!(store.list_pages().iter().any(|p| p.title == "Hand Written"));
 }

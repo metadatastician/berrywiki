@@ -109,19 +109,28 @@ mod tests {
         // browser, and surrounding content still renders.
         assert!(!html.contains("<script>"), "no live script element: {html}");
         assert!(!html.to_lowercase().contains("alert('xss')") || html.contains("omitted"));
-        assert!(html.contains("after"), "surrounding content still renders: {html}");
+        assert!(
+            html.contains("after"),
+            "surrounding content still renders: {html}"
+        );
     }
 
     #[test]
     fn inline_event_handler_html_cannot_pass_through() {
         let html = render_markdown("<img src=x onerror=alert(1)>\n");
-        assert!(!html.to_lowercase().contains("onerror=alert"), "no live handler: {html}");
+        assert!(
+            !html.to_lowercase().contains("onerror=alert"),
+            "no live handler: {html}"
+        );
     }
 
     #[test]
     fn javascript_link_is_neutralised() {
         let html = render_markdown("[click](javascript:alert(1))\n");
-        assert!(!html.contains("javascript:"), "dangerous scheme removed: {html}");
+        assert!(
+            !html.contains("javascript:"),
+            "dangerous scheme removed: {html}"
+        );
         assert!(html.contains("href=\"#\""));
     }
 
@@ -137,7 +146,10 @@ mod tests {
         let ok = render_markdown("![i](data:image/png;base64,iVBOR)\n");
         assert!(ok.contains("data:image/png"), "inert data-image kept: {ok}");
         let bad = render_markdown("[x](data:text/html,<script>1</script>)\n");
-        assert!(!bad.contains("data:text/html"), "active data URL removed: {bad}");
+        assert!(
+            !bad.contains("data:text/html"),
+            "active data URL removed: {bad}"
+        );
     }
 
     #[test]

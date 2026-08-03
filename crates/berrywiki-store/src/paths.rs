@@ -92,7 +92,7 @@ pub fn file_slug(title: &str) -> String {
     // "_Sidebar" would otherwise be silently clobbered by sidebar regeneration.
     collapsed
         .trim_matches('-')
-        .trim_start_matches(|c| c == '_' || c == '-')
+        .trim_start_matches(['_', '-'])
         .to_string()
 }
 
@@ -152,7 +152,10 @@ pub fn page_filename(ancestor_titles: &[String], title: &str) -> Result<String> 
     validate_component(&name)?;
     // Defence in depth: file_slug already strips leading underscores, but no
     // caller path may ever route a page onto a reserved control filename.
-    if RESERVED_PAGE_NAMES.iter().any(|r| name.eq_ignore_ascii_case(r)) {
+    if RESERVED_PAGE_NAMES
+        .iter()
+        .any(|r| name.eq_ignore_ascii_case(r))
+    {
         return Err(StoreError::InvalidName {
             name,
             reason: "reserved wiki control filename".to_string(),
@@ -165,7 +168,14 @@ pub fn page_filename(ancestor_titles: &[String], title: &str) -> Result<String> 
 /// (`Assessment-Plan--e256.md`, ADR-0001).
 pub fn with_id_suffix(filename: &str, id: &str) -> String {
     let stem = filename.strip_suffix(".md").unwrap_or(filename);
-    let tail: String = id.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+    let tail: String = id
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     format!("{stem}--{tail}.md")
 }
 
@@ -176,7 +186,10 @@ mod tests {
     #[test]
     fn slug_preserves_case_and_unicode() {
         assert_eq!(file_slug("Assessment Plan"), "Assessment-Plan");
-        assert_eq!(file_slug("Sandbox — Ünïcode & Spaces"), "Sandbox-Ünïcode-Spaces");
+        assert_eq!(
+            file_slug("Sandbox — Ünïcode & Spaces"),
+            "Sandbox-Ünïcode-Spaces"
+        );
     }
 
     #[test]
@@ -188,9 +201,11 @@ mod tests {
 
     #[test]
     fn builds_hierarchical_filename() {
-        let name =
-            page_filename(&["Teaching".to_string(), "Course A".to_string()], "Assessment Plan")
-                .unwrap();
+        let name = page_filename(
+            &["Teaching".to_string(), "Course A".to_string()],
+            "Assessment Plan",
+        )
+        .unwrap();
         assert_eq!(name, "Teaching--Course-A--Assessment-Plan.md");
     }
 

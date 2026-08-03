@@ -89,9 +89,7 @@ impl WikiPage {
     /// GitHub wiki link target for this page: the filename stem (no `.md`).
     /// Used by sidebar generation and link rewriting.
     pub fn wiki_link_target(&self) -> &str {
-        self.path
-            .strip_suffix(".md")
-            .unwrap_or(&self.path)
+        self.path.strip_suffix(".md").unwrap_or(&self.path)
     }
 
     pub fn is_archived(&self) -> bool {
@@ -131,7 +129,11 @@ pub fn extract_headings(body: &str) -> Vec<PageHeading> {
             if let Some(text) = rest.strip_prefix(' ') {
                 let text = text.trim().trim_end_matches('#').trim().to_string();
                 let anchor = slug(&text);
-                headings.push(PageHeading { depth, text, anchor });
+                headings.push(PageHeading {
+                    depth,
+                    text,
+                    anchor,
+                });
             }
         }
     }
@@ -261,7 +263,10 @@ fn internal_md_link(label: &str, target: &str) -> Option<PageLink> {
         Some((p, h)) => (p.trim(), Some(h.trim().to_string())),
         None => (target, None),
     };
-    let target_text = path_part.strip_suffix(".md").unwrap_or(path_part).to_string();
+    let target_text = path_part
+        .strip_suffix(".md")
+        .unwrap_or(path_part)
+        .to_string();
     Some(PageLink {
         raw,
         label: Some(label.to_string()),
@@ -319,8 +324,7 @@ mod tests {
 
     #[test]
     fn parses_internal_markdown_links_only() {
-        let body =
-            "[a](Other-Page) [ext](https://example.com) [root](/x) [img](assets/p.png#f)";
+        let body = "[a](Other-Page) [ext](https://example.com) [root](/x) [img](assets/p.png#f)";
         let ls = extract_links(body);
         // Other-Page and assets/p.png are internal; the http and /x links are not.
         let targets: Vec<&str> = ls.iter().map(|l| l.target_text.as_str()).collect();

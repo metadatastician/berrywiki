@@ -20,7 +20,10 @@ pub type Result<T> = std::result::Result<T, DraftError>;
 #[derive(Debug)]
 pub enum DraftError {
     InvalidPageId(String),
-    Io { context: String, source: std::io::Error },
+    Io {
+        context: String,
+        source: std::io::Error,
+    },
 }
 
 impl DraftError {
@@ -89,7 +92,13 @@ impl DraftStore {
         }
         let safe: String = page_id
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '-' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                    c
+                } else {
+                    '-'
+                }
+            })
             .collect();
         if safe.starts_with('.') {
             return Err(DraftError::InvalidPageId(page_id.to_string()));
@@ -131,7 +140,10 @@ impl DraftStore {
                 }))
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(DraftError::io(format!("reading the draft for {page_id:?}"), e)),
+            Err(e) => Err(DraftError::io(
+                format!("reading the draft for {page_id:?}"),
+                e,
+            )),
         }
     }
 
@@ -147,7 +159,10 @@ impl DraftStore {
         match fs::remove_file(&path) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(DraftError::io(format!("discarding the draft for {page_id:?}"), e)),
+            Err(e) => Err(DraftError::io(
+                format!("discarding the draft for {page_id:?}"),
+                e,
+            )),
         }
     }
 
@@ -239,8 +254,14 @@ mod tests {
     #[test]
     fn rejects_traversal_page_ids() {
         let s = DraftStore::new(scratch());
-        assert!(matches!(s.save("../evil", "x"), Err(DraftError::InvalidPageId(_))));
-        assert!(matches!(s.save("a/b", "x"), Err(DraftError::InvalidPageId(_))));
+        assert!(matches!(
+            s.save("../evil", "x"),
+            Err(DraftError::InvalidPageId(_))
+        ));
+        assert!(matches!(
+            s.save("a/b", "x"),
+            Err(DraftError::InvalidPageId(_))
+        ));
         assert!(matches!(s.save("", "x"), Err(DraftError::InvalidPageId(_))));
     }
 

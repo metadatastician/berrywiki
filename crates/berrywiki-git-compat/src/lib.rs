@@ -61,8 +61,7 @@ impl GitSandbox {
 
         git_in(&root, &["init", "--bare", "-b", "main", "remote.git"])
             .expect_success("init bare remote");
-        git_in(&root, &["clone", remote.to_str().unwrap(), "ours"])
-            .expect_success("clone ours");
+        git_in(&root, &["clone", remote.to_str().unwrap(), "ours"]).expect_success("clone ours");
 
         // Seed from the fixture (files only; the fixture itself is read-only).
         for entry in fs::read_dir(seed_dir).expect("read seed dir") {
@@ -82,7 +81,10 @@ impl GitSandbox {
             .git(&sandbox.ours.clone(), &["add", "-A"])
             .expect_success("stage seed");
         sandbox
-            .git(&sandbox.ours.clone(), &["commit", "-m", "Seed fixture wiki"])
+            .git(
+                &sandbox.ours.clone(),
+                &["commit", "-m", "Seed fixture wiki"],
+            )
             .expect_success("commit seed");
         sandbox
             .git(&sandbox.ours.clone(), &["push", "origin", "main"])
@@ -119,7 +121,8 @@ impl GitSandbox {
 
     /// Number of remote commits not yet in the local branch (after `fetch`).
     pub fn behind_by(&self, clone: &Path) -> usize {
-        self.git(clone, &["fetch", "origin"]).expect_success("fetch");
+        self.git(clone, &["fetch", "origin"])
+            .expect_success("fetch");
         let out = self
             .git(clone, &["rev-list", "--count", "HEAD..origin/main"])
             .expect_success("rev-list");

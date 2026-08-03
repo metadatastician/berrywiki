@@ -68,7 +68,11 @@ impl Diagnostic {
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.page {
-            Some(p) => write!(f, "[{}] {} ({}): {}", self.severity, self.code, p, self.message),
+            Some(p) => write!(
+                f,
+                "[{}] {} ({}): {}",
+                self.severity, self.code, p, self.message
+            ),
             None => write!(f, "[{}] {} : {}", self.severity, self.code, self.message),
         }
     }

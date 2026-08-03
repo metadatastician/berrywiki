@@ -36,11 +36,11 @@ fn engine_source_contains_no_destructive_git_tokens() {
         "--mirror",         // push --mirror can delete remote refs
         "--delete",         // push --delete removes a remote ref
         // Local history / working-tree discarding.
-        "--hard",           // reset --hard
-        "reset",            // any reset; the engine uses none
-        "restore",          // discards uncommitted changes to tracked files
-        "checkout",         // checkout -- <path> / -f discards changes; unused
-        "\"clean\"",        // clean -fd deletes untracked (quoted: not `is_clean`)
+        "--hard",    // reset --hard
+        "reset",     // any reset; the engine uses none
+        "restore",   // discards uncommitted changes to tracked files
+        "checkout",  // checkout -- <path> / -f discards changes; unused
+        "\"clean\"", // clean -fd deletes untracked (quoted: not `is_clean`)
     ];
     for needle in forbidden {
         assert!(

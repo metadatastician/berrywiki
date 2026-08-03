@@ -121,7 +121,10 @@ impl LocalFolderStore {
             return Ok(());
         };
 
-        let all_new_present = j.entries.iter().all(|e| self.root.join(&e.new_path).exists());
+        let all_new_present = j
+            .entries
+            .iter()
+            .all(|e| self.root.join(&e.new_path).exists());
         let mut forward: HashMap<String, String> = HashMap::new();
         let mut reverse: HashMap<String, String> = HashMap::new();
         for e in &j.entries {
@@ -130,8 +133,7 @@ impl LocalFolderStore {
         }
 
         if all_new_present {
-            let new_paths: HashSet<&str> =
-                j.entries.iter().map(|e| e.new_path.as_str()).collect();
+            let new_paths: HashSet<&str> = j.entries.iter().map(|e| e.new_path.as_str()).collect();
             for e in &j.entries {
                 if new_paths.contains(e.old_path.as_str()) {
                     continue;
@@ -155,8 +157,7 @@ impl LocalFolderStore {
             self.rewrite_folder_links(&reverse)?;
         }
 
-        MoveJournal::clear(&jp)
-            .map_err(|e| StoreError::io("clearing the operation journal", e))?;
+        MoveJournal::clear(&jp).map_err(|e| StoreError::io("clearing the operation journal", e))?;
         Ok(())
     }
 
@@ -320,13 +321,18 @@ impl LocalFolderStore {
             Ok(f) => f,
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                 // Stale temp or planted symlink: remove the entry, retry once.
-                fs::remove_file(&tmp)
-                    .map_err(|e| StoreError::io(format!("clearing stale temp for {relative:?}"), e))?;
-                open(&tmp)
-                    .map_err(|e| StoreError::io(format!("creating temp file for {relative:?}"), e))?
+                fs::remove_file(&tmp).map_err(|e| {
+                    StoreError::io(format!("clearing stale temp for {relative:?}"), e)
+                })?;
+                open(&tmp).map_err(|e| {
+                    StoreError::io(format!("creating temp file for {relative:?}"), e)
+                })?
             }
             Err(e) => {
-                return Err(StoreError::io(format!("creating temp file for {relative:?}"), e))
+                return Err(StoreError::io(
+                    format!("creating temp file for {relative:?}"),
+                    e,
+                ))
             }
         };
         file.write_all(content)
@@ -478,7 +484,8 @@ impl WikiStore for LocalFolderStore {
         // OS-dependent, and the graph's tie-breaking must be deterministic
         // (so a crash-mid-move duplicate-id state resolves the same way every
         // load).
-        let read = fs::read_dir(&self.root).map_err(|e| StoreError::io("listing the wiki folder", e))?;
+        let read =
+            fs::read_dir(&self.root).map_err(|e| StoreError::io("listing the wiki folder", e))?;
         let mut names: Vec<String> = Vec::new();
         for entry in read {
             let entry = entry.map_err(|e| StoreError::io("listing the wiki folder", e))?;
@@ -831,7 +838,12 @@ impl WikiStore for LocalFolderStore {
         Ok(())
     }
 
-    fn add_attachment(&mut self, page_id: &str, filename: &str, bytes: &[u8]) -> Result<Attachment> {
+    fn add_attachment(
+        &mut self,
+        page_id: &str,
+        filename: &str,
+        bytes: &[u8],
+    ) -> Result<Attachment> {
         self.ensure_unambiguous(page_id)?;
         let page = self.page(page_id)?; // page must exist…
         if page.metadata.is_none() {

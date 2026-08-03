@@ -319,7 +319,10 @@ impl GitRepo {
     /// a branch (a detached `HEAD`). An unborn branch (no commits yet) still
     /// reports its name, so it is correctly not treated as detached.
     pub fn current_branch(&self) -> Result<Option<String>, GitError> {
-        let out = self.exec("branch-name", &["symbolic-ref", "--short", "--quiet", "HEAD"])?;
+        let out = self.exec(
+            "branch-name",
+            &["symbolic-ref", "--short", "--quiet", "HEAD"],
+        )?;
         if out.success {
             Ok(Some(out.stdout.trim().to_string()))
         } else {

@@ -106,7 +106,8 @@ pub trait WikiStore {
     fn delete_page(&mut self, id: &str) -> Result<()>;
 
     /// Store an attachment under `assets/<page-id>/`.
-    fn add_attachment(&mut self, page_id: &str, filename: &str, bytes: &[u8]) -> Result<Attachment>;
+    fn add_attachment(&mut self, page_id: &str, filename: &str, bytes: &[u8])
+        -> Result<Attachment>;
 
     /// Regenerate `_Sidebar.md`. Returns `true` when the file was written,
     /// `false` when the existing content was already up to date.
