@@ -46,7 +46,9 @@ pub enum SyncError {
     Git(GitError),
     /// A merge is in progress in the clone (unmerged paths). Committing would
     /// bury the conflict markers as if resolved, so we refuse.
-    UnmergedPaths { paths: Vec<String> },
+    UnmergedPaths {
+        paths: Vec<String>,
+    },
     /// `HEAD` is detached; a commit would be unreachable and eventually lost.
     DetachedHead,
 }
@@ -224,7 +226,11 @@ impl<S: WikiStore> SyncedStore<S> {
         let title = input.title.clone();
         let id = self.store.create_page(input)?;
         let commit = self.git.commit_all(&msg_create(&title))?;
-        Ok(Saved { value: id, checkpoint, commit })
+        Ok(Saved {
+            value: id,
+            checkpoint,
+            commit,
+        })
     }
 
     pub fn update_page(&mut self, id: &str, new_body: &str) -> Result<Saved<()>> {
@@ -233,7 +239,11 @@ impl<S: WikiStore> SyncedStore<S> {
         // The body's H1 may have changed the title; read it back for the message.
         let title = self.store.read_page(id)?.title.clone();
         let commit = self.git.commit_all(&msg_update(&title))?;
-        Ok(Saved { value: (), checkpoint, commit })
+        Ok(Saved {
+            value: (),
+            checkpoint,
+            commit,
+        })
     }
 
     pub fn move_page(&mut self, input: MovePageInput) -> Result<Saved<()>> {
@@ -242,7 +252,11 @@ impl<S: WikiStore> SyncedStore<S> {
         self.store.move_page(input)?;
         let title = self.store.read_page(&id)?.title.clone();
         let commit = self.git.commit_all(&msg_move(&title))?;
-        Ok(Saved { value: (), checkpoint, commit })
+        Ok(Saved {
+            value: (),
+            checkpoint,
+            commit,
+        })
     }
 
     pub fn delete_page(&mut self, id: &str) -> Result<Saved<()>> {
@@ -251,7 +265,11 @@ impl<S: WikiStore> SyncedStore<S> {
         let title = self.store.read_page(id)?.title.clone();
         self.store.delete_page(id)?;
         let commit = self.git.commit_all(&msg_delete(&title))?;
-        Ok(Saved { value: (), checkpoint, commit })
+        Ok(Saved {
+            value: (),
+            checkpoint,
+            commit,
+        })
     }
 
     pub fn add_attachment(
@@ -264,7 +282,11 @@ impl<S: WikiStore> SyncedStore<S> {
         let title = self.store.read_page(page_id)?.title.clone();
         let attachment = self.store.add_attachment(page_id, filename, bytes)?;
         let commit = self.git.commit_all(&msg_attach(filename, &title))?;
-        Ok(Saved { value: attachment, checkpoint, commit })
+        Ok(Saved {
+            value: attachment,
+            checkpoint,
+            commit,
+        })
     }
 
     // ----- the remote cycle -----
@@ -275,11 +297,17 @@ impl<S: WikiStore> SyncedStore<S> {
         let checkpoint = self.ensure_committable()?;
         let divergence = self.git.divergence()?;
         if !divergence.has_upstream {
-            return Ok(Refreshed { checkpoint, divergence });
+            return Ok(Refreshed {
+                checkpoint,
+                divergence,
+            });
         }
         // Fetch before push (non-negotiable): the working tree is untouched.
         self.git.fetch()?;
-        Ok(Refreshed { checkpoint, divergence: self.git.divergence()? })
+        Ok(Refreshed {
+            checkpoint,
+            divergence: self.git.divergence()?,
+        })
     }
 
     /// Act on the *current* (already-fetched) divergence — no re-fetch, so only
@@ -321,7 +349,10 @@ impl<S: WikiStore> SyncedStore<S> {
     pub fn sync(&mut self) -> Result<SyncReport> {
         let refreshed = self.refresh()?;
         let outcome = self.advance()?;
-        Ok(SyncReport { checkpoint: refreshed.checkpoint, outcome })
+        Ok(SyncReport {
+            checkpoint: refreshed.checkpoint,
+            outcome,
+        })
     }
 
     /// Re-run [`SyncedStore::sync`] while the outcome is [`SyncOutcome::PushRaced`],

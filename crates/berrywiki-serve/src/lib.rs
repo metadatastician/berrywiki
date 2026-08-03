@@ -141,7 +141,11 @@ fn search_page(store: &LocalFolderStore, q: &str) -> Response {
                     "<li><a href=\"/page/{}\">{}</a>{}</li>",
                     escape_attr(&page.id),
                     escape_html(&page.title),
-                    if in_title { "" } else { " <small>(body)</small>" }
+                    if in_title {
+                        ""
+                    } else {
+                        " <small>(body)</small>"
+                    }
                 ));
             }
         }
@@ -218,7 +222,11 @@ fn nav_tree(store: &LocalFolderStore, current: Option<&str>) -> String {
              <a href=\"/page/{}\"{}>{}</a></li>",
             if is_current { " current" } else { "" },
             escape_attr(&page.id),
-            if is_current { " aria-current=\"page\"" } else { "" },
+            if is_current {
+                " aria-current=\"page\""
+            } else {
+                ""
+            },
             escape_html(&page.title),
         ));
     }
@@ -395,7 +403,7 @@ fn write_response(stream: &mut TcpStream, response: &Response) -> io::Result<()>
         response.status,
         reason(response.status),
         response.content_type,
-        response.body.as_bytes().len(),
+        response.body.len(),
     );
     stream.write_all(head.as_bytes())?;
     stream.write_all(response.body.as_bytes())?;

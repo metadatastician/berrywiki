@@ -128,7 +128,10 @@ mod tests {
         let wiki = std::env::temp_dir().join(format!("bw-wiki-{}", std::process::id()));
         std::fs::create_dir_all(&wiki).unwrap();
         let app = AppState::for_wiki(&wiki).unwrap();
-        assert!(!app.root().starts_with(&wiki), "app state must not be inside the clone");
+        assert!(
+            !app.root().starts_with(&wiki),
+            "app state must not be inside the clone"
+        );
         assert!(app.drafts_dir().starts_with(app.root()));
         assert!(app.journal_path().starts_with(app.root()));
         assert!(app.index_dir().starts_with(app.root()));

@@ -35,7 +35,10 @@ pub enum GithubError {
     /// `repo` could not be interpreted as a wiki target.
     BadRepo(String),
     /// A `git` invocation failed. `stderr` has the token redacted.
-    Git { context: String, stderr: String },
+    Git {
+        context: String,
+        stderr: String,
+    },
     Store(StoreError),
     Io(std::io::Error),
 }
@@ -95,7 +98,10 @@ pub fn wiki_git_url(repo: &str) -> Result<String> {
         && !r.contains(':')
         && !segs[0].contains('.')
     {
-        return Ok(format!("https://github.com/{}/{}.wiki.git", segs[0], segs[1]));
+        return Ok(format!(
+            "https://github.com/{}/{}.wiki.git",
+            segs[0], segs[1]
+        ));
     }
     // Otherwise treat as a direct remote (local bare repo, other URL form).
     Ok(r.to_string())
@@ -288,7 +294,10 @@ mod tests {
         );
         // Local bare repo paths pass through unchanged — including the
         // two-path-segment form that previously looked like an owner/name slug.
-        assert_eq!(wiki_git_url("/tmp/x/remote.git").unwrap(), "/tmp/x/remote.git");
+        assert_eq!(
+            wiki_git_url("/tmp/x/remote.git").unwrap(),
+            "/tmp/x/remote.git"
+        );
         assert_eq!(wiki_git_url("/tmp/bare.git").unwrap(), "/tmp/bare.git");
         assert_eq!(wiki_git_url("./local.git").unwrap(), "./local.git");
         assert!(wiki_git_url("").is_err());
@@ -296,7 +305,10 @@ mod tests {
 
     #[test]
     fn redaction_hides_token() {
-        assert_eq!(redact_token("auth secret123 fail", Some("secret123")), "auth *** fail");
+        assert_eq!(
+            redact_token("auth secret123 fail", Some("secret123")),
+            "auth *** fail"
+        );
         assert_eq!(redact_token("no token here", None), "no token here");
     }
 
@@ -305,7 +317,10 @@ mod tests {
         let s = askpass_script();
         assert!(s.contains("GIT_USERNAME"));
         assert!(s.contains("BERRYWIKI_TOKEN"));
-        assert!(s.contains("sername"), "handles the Username prompt distinctly");
+        assert!(
+            s.contains("sername"),
+            "handles the Username prompt distinctly"
+        );
     }
 
     #[test]
@@ -337,9 +352,17 @@ mod tests {
             .expect_success("push");
 
         // Before pull: not visible. After pull: visible.
-        assert!(!wiki.store().list_pages().iter().any(|p| p.title == "New Remote Page"));
+        assert!(!wiki
+            .store()
+            .list_pages()
+            .iter()
+            .any(|p| p.title == "New Remote Page"));
         wiki.pull().unwrap();
-        assert!(wiki.store().list_pages().iter().any(|p| p.title == "New Remote Page"));
+        assert!(wiki
+            .store()
+            .list_pages()
+            .iter()
+            .any(|p| p.title == "New Remote Page"));
     }
 
     #[test]

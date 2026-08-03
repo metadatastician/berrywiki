@@ -80,7 +80,14 @@ mod tests {
     use super::*;
     use crate::page::WikiPage;
 
-    fn page(id: &str, parent: Option<&str>, pos: i64, path: &str, title: &str, archived: bool) -> WikiPage {
+    fn page(
+        id: &str,
+        parent: Option<&str>,
+        pos: i64,
+        path: &str,
+        title: &str,
+        archived: bool,
+    ) -> WikiPage {
         let parent_line = match parent {
             Some(p) => format!("parent: {p}\n"),
             None => "parent: null\n".to_string(),
@@ -95,8 +102,22 @@ mod tests {
         PageGraph::build(vec![
             page("home", None, 0, "Home.md", "Home", false),
             page("teach", None, 10, "Teaching.md", "Teaching", false),
-            page("courseA", Some("teach"), 0, "Teaching--Course-A.md", "Course A", false),
-            page("plan", Some("courseA"), 0, "Teaching--Course-A--Assessment-Plan.md", "Assessment Plan", false),
+            page(
+                "courseA",
+                Some("teach"),
+                0,
+                "Teaching--Course-A.md",
+                "Course A",
+                false,
+            ),
+            page(
+                "plan",
+                Some("courseA"),
+                0,
+                "Teaching--Course-A--Assessment-Plan.md",
+                "Assessment Plan",
+                false,
+            ),
             page("old", None, 20, "Old.md", "Old Page", true),
         ])
     }

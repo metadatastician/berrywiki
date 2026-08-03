@@ -41,7 +41,9 @@ COMMANDS:
 pub fn run(args: &[String], out: &mut dyn Write) -> io::Result<i32> {
     match args.first().map(String::as_str) {
         Some("check") => cmd_check(first_path(&args[1..]), out),
-        Some("sidebar") => cmd_sidebar(first_path(&args[1..]), has_flag(&args[1..], "--write"), out),
+        Some("sidebar") => {
+            cmd_sidebar(first_path(&args[1..]), has_flag(&args[1..], "--write"), out)
+        }
         Some("serve") => cmd_serve(&args[1..], out),
         Some("--help") | Some("-h") | Some("help") | None => {
             write!(out, "{USAGE}")?;
@@ -57,7 +59,9 @@ pub fn run(args: &[String], out: &mut dyn Write) -> io::Result<i32> {
 
 /// First positional (non-`--`) argument, if any.
 fn first_path(args: &[String]) -> Option<&str> {
-    args.iter().find(|a| !a.starts_with("--")).map(String::as_str)
+    args.iter()
+        .find(|a| !a.starts_with("--"))
+        .map(String::as_str)
 }
 
 fn has_flag(args: &[String], flag: &str) -> bool {
@@ -91,7 +95,11 @@ fn cmd_check(path: Option<&str>, out: &mut dyn Write) -> io::Result<i32> {
 
     // Tree (deterministic pre-order).
     for (depth, page) in store.graph().walk() {
-        let marker = if page.is_archived() { " (archived)" } else { "" };
+        let marker = if page.is_archived() {
+            " (archived)"
+        } else {
+            ""
+        };
         writeln!(out, "{}- {}{marker}", "  ".repeat(depth), page.title)?;
     }
 

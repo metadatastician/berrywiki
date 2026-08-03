@@ -59,16 +59,33 @@ fn fixture_backlinks_resolve() {
     let home_id = "0195f6d0-0000-7000-8000-000000000001";
     // Sandbox and Plain Legacy Page both link to Home.
     let bl = graph.backlinks_of(home_id);
-    assert!(bl.len() >= 2, "Home has at least two backlinks, got {}", bl.len());
+    assert!(
+        bl.len() >= 2,
+        "Home has at least two backlinks, got {}",
+        bl.len()
+    );
 }
 
 #[test]
 fn fixture_reports_expected_diagnostics() {
     let graph = PageGraph::build(load_pages());
-    let codes: Vec<&str> = graph.diagnostics().iter().map(|d| d.code.as_str()).collect();
-    assert!(codes.contains(&"link.broken"), "broken [[Nonexistent Page]] link");
-    assert!(codes.contains(&"metadata.bad-position"), "malformed position");
-    assert!(codes.contains(&"metadata.bad-archived"), "malformed archived");
+    let codes: Vec<&str> = graph
+        .diagnostics()
+        .iter()
+        .map(|d| d.code.as_str())
+        .collect();
+    assert!(
+        codes.contains(&"link.broken"),
+        "broken [[Nonexistent Page]] link"
+    );
+    assert!(
+        codes.contains(&"metadata.bad-position"),
+        "malformed position"
+    );
+    assert!(
+        codes.contains(&"metadata.bad-archived"),
+        "malformed archived"
+    );
 }
 
 #[test]
@@ -78,7 +95,10 @@ fn fixture_sidebar_is_deterministic_and_excludes_archived() {
     let b = generate_sidebar(&graph, &SidebarOptions::default());
     assert_eq!(a, b, "sidebar generation is deterministic");
     assert!(a.contains("[Home](Home)"));
-    assert!(!a.contains("Archived Old Page"), "archived page excluded by default");
+    assert!(
+        !a.contains("Archived Old Page"),
+        "archived page excluded by default"
+    );
 }
 
 #[test]

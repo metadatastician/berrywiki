@@ -69,10 +69,9 @@ impl fmt::Display for StoreError {
                 "A page with id {id:?} already exists. Nothing was changed; \
                  use a fresh id."
             ),
-            StoreError::ParentNotFound(id) => write!(
-                f,
-                "Parent page {id:?} does not exist. Nothing was changed."
-            ),
+            StoreError::ParentNotFound(id) => {
+                write!(f, "Parent page {id:?} does not exist. Nothing was changed.")
+            }
             StoreError::UnmanagedParent(id) => write!(
                 f,
                 "Page {id:?} has no BerryWiki metadata, so it cannot be used as \

@@ -231,7 +231,8 @@ fn parse_block(lines: &[&str], diagnostics: &mut Vec<Diagnostic>) -> PageMetadat
             "tags" => {
                 if value == "[]" {
                     meta.tags = Vec::new();
-                } else if let Some(inner) = value.strip_prefix('[').and_then(|v| v.strip_suffix(']'))
+                } else if let Some(inner) =
+                    value.strip_prefix('[').and_then(|v| v.strip_suffix(']'))
                 {
                     // Inline list form: tags: [a, b]
                     meta.tags = inner
@@ -247,9 +248,8 @@ fn parse_block(lines: &[&str], diagnostics: &mut Vec<Diagnostic>) -> PageMetadat
                         if let Some(item) = next.trim_start().strip_prefix("- ") {
                             tags.push(item.trim().to_string());
                             i += 1;
-                        } else if next.trim().is_empty() {
-                            break;
                         } else {
+                            // A blank or non-item line ends the block list.
                             break;
                         }
                     }
@@ -312,7 +312,13 @@ fn split_key_value(line: &str) -> Option<(String, &str)> {
 fn sanitise_field(value: &str) -> String {
     let mut s: String = value
         .chars()
-        .map(|c| if c == '\n' || c == '\r' || c.is_control() { ' ' } else { c })
+        .map(|c| {
+            if c == '\n' || c == '\r' || c.is_control() {
+                ' '
+            } else {
+                c
+            }
+        })
         .collect();
     if s.contains("-->") {
         s = s.replace("-->", "-- >");
@@ -324,7 +330,10 @@ fn sanitise_field(value: &str) -> String {
 /// a newline, control character or the `-->` token). Callers use this to
 /// reject bad input with a clear error rather than silently rewriting it.
 pub fn sanitises_field(value: &str) -> bool {
-    value.chars().any(|c| c == '\n' || c == '\r' || c.is_control()) || value.contains("-->")
+    value
+        .chars()
+        .any(|c| c == '\n' || c == '\r' || c.is_control())
+        || value.contains("-->")
 }
 
 /// Serialise metadata into the canonical, deterministic block form (including
@@ -406,7 +415,10 @@ This page describes the assessment strategy.\n";
         let parsed = parse_source(SAMPLE);
         let m = parsed.metadata.expect("metadata present");
         assert_eq!(m.id, "0195f6ec-36a2-7a42-b519-5f558842e256");
-        assert_eq!(m.parent_id.as_deref(), Some("0195f6d0-b787-7c3a-a48f-c1a04fb2ea84"));
+        assert_eq!(
+            m.parent_id.as_deref(),
+            Some("0195f6d0-b787-7c3a-a48f-c1a04fb2ea84")
+        );
         assert_eq!(m.position, 30);
         assert_eq!(m.kind, PageKind::Page);
         assert_eq!(m.tags, vec!["assessment", "teaching"]);
@@ -485,7 +497,10 @@ This page describes the assessment strategy.\n";
         m.tags = vec![];
         let out = serialize_metadata(&m);
         assert!(out.contains("tags: []"));
-        assert_eq!(parse_source(&out).metadata.unwrap().tags, Vec::<String>::new());
+        assert_eq!(
+            parse_source(&out).metadata.unwrap().tags,
+            Vec::<String>::new()
+        );
     }
 
     #[test]
@@ -500,7 +515,8 @@ This page describes the assessment strategy.\n";
     fn multiline_unknown_metadata_survives_round_trip() {
         // Review finding #4: an unknown key with a block list must not lose its
         // items on re-serialisation.
-        let src = "<!-- berrywiki\nid: x\ncollaborators:\n  - alice\n  - bob\ncolor: blue\n-->\n\n# T\n";
+        let src =
+            "<!-- berrywiki\nid: x\ncollaborators:\n  - alice\n  - bob\ncolor: blue\n-->\n\n# T\n";
         let parsed = parse_source(src);
         let m = parsed.metadata.unwrap();
         let out = serialize_metadata(&m);

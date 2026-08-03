@@ -21,7 +21,10 @@ fn fixture_dir() -> PathBuf {
 fn open_rejects_a_non_repo() {
     let tmp = std::env::temp_dir().join(format!("berrywiki-git-nonrepo-{}", std::process::id()));
     fs::create_dir_all(&tmp).unwrap();
-    assert!(GitRepo::open(&tmp).is_err(), "a plain directory is not a repo");
+    assert!(
+        GitRepo::open(&tmp).is_err(),
+        "a plain directory is not a repo"
+    );
     let _ = fs::remove_dir_all(&tmp);
 }
 
@@ -30,7 +33,11 @@ fn open_and_status_on_a_clean_clone() {
     let sb = GitSandbox::create(&fixture_dir());
     let repo = GitRepo::open(&sb.ours).expect("open clone");
     assert!(repo.is_clean().unwrap(), "freshly seeded clone is clean");
-    assert_eq!(repo.head().unwrap().0, sb.head(&sb.ours), "head matches git");
+    assert_eq!(
+        repo.head().unwrap().0,
+        sb.head(&sb.ours),
+        "head matches git"
+    );
 }
 
 // ---------- commit ----------
@@ -58,10 +65,12 @@ fn commit_all_commits_pending_changes_then_reports_nothing_to_do() {
 #[test]
 fn commit_all_records_the_configured_identity() {
     let sb = GitSandbox::create(&fixture_dir());
-    let repo = GitRepo::open(&sb.ours).expect("open").with_identity(Identity {
-        name: "Ada Lovelace".to_string(),
-        email: "ada@example.invalid".to_string(),
-    });
+    let repo = GitRepo::open(&sb.ours)
+        .expect("open")
+        .with_identity(Identity {
+            name: "Ada Lovelace".to_string(),
+            email: "ada@example.invalid".to_string(),
+        });
     fs::write(sb.ours.join("Research.md"), "# Research\n\nby ada\n").unwrap();
     repo.commit_all("Ada edits").unwrap().unwrap();
 
@@ -82,8 +91,14 @@ fn fetch_then_divergence_sees_the_remote_advance() {
     let repo = GitRepo::open(&sb.ours).expect("open");
 
     // They push a commit; before we fetch we cannot see it.
-    sb.commit_change(&sb.theirs, "Research.md", "# Research\n\ntheirs\n", "Theirs");
-    sb.git(&sb.theirs, &["push", "origin", "main"]).expect_success("their push");
+    sb.commit_change(
+        &sb.theirs,
+        "Research.md",
+        "# Research\n\ntheirs\n",
+        "Theirs",
+    );
+    sb.git(&sb.theirs, &["push", "origin", "main"])
+        .expect_success("their push");
 
     repo.fetch().expect("fetch");
     let div = repo.divergence().expect("divergence");
@@ -99,8 +114,14 @@ fn divergence_reports_both_sides_when_histories_diverge() {
     let sb = GitSandbox::create(&fixture_dir());
     let repo = GitRepo::open(&sb.ours).expect("open");
 
-    sb.commit_change(&sb.theirs, "Research.md", "# Research\n\ntheirs\n", "Theirs");
-    sb.git(&sb.theirs, &["push", "origin", "main"]).expect_success("their push");
+    sb.commit_change(
+        &sb.theirs,
+        "Research.md",
+        "# Research\n\ntheirs\n",
+        "Theirs",
+    );
+    sb.git(&sb.theirs, &["push", "origin", "main"])
+        .expect_success("their push");
     sb.commit_change(&sb.ours, "Teaching.md", "# Teaching\n\nours\n", "Ours");
 
     repo.fetch().expect("fetch");
@@ -117,8 +138,14 @@ fn fast_forward_advances_local_to_a_purely_remote_change() {
     let sb = GitSandbox::create(&fixture_dir());
     let repo = GitRepo::open(&sb.ours).expect("open");
 
-    sb.commit_change(&sb.theirs, "Research.md", "# Research\n\ntheirs\n", "Theirs");
-    sb.git(&sb.theirs, &["push", "origin", "main"]).expect_success("their push");
+    sb.commit_change(
+        &sb.theirs,
+        "Research.md",
+        "# Research\n\ntheirs\n",
+        "Theirs",
+    );
+    sb.git(&sb.theirs, &["push", "origin", "main"])
+        .expect_success("their push");
 
     repo.fetch().expect("fetch");
     assert_eq!(
@@ -141,8 +168,14 @@ fn fast_forward_refuses_to_touch_a_diverged_history() {
     let sb = GitSandbox::create(&fixture_dir());
     let repo = GitRepo::open(&sb.ours).expect("open");
 
-    sb.commit_change(&sb.theirs, "Research.md", "# Research\n\ntheirs\n", "Theirs");
-    sb.git(&sb.theirs, &["push", "origin", "main"]).expect_success("their push");
+    sb.commit_change(
+        &sb.theirs,
+        "Research.md",
+        "# Research\n\ntheirs\n",
+        "Theirs",
+    );
+    sb.git(&sb.theirs, &["push", "origin", "main"])
+        .expect_success("their push");
     sb.commit_change(&sb.ours, "Teaching.md", "# Teaching\n\nours\n", "Ours");
     let our_head = sb.head(&sb.ours);
 
@@ -154,8 +187,13 @@ fn fast_forward_refuses_to_touch_a_diverged_history() {
     );
     // Local was left exactly as it was — no merge commit, no rewind.
     assert_eq!(sb.head(&sb.ours), our_head, "HEAD untouched");
-    assert!(fs::read_to_string(sb.ours.join("Teaching.md")).unwrap().contains("ours"));
-    assert!(repo.is_clean().unwrap(), "no half-finished merge left behind");
+    assert!(fs::read_to_string(sb.ours.join("Teaching.md"))
+        .unwrap()
+        .contains("ours"));
+    assert!(
+        repo.is_clean().unwrap(),
+        "no half-finished merge left behind"
+    );
 }
 
 // ---------- push ----------
@@ -169,7 +207,11 @@ fn push_publishes_a_fast_forward_then_is_up_to_date() {
     repo.commit_all("Local edit").unwrap().unwrap();
 
     assert_eq!(repo.push().unwrap(), PushOutcome::Pushed);
-    assert_eq!(sb.behind_by(&sb.theirs), 1, "remote advanced for the other clone");
+    assert_eq!(
+        sb.behind_by(&sb.theirs),
+        1,
+        "remote advanced for the other clone"
+    );
 
     // Re-pushing with no new commits is a clean no-op.
     assert_eq!(repo.push().unwrap(), PushOutcome::UpToDate);
@@ -184,8 +226,14 @@ fn push_is_rejected_when_remote_moved_and_nothing_is_overwritten() {
     let repo = GitRepo::open(&sb.ours).expect("open");
 
     // They publish first.
-    sb.commit_change(&sb.theirs, "Research.md", "# Research\n\ntheirs\n", "Theirs");
-    sb.git(&sb.theirs, &["push", "origin", "main"]).expect_success("their push");
+    sb.commit_change(
+        &sb.theirs,
+        "Research.md",
+        "# Research\n\ntheirs\n",
+        "Theirs",
+    );
+    sb.git(&sb.theirs, &["push", "origin", "main"])
+        .expect_success("their push");
     let their_head = sb.head(&sb.theirs);
     let remote_before = sb.head(&sb.remote);
     assert_eq!(remote_before, their_head, "remote is at their commit");
@@ -199,16 +247,23 @@ fn push_is_rejected_when_remote_moved_and_nothing_is_overwritten() {
 
     // Local commit intact...
     assert_eq!(repo.head().unwrap(), our_head, "our commit survives");
-    assert!(fs::read_to_string(sb.ours.join("Teaching.md")).unwrap().contains("ours"));
+    assert!(fs::read_to_string(sb.ours.join("Teaching.md"))
+        .unwrap()
+        .contains("ours"));
     // ...and the remote was not overwritten.
-    assert_eq!(sb.head(&sb.remote), their_head, "remote tip unchanged — not forced");
+    assert_eq!(
+        sb.head(&sb.remote),
+        their_head,
+        "remote tip unchanged — not forced"
+    );
 }
 
 #[test]
 fn push_reports_no_upstream_when_the_branch_has_none() {
     let sb = GitSandbox::create(&fixture_dir());
     // Detach the branch from its upstream to model an un-tracked branch.
-    sb.git(&sb.ours, &["branch", "--unset-upstream"]).expect_success("unset upstream");
+    sb.git(&sb.ours, &["branch", "--unset-upstream"])
+        .expect_success("unset upstream");
     let repo = GitRepo::open(&sb.ours).expect("open");
 
     assert!(!repo.divergence().unwrap().has_upstream);
@@ -252,7 +307,11 @@ fn push_surfaces_a_server_side_decline_as_an_error() {
         other => panic!("hook decline must surface as an error, not {other:?}"),
     }
     // The failed push left the local commit exactly as it was.
-    assert_eq!(repo.head().unwrap(), our_head, "local commit intact after decline");
+    assert_eq!(
+        repo.head().unwrap(),
+        our_head,
+        "local commit intact after decline"
+    );
 }
 
 /// A staged rename is ONE logical change; porcelain `-z` encodes it as two
@@ -261,14 +320,23 @@ fn push_surfaces_a_server_side_decline_as_an_error() {
 #[test]
 fn status_folds_a_staged_rename_into_one_entry() {
     let sb = GitSandbox::create(&fixture_dir());
-    sb.git(&sb.ours, &["mv", "Research.md", "Research-Renamed.md"]).expect_success("git mv");
+    sb.git(&sb.ours, &["mv", "Research.md", "Research-Renamed.md"])
+        .expect_success("git mv");
     let repo = GitRepo::open(&sb.ours).expect("open");
 
     let st = repo.status().unwrap();
     assert!(!st.is_clean());
-    assert_eq!(st.entries.len(), 1, "a rename is one change, not two: {:?}", st.entries);
+    assert_eq!(
+        st.entries.len(),
+        1,
+        "a rename is one change, not two: {:?}",
+        st.entries
+    );
     let entry = &st.entries[0];
-    assert!(entry.starts_with('R'), "keeps the rename status code: {entry}");
+    assert!(
+        entry.starts_with('R'),
+        "keeps the rename status code: {entry}"
+    );
     assert!(
         entry.contains("Research.md") && entry.contains("Research-Renamed.md"),
         "shows both the original and the new path: {entry}"
