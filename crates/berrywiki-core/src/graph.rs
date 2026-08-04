@@ -170,9 +170,9 @@ impl PageGraph {
                 pages[idx].id.clone(),
             )
         };
-        roots.sort_by(|&a, &b| sort_key(&pages, a).cmp(&sort_key(&pages, b)));
+        roots.sort_by_key(|&a| sort_key(&pages, a));
         for kids in children.values_mut() {
-            kids.sort_by(|&a, &b| sort_key(&pages, a).cmp(&sort_key(&pages, b)));
+            kids.sort_by_key(|&a| sort_key(&pages, a));
         }
 
         PageGraph {
