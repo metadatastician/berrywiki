@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! Integration tests for P2-edit: the editor routes over a scratch copy of
 //! the fixture wiki, with an injected draft store (never env-dependent).
 //!

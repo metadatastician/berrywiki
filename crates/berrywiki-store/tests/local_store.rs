@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! Integration tests: LocalFolderStore over a scratch copy of the fixture
 //! wiki. Every test gets its own temp directory; the fixture itself is never
 //! modified (spec: fixtures and import sources are read-only).

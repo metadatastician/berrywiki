@@ -1,5 +1,6 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
-# Feature request issue template for metadatastician/paint-type
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+# SPDX-License-Identifier: MPL-2.0
+# Feature request issue template for metadatastician/berrywiki
 name: Feature Request
 description: Suggest an idea or enhancement for this project
 title: "[Feature]: "

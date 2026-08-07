@@ -1,5 +1,6 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
-# Bug report issue template for metadatastician/paint-type
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+# SPDX-License-Identifier: MPL-2.0
+# Bug report issue template for metadatastician/berrywiki
 name: Bug Report
 description: Create a report to help us improve
 title: "[Bug]: "

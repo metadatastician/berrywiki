@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! Persistent, per-page draft store (ADR-0006).
 //!
 //! A zero-JavaScript SSR app cannot detect idle or auto-submit, so "never lose

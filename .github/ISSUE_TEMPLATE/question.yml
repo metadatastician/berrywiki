@@ -1,5 +1,6 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
-# Question issue template for metadatastician/paint-type
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+# SPDX-License-Identifier: MPL-2.0
+# Question issue template for metadatastician/berrywiki
 name: Question
 description: Ask a question about usage or behaviour
 title: "[Question]: "
@@ -10,7 +11,7 @@ body:
     attributes:
       value: |
         Have a question? You can also ask in
-        [Discussions](https://github.com/metadatastician/paint-type/discussions)
+        [Discussions](https://github.com/metadatastician/berrywiki/discussions)
         for broader conversations.
 
   - type: textarea

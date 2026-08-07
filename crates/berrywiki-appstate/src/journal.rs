@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! A crash-recovery journal for multi-file operations (the subtree move).
 //!
 //! # Why not `git restore` / `reset --hard`

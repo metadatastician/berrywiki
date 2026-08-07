@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! The `berrywiki` CLI, as a testable library.
 //!
 //! `main.rs` is a thin shell over [`run`], which takes its arguments and an

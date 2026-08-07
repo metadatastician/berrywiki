@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! The hidden BerryWiki metadata block.
 //!
 //! A BerryWiki-managed page *may* begin with an HTML comment that is invisible

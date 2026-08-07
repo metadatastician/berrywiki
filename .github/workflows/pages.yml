@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+# SPDX-License-Identifier: MPL-2.0
+
 name: GitHub Pages (Ddraig SSG)
 on:
   push:
@@ -40,7 +43,11 @@ jobs:
           elif [ ! -f src/index.md ]; then
             echo "# ${GITHUB_REPOSITORY}" > src/index.md
           fi
-          ./.ddraig-ssg/build/exec/ddraig build src _site https://hyperpolymath.github.io/${GITHUB_REPOSITORY#*/}
+          # Canonical base must match where Pages actually publishes, which is
+          # derived from the repository OWNER — this repo lives in the
+          # metadatastician org, so a hardcoded hyperpolymath.github.io URL
+          # produced canonical links to a site that does not exist.
+          ./.ddraig-ssg/build/exec/ddraig build src _site "https://${GITHUB_REPOSITORY%%/*}.github.io/${GITHUB_REPOSITORY#*/}"
       - name: Upload artifact
         uses: actions/upload-pages-artifact@37887958984318f2416549b205437f2699699998 # v5
         with:

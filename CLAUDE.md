@@ -9,6 +9,11 @@ repo. **The wiki must stay fully usable without BerryWiki.**
 - **TypeScript and hand-written JavaScript are banned.** Core = Rust
   (→ Rust/SPARK proofs later). Web UI = AffineScript→typed-wasm, deferred
   until that language matures. See ADR-0003.
+  *Scope:* the ban covers everything **shipped or served** — no `<script>` in
+  any response, no JS/TS in any crate. It does not cover local agent tooling
+  (`.claude/workflows/*.js` is a Claude Code harness, never distributed).
+  Whether *generated* client script may ever ship is ADR-0007, **unruled** —
+  do not assume either answer.
 - **Native GitHub wiki reader must work.** Flat `--`-separated filenames
   (ADR-0001, provisional); tree lives in `<!-- berrywiki -->` metadata +
   generated `_Sidebar.md`, never inferred from filenames.
@@ -30,17 +35,35 @@ repo. **The wiki must stay fully usable without BerryWiki.**
 - The repo lives in WSL at `~/developer/meta-repos/berrywiki`. **Only WSL
   tooling may write to it or run git in it** — Windows git/editors cause
   clone desync. Author files Windows-side, `cp` in from inside WSL.
-- WSL Rust is distro 1.85 at `/usr/bin` — **no rustup/rustfmt/clippy
-  locally**; lint gates run in CI. No `rsync` (use `cp`). `gh` not installed.
-- Long commit messages: write to a temp file, `git commit -F` (PowerShell
-  32k command-line limit).
+- WSL Rust is distro 1.85 at `/usr/bin` — **no rustup, so no rustfmt/clippy
+  on the host**. Do not skip those gates: run them in a container instead
+  (recipe below). No `rsync` (use `cp`).
+- `gh` **is** installed and authenticated.
+- Long commit messages: write to a temp file and `git commit -F`.
 
 ## Build & verify
 
 ```sh
 cargo test --workspace          # must pass before any report of completion
-cargo build --workspace        # must be warning-free
+cargo build --workspace         # must be warning-free
 ```
+
+`cargo test` IS the safety gate — it carries the script-free SSR assertions
+and the git conflict / no-data-loss harness.
+
+rustfmt and clippy have no host toolchain, so run them through podman before
+pushing (CI denies warnings, and a first-ever lint run finds real problems):
+
+```sh
+podman run --rm -v "$PWD":/work -w /work docker.io/library/rust:1.86-slim sh -c \
+  'rustup component add clippy rustfmt >/dev/null 2>&1
+   cargo fmt --all -- --check
+   cargo clippy --workspace --all-targets -- -D warnings'
+```
+
+Note the container toolchain is older than CI's `stable`, so it can miss a
+newer lint. Check the PR run with `gh run list` — never `gh pr checks`, which
+hides `startup_failure`.
 
 ## Model routing for execution
 

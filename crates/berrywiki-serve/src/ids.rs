@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! UUIDv7-shaped page-id minting from std only.
 //!
 //! The store leaves id generation to the application layer

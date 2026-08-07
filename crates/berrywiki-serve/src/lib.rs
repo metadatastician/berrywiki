@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! Zero-JavaScript, server-side-rendered explorer and editor for BerryWiki
 //! (ADR-0005, P2-edit).
 //!

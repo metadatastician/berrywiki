@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! Deterministic generation of GitHub Wiki's `_Sidebar.md`.
 //!
 //! Requirements honoured:

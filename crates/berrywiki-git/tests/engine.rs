@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! Behavioural tests for the git engine, run against a real bare remote plus
 //! two clones ([`berrywiki_git_compat::GitSandbox`]). Every test that mutates
 //! also asserts that nothing was lost — the property the engine exists to hold.

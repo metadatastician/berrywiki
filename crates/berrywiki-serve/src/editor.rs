@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! P2-edit: source editor + preview, create/update/delete via the store, and
 //! explicit Save / Save-draft with visible unsaved state (ADR-0006).
 //!

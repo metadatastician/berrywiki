@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! App-private state that must live **outside** the wiki clone (ADR-0008).
 //!
 //! Drafts, the operation journal, the repository lock and the search index are

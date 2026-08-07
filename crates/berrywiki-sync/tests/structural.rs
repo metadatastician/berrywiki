@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! Structural guarantee: the sync layer never shells out to git itself. Every
 //! git operation must flow through the audited `berrywiki_git::GitRepo`, so the
 //! engine's "destructive operations are unrepresentable" property keeps bounding

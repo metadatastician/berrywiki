@@ -42,7 +42,7 @@ If you cannot use GitHub Security Advisories, you may email us directly:
 |---|---|
 | **Email** | j.d.a.jewell@open.ac.uk |
 | **PGP Key** | [Download Public Key](https://github.com/hyperpolymath.gpg) |
-| **Fingerprint** | `TBD` |
+| **Fingerprint** | _not yet published — verify the key out of band before relying on it_ |
 
 ```bash
 # Import our PGP key
