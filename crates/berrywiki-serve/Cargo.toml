@@ -16,6 +16,7 @@ repository.workspace = true
 berrywiki-core = { path = "../berrywiki-core" }
 berrywiki-store = { path = "../berrywiki-store" }
 berrywiki-render = { path = "../berrywiki-render" }
+berrywiki-draft = { path = "../berrywiki-draft" }
 
 [lints.rust]
 unsafe_code = "forbid"

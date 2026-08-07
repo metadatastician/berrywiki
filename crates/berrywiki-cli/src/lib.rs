@@ -30,10 +30,12 @@ COMMANDS:
     check      Load the wiki and print its tree + diagnostics. Exit code 1 if
                any error-level diagnostic is found, else 0.
     sidebar    Print the generated _Sidebar.md, or regenerate it with --write.
-    serve      Start a zero-JavaScript, read-only web explorer (three-pane:
-               tree | page | outline/backlinks). Serve a local folder, or mirror
-               a GitHub wiki with --github (token via BERRYWIKI_GITHUB_TOKEN for
-               private wikis). Blocks until interrupted.
+    serve      Start a zero-JavaScript web explorer and editor (three-pane:
+               tree | page | outline/backlinks; edit/create/delete with explicit
+               Save and Save-draft). A local folder is served editable; a
+               GitHub mirror via --github is read-only (token via
+               BERRYWIKI_GITHUB_TOKEN for private wikis). Blocks until
+               interrupted.
 ";
 
 /// Run the CLI. Returns the process exit code. All output (including error
@@ -190,7 +192,7 @@ fn cmd_serve(args: &[String], out: &mut dyn Write) -> io::Result<i32> {
             cache.display()
         )?;
         out.flush()?;
-        return match berrywiki_serve::serve(wiki.store(), addr) {
+        return match berrywiki_serve::serve_readonly(wiki.store(), addr) {
             Ok(()) => Ok(0),
             Err(e) => {
                 writeln!(out, "server error: {e}")?;
@@ -213,12 +215,18 @@ fn cmd_serve(args: &[String], out: &mut dyn Write) -> io::Result<i32> {
             return Ok(2);
         }
     };
+    let mut app = berrywiki_serve::App::new(store);
+    let drafts_note = if app.store().appstate().is_some() {
+        "drafts on"
+    } else {
+        "drafts unavailable"
+    };
     writeln!(
         out,
-        "BerryWiki: serving {path} at http://{addr}  (read-only; Ctrl-C to stop)"
+        "BerryWiki: serving {path} at http://{addr}  (editable; {drafts_note}; Ctrl-C to stop)"
     )?;
     out.flush()?;
-    match berrywiki_serve::serve(&store, addr) {
+    match berrywiki_serve::serve(&mut app, addr) {
         Ok(()) => Ok(0),
         Err(e) => {
             writeln!(out, "server error: {e}")?;

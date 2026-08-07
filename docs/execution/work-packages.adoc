@@ -79,10 +79,15 @@ actually clone a wiki?). | *Blocked-by* critique major "fine-grained PAT vs
 |===
 | ID | Tier | Contract | Escalation triggers / Blocked-by
 
-| P2-edit | sonnet | Source editor + preview; create/update/delete via the
-store; explicit Save / Save-draft actions with visible unsaved state. |
-*Blocked-by* critique major "zero-JS idle-autosave infeasible" — the draft
-model must be redesigned (opus) before this ships an autosave promise.
+| P2-edit | *DONE* | Source editor + preview; create/update/delete via the
+store; explicit Save / Save-draft with visible unsaved state (banner, badge,
+nav dot). Zero-JS forms + 303 PRG; a refused Save keeps the text in the form
+AND as a draft. Two-layer stale guard: store fingerprint (ADR-0008) + hidden
+`base` source-hash per editor session. Drafts wired through appstate
+(`berrywiki-serve::App`); degraded visibly when appstate is unresolvable. |
+Former blocker resolved by ADR-0006 (explicit Save-draft, no autosave
+promise). **X-lock's trigger has now fired** — the serve process is a
+long-running writer; schedule X-lock before a second writer surface ships.
 | P2-move | opus | Transactional *subtree* move/rename: validate → compute all
 descendant renames → rewrite inbound links → regenerate sidebar → single
 commit; never half-moved. | *Blocked-by* critique major "non-leaf move is a
