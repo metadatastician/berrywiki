@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! `LocalFolderStore` — the plain-directory adapter.
 //!
 //! This is the first `WikiStore`: it lets the engine, tests and (soon) the

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! Filename generation and validation.
 //!
 //! Two distinct jobs:

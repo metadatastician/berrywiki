@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! Markdown → HTML rendering for the BerryWiki SSR UI (ADR-0005).
 //!
 //! Wraps comrak with GitHub-Flavored-Markdown extensions and a deliberate,

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! Structured, non-fatal diagnostics.
 //!
 //! The engine never panics on malformed input. Instead it degrades gracefully

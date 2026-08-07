@@ -55,6 +55,7 @@ name = "berrywiki-serve"
 version = "0.0.1"
 dependencies = [
  "berrywiki-core",
+ "berrywiki-draft",
  "berrywiki-render",
  "berrywiki-store",
 ]

@@ -1,0 +1,303 @@
+= BerryWiki — Debt Register
+:toc: macro
+:toclevels: 2
+
+toc::[]
+
+Known debt, by kind. Every entry states what is wrong, what it costs, and what
+would clear it. Entries are removed when fixed, not marked done — the
+link:work-packages.adoc[work-package register] tracks progress; this file
+tracks *liabilities*.
+
+Compiled 2026-08-07 during a full documentation audit. Items marked *CLEARED*
+were fixed in that same pass and are listed only so the history is legible;
+they will be deleted at the next revision.
+
+== Severity
+
+[cols="1,4", options="header"]
+|===
+| Level | Meaning
+| *H* | Actively misleads a user, or risks data/legal exposure. Fix before the next release.
+| *M* | Wrong or absent, with a real cost, but nobody is misled into harm.
+| *L* | Tidiness, consistency, or a cost that only maintainers pay.
+|===
+
+== Licence debt
+
+[cols="1,5", options="header"]
+|===
+| Sev | Item
+
+| *CLEARED*
+| `Cargo.toml` declared `license = "MIT OR Apache-2.0"` while `LICENSE` and
+  `README` said MPL-2.0 + CC-BY-SA-4.0. All eleven crates inherit
+  `license.workspace = true`, so every crate would have published under the
+  wrong terms. Ruled 2026-08-07: **MPL-2.0 for code, CC-BY-SA-4.0 for docs**.
+  `berrywiki.launcher.a2ml` carried the same wrong claim and was corrected.
+
+| *CLEARED*
+| `LICENSES/AGPL-3.0-or-later.txt` existed with no referent. Its origin was
+  `.github/settings.yml`, copied from another project with an AGPL header.
+  Deleted along with the AGPL headers that pulled it in.
+
+| *CLEARED*
+| No REUSE metadata and no SPDX headers: 0 of 31 Rust files, 0 of 22 Markdown
+  files. `REUSE.toml` now maps every path to a licence and all Rust sources
+  carry headers.
+
+| M
+| REUSE compliance is *declared but never checked*. Nothing in CI runs
+  `reuse lint`, so the mapping can rot silently. Clearing it: add a REUSE
+  lint step to `ci.yml`. Until then, treat REUSE.toml as documentation, not
+  as a verified property.
+
+| L
+| `LICENSE` at the repository root concatenates a prose summary with the full
+  MPL-2.0 text. GitHub's licence detector reports "other" rather than
+  MPL-2.0 as a result. Clearing it: keep `LICENSE` as the bare MPL-2.0 text
+  and move the dual-licensing explanation to `README`/`REUSE.toml`.
+|===
+
+== Documentation debt
+
+[cols="1,5", options="header"]
+|===
+| Sev | Item
+
+| *CLEARED*
+| `ARCHITECTURE.md` described a different product: a three-layer system with a
+  "BerryBlocks" presentation layer in **JS/WASM** — banned by ADR-0003 — plus
+  a Semantic Knowledge Graph, a Broken Link Auto-Healer, an Obsidian-style
+  graph view and `git-seo` SEO hooks. None of those exist. Rewritten to
+  describe the real eleven-crate system. `scaffold/` repeated the same
+  fiction and was deleted.
+
+| *CLEARED*
+| `CODE_OF_CONDUCT.md` pledged a harassment-free experience for **"Squisher
+  Corpus"** and linked to `hyperpolymath/squisher-corpus/discussions` — in
+  the live body text, not only in the unremoved template-instruction block
+  that sat at the top of the published file.
+
+| *CLEARED*
+| `CONTRIBUTING.md` began mid-code-block with no title, and instructed
+  contributors to use `nix develop`, `just check` and a directory tree
+  (`src/`, `lib/`, `spec/`, `flake.nix`, `Justfile`, `README.adoc`) of which
+  **none exists** in this repository.
+
+| *CLEARED*
+| `README.md` claimed "Phase 0", "no rich editor yet", and listed one crate of
+  eleven — roughly three phases behind the code.
+
+| *CLEARED*
+| **ADR-0007 was referenced eight times and did not exist.** ADR-0005 and
+  ADR-0006 both defer to it, and the implementation plan gates all post-MVP
+  enhancement work on it. Now filed as an explicitly *open* ADR stating the
+  question and options — the ruling itself is still owed.
+
+| H
+| **ADR-0007 is unruled**, and it blocks the entire post-MVP enhancement
+  layer. Recorded above as documentation debt *cleared*; the decision is
+  still outstanding and is an owner action, not an engineering one.
+
+| M
+| `docs/compatibility/github-wiki.adoc` records the GitHub Wiki behaviours the
+  whole design rests on — HTML-comment invisibility, `_Sidebar.md` rendering,
+  filename↔title mapping, fine-grained PAT access to `.wiki.git`. **None has
+  been tested against a live wiki.** This is disclosed everywhere it matters
+  and is therefore honest debt rather than a defect, but the product rests on
+  untested assumptions. Clearing it: P1-spike-read and P3-spike-write, both
+  credential-gated.
+
+| M
+| `docs/architecture/implementation-plan.adoc` (900+ lines) has not been
+  audited against the code in this pass. It is the largest remaining candidate
+  for the same staleness found in every other document.
+
+| L
+| `docs/development/review-2026-07-11-store.adoc` is a point-in-time review
+  with no status marker; a reader cannot tell whether its findings were
+  actioned.
+
+| L
+| No `CHANGELOG.md`. At `0.0.1` with no releases this costs nothing yet; it
+  will the moment a version is published.
+|===
+
+== Repository hygiene
+
+[cols="1,5", options="header"]
+|===
+| Sev | Item
+
+| *CLEARED*
+| **`.github/settings.yml` was paint-type's**, and the probot/settings app
+  applies that file on every push to the default branch. It would have
+  renamed this repository to `paint-type`, replaced its description with an
+  image editor's, repointed its homepage, and set `has_wiki: false` —
+  disabling the wiki on a project whose entire purpose is GitHub wikis.
+
+| *CLEARED*
+| **Security reports were routed to the wrong project.** The "Report a
+  vulnerability" link in `.github/ISSUE_TEMPLATE/config.yml` pointed at
+  `metadatastician/paint-type/security/advisories/new`. Eleven files under
+  `.github/` carried paint-type references; all repointed.
+
+| *CLEARED*
+| `.github/funding.yml` and `.github/FUNDING.yml` both existed — a case
+  collision that breaks checkouts on case-insensitive filesystems (Windows,
+  default macOS). The uppercase one also had duplicate YAML keys (`github:`,
+  `ko_fi:` and four more, each twice), so most of its entries were silently
+  discarded by the parser.
+
+| *CLEARED*
+| `api/zig-unified-hexdeca-api/` shipped a 45-line Zig program that prints
+  "Server listening on port 8080 (Scaffold)" without listening to anything.
+  It was in no build, referenced by no CI, and contradicted ADR-0003.
+
+| *CLEARED*
+| `ARCHITECTURE.md` and `MAINTAINERS` listed **@metadatastician as a
+  co-architect / co-maintainer**. It is the owning organisation account, not
+  a person.
+
+| M
+| `mise.toml` installs Node, Python, Go, Java, Bun, Deno, npm, yarn, pnpm,
+  black, ruff, prettier, stylua, cmake and ninja — for a repository whose
+  only toolchain is Rust. It is estate boilerplate. Cost: a slow, confusing
+  first-run for any contributor who uses mise. Clearing it: reduce to `rust`
+  and `just`, or delete the file.
+
+| L
+| `berrywiki-launcher.sh` (440 lines) and `berrywiki.launcher.a2ml` are
+  undocumented in the README and untested by CI.
+|===
+
+== Code debt
+
+[cols="1,5", options="header"]
+|===
+| Sev | Item
+
+| H
+| **No repository lock.** ADR-0008 deferred single-writer enforcement "until
+  in-app mutation / a long-running server lands" — which P2-edit has now
+  done. Two `berrywiki serve` processes, or a serve process alongside a CLI
+  write, can interleave mutations on one clone. The stale-write guard
+  narrows but does not close the window. Tracked as *X-lock*; implement with
+  an OS advisory lock (`flock`), never a pid file — the first attempt was
+  removed for reclaim races.
+
+| M
+| The stale guard fingerprints mtime + length. An edit that preserves both
+  within one filesystem tick is undetectable. Documented in ADR-0008;
+  clearing it means upgrading to a content hash.
+
+| M
+| `berrywiki-github` is read-only, so `serve --github` cannot edit. The
+  editor works only against a local folder.
+
+| L
+| `crates/berrywiki-serve/src/ids.rs` mints UUIDv7-shaped ids from
+  `RandomState` and the pid. Uniqueness is sound in practice; the values are
+  *not* unpredictable. That is fine — page ids are public identifiers — but
+  nothing must ever come to depend on their unguessability.
+
+| L
+| Page ids are minted in `berrywiki-serve` while `berrywiki-store` documents
+  id generation as the application layer's job. A second writing front end
+  would need to duplicate or share that code.
+|===
+
+== Proof debt
+
+[cols="1,5", options="header"]
+|===
+| Sev | Item
+
+| M
+| **There are no proofs.** The README's technology note has referenced a
+  "mathematically sound base" and SPARK/GNATprove since Phase 0, but no
+  `.gpr` project, no `gnatprove` lane and no proof obligations exist. The
+  invariants that would be proved — metadata round-trip idempotence,
+  sidebar determinism, no-data-loss on move — are currently covered by tests
+  only. Tracked as *P5-spark*. Until then, no document may describe any
+  BerryWiki property as "proved"; 183 passing tests are evidence, not proof.
+
+| L
+| The invariants ledger P5-spark refers to is not written down as a ledger.
+  The properties are stated across ADRs and enforced by scattered tests, so
+  there is no single list to prove *against*.
+|===
+
+== CI/CD debt
+
+[cols="1,5", options="header"]
+|===
+| Sev | Item
+
+| *CLEARED*
+| Two action pins in `ci.yml` referenced commits that do not exist upstream,
+  so **every run died at action download for eight days**. Repointed, along
+  with a latent `dtolnay/rust-toolchain` failure (a SHA pin cannot infer the
+  toolchain from the ref).
+
+| *CLEARED*
+| CodeQL default setup and an advanced `codeql.yml` were both configured — a
+  combination in which GitHub rejects the advanced workflow's uploads. Ruled:
+  keep default setup, delete the advanced workflow.
+
+| *CLEARED*
+| `dependabot.yml` declared mix, npm, pip and nix ecosystems with no matching
+  manifests, producing failing update jobs on a Rust-only repository.
+
+| H
+| **`pages.yml` has never succeeded.** Its only run — 2026-07-19 — was a
+  `startup_failure` at 0 seconds, and it has not been triggered since. GitHub
+  Pages is enabled and publishing from a workflow, so the site is
+  permanently empty. Its canonical base URL also named the wrong owner
+  (`hyperpolymath.github.io` for a repo in `metadatastician`); that is fixed,
+  but the workflow itself remains unproven.
+
+| M
+| `pages.yml` builds `src/index.md`, falling back to a copy of `README.md`.
+  There is no `src/`, so a successful run would publish the README as a
+  single page. Either give the site real content or remove the workflow and
+  disable Pages — an empty published site is worse than none.
+
+| M
+| The lint job is the *only* gate that runs `rustfmt` and `clippy`, and it
+  never executed until 2026-08-03. Its first real run found four defects.
+  There is no equivalent local gate, because the development host has no
+  rustup; contributors depend entirely on CI catching lint.
+
+| M
+| No REUSE lint, no link checker, no MSRV-drift check beyond the 1.85 matrix
+  leg, and no coverage measurement.
+
+| L
+| The SonarCloud step was removed from `ci.yml` because no
+  `sonar-project.properties` and no `SONAR_TOKEN` were configured — it could
+  never have reported anything. Restore it properly or leave it out.
+|===
+
+== Governance debt
+
+[cols="1,5", options="header"]
+|===
+| Sev | Item
+
+| M
+| `main` has **no branch protection and no rulesets**. Anything can be pushed
+  directly, and a red CI run blocks nothing. Cheap to fix; a deliberate
+  choice for a single-maintainer repo, but it should be a recorded choice
+  rather than an omission.
+
+| L
+| `SECURITY.md` offers a PGP key whose fingerprint was `TBD` while telling
+  readers to verify against it. Now stated as unpublished; publish the real
+  fingerprint or drop the PGP option.
+
+| L
+| `.github/CODEOWNERS` has not been audited against the current maintainer
+  list in this pass.
+|===

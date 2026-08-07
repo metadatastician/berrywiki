@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! GitHub Wiki read adapter.
 //!
 //! A GitHub wiki is a separate `<repo>.wiki.git` git repository — there is no

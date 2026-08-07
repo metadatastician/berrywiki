@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! # berrywiki-store
 //!
 //! Storage adapters for BerryWiki. All repository access goes through the

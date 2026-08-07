@@ -4,50 +4,101 @@
 
 toc::[]
 
+This is the technical companion to `ARCHITECTURE.md` at the repository root,
+which carries the same picture in prose for a first-time reader. Package-level
+state lives in link:../execution/work-packages.adoc[the work-package register];
+known debt in link:../execution/debt-register.adoc[the debt register].
+
 == Layers
 
 [source]
 ----
-┌─────────────────────────────────────────────┐
-│ UI  (AffineScript → typed-wasm) — DEFERRED   │
-├─────────────────────────────────────────────┤
-│ WikiStore adapters                           │
-│   LocalFolderStore · GitHubWikiStore · …     │  (next slices)
-├─────────────────────────────────────────────┤
-│ berrywiki-core  (Rust, I/O-free) — DONE     │
-│   metadata · page · graph · sidebar · diag   │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│ Enhancement layer (AffineScript → typed-wasm) — DEFERRED │
+│   gated on ADR-0007, which is UNRULED                    │
+├──────────────────────────────────────────────────────────┤
+│ berrywiki-serve · -render · -cli              — BUILT    │
+│   zero-JS three-pane explorer AND editor                 │
+├──────────────────────────────────────────────────────────┤
+│ berrywiki-sync · -git · -github · -git-compat — BUILT    │
+│   store mutation → one atomic logical commit             │
+│   (conflict UX P3-conflict still open)                   │
+├──────────────────────────────────────────────────────────┤
+│ berrywiki-store (WikiStore trait)             — BUILT    │
+│   LocalFolderStore · GitHubWiki mirror (read-only)       │
+│   berrywiki-appstate · -draft: state OUTSIDE the clone   │
+├──────────────────────────────────────────────────────────┤
+│ berrywiki-core  (Rust, I/O-free)              — BUILT    │
+│   metadata · page · graph · sidebar · diagnostics        │
+└──────────────────────────────────────────────────────────┘
 ----
 
 == Principles
 
 * *Markdown + Git are canonical.* Everything else is derived and rebuildable.
 * *Stable ids, not filenames*, define identity and hierarchy.
-* *Deterministic* parsing, serialisation and sidebar generation.
+* *Deterministic* parsing, serialisation and sidebar generation — re-saving an
+  unchanged page produces no diff.
 * *Non-fatal degradation*: malformed input yields diagnostics, never crashes.
 * *Storage is abstracted*: no filesystem/git/GitHub calls leak into the engine
-  or (later) the UI.
+  or the UI.
+* *App state never enters the clone* (ADR-0008), so a plain-git user cannot
+  commit BerryWiki's own bookkeeping to their wiki.
 
 == Crate: `berrywiki-core`
 
 [cols="1,3", options="header"]
 |===
 | Module | Responsibility
-| `metadata` | Parse/serialise the hidden BerryWiki block; round-trip-stable.
+| `metadata` | Parse/serialise the hidden BerryWiki block; round-trip-stable and idempotent.
 | `page` | `WikiPage` model; heading, wiki-link and Markdown-link extraction; title/slug.
 | `graph` | `PageGraph`: hierarchy, sibling order, backlinks, consistency diagnostics.
 | `sidebar` | Deterministic `_Sidebar.md` generation.
 | `diagnostics` | Structured, non-fatal, actionable diagnostics.
 |===
 
-== Planned crates
+== The WikiStore seam
 
-* `berrywiki-store` — the `WikiStore` trait + `LocalFolderStore` (safe writes,
-  path-traversal-proof), then `GitHubWikiStore` (credential-gated).
-* `berrywiki-app` — read-only three-pane prototype first.
+All repository access goes through one trait, so the engine and the UI never
+touch git or GitHub directly.
 
-== The WikiStore seam (planned)
+[cols="1,3", options="header"]
+|===
+| Crate | Responsibility
+| `berrywiki-store` | `WikiStore` + `LocalFolderStore`. Atomic writes (temp file + rename), component-wise path validation, mtime+len stale-write guard, sidebar regenerated inside every mutation.
+| `berrywiki-appstate` | XDG state home keyed by a stable hash of the wiki path; operation journal.
+| `berrywiki-draft` | Per-page drafts, atomically written, outside the clone.
+| `berrywiki-git` | Closed-set wrapper over the git CLI. No force-push, no `reset --hard`, fetch before push.
+| `berrywiki-sync` | `SyncedStore`: one completed store mutation → one atomic logical commit.
+| `berrywiki-github` | `.wiki.git` mirror exposed as a store. Read-only.
+| `berrywiki-git-compat` | Evidence harness reproducing remote-change, non-fast-forward and merge-conflict cases, asserting no data loss.
+|===
 
-All repository access goes through one trait so the engine and UI never touch
-git/GitHub directly. `LocalFolderStore` is built and tested first, enabling the
-whole product to be developed without live credentials.
+== The UI seam
+
+`berrywiki-serve` has **no third-party dependencies**: a hand-rolled blocking
+`std::net` server, no async runtime, no web framework (see the ADR-0005
+amendment). The HTTP surface is the stable seam — the library underneath can be
+replaced without touching engine, store or render.
+
+Request handling is a pure function, `handle(&mut App, &Request) -> Response`,
+so every route is testable in-process with no sockets. Editing adds only what
+plain HTML needs: form POSTs distinguished by named submit buttons, 303
+See Other on success (Post/Redirect/Get), and error responses that re-render
+with the submitted text intact.
+
+Two properties are enforced by test rather than convention:
+
+* *No `<script>` ever ships* — asserted on every route, including hostile input
+  echoed back through the editor.
+* *A refused write never loses text* — a stale Save returns 409 with the text
+  still in the form and also persisted as a draft.
+
+== Staleness: two layers, both load-bearing
+
+The store's mtime+len fingerprint (ADR-0008) catches changes made on disk since
+the store last loaded. It is not sufficient on its own: the store re-fingerprints
+after every mutation, so two editors opened in sequence would let the second
+save silently overwrite the first. The editor therefore carries a hidden `base`
+hash of the page source at render time, and refuses a save whose base no longer
+matches. Both layers are covered by tests.

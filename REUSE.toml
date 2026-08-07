@@ -1,0 +1,53 @@
+version = 1
+SPDX-PackageName = "berrywiki"
+SPDX-PackageSupplier = "Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>"
+SPDX-PackageDownloadLocation = "https://github.com/metadatastician/berrywiki"
+
+# Licensing is split by kind, not by directory alone:
+#   * code and configuration -> MPL-2.0
+#   * prose documentation    -> CC-BY-SA-4.0
+# Rust sources carry their own SPDX headers; everything else is covered here so
+# that generated, binary and third-party-format files need no header comment.
+
+[[annotations]]
+path = [
+  "docs/**",
+  "ARCHITECTURE.md",
+  "CODE_OF_CONDUCT.md",
+  "CONTRIBUTING.md",
+  "GOVERNANCE.md",
+  "README.md",
+  "SECURITY.md",
+  "MAINTAINERS",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Jonathan D.A. Jewell"
+SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+# The fixture notebook is test data read by the engine, not prose to reuse.
+[[annotations]]
+path = ["fixtures/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Jonathan D.A. Jewell"
+SPDX-License-Identifier = "MPL-2.0"
+
+[[annotations]]
+path = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "crates/**/Cargo.toml",
+  "mise.toml",
+  "REUSE.toml",
+  ".github/**",
+  ".gitignore",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Jonathan D.A. Jewell"
+SPDX-License-Identifier = "MPL-2.0"
+
+# CLAUDE.md / AGENTS.md are instructions to tooling, not published prose.
+[[annotations]]
+path = ["CLAUDE.md", "AGENTS.md"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Jonathan D.A. Jewell"
+SPDX-License-Identifier = "MPL-2.0"

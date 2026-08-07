@@ -1,4 +1,5 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+# SPDX-License-Identifier: MPL-2.0
 #
 # Repository settings for probot/settings GitHub App.
 # https://github.com/probot/settings
@@ -7,18 +8,18 @@
 # applied by the probot/settings app when changes are pushed to the default
 # branch. Install the app at: https://github.com/apps/settings
 #
-# Repository settings — configured for paint-type.
+# Repository settings — configured for berrywiki.
 
 # ─── Repository Settings ───────────────────────────────────────────────────────
 
 repository:
-  name: "paint-type"
-  description: "Cross-platform open-source image editor — capable enough for real work, simple enough to reach for without thinking"
-  homepage: "https://github.com/metadatastician/paint-type"
+  name: "berrywiki"
+  description: "Hierarchical notebook layer for GitHub Wikis — the wiki stays plain Markdown, usable without it"
+  homepage: "https://github.com/metadatastician/berrywiki"
   private: false
   has_issues: true
   has_projects: true
-  has_wiki: false
+  has_wiki: true
   has_downloads: true
   default_branch: main
   allow_squash_merge: true

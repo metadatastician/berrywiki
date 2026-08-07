@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! Integration test: load the real fixture wiki from disk and exercise the
 //! whole pipeline (parse -> graph -> backlinks -> sidebar -> diagnostics).
 //!

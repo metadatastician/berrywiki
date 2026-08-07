@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! Phase 0 Step 6: reproduce the synchronisation situations BerryWiki must
 //! survive, and prove that **local work is never lost** in any of them.
 //!

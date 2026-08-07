@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! Actionable store errors.
 //!
 //! Spec requirement: every failure says what was attempted, whether local work

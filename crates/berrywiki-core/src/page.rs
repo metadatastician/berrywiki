@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! In-memory page model plus pure extractors (headings, links, title, slug).
 //!
 //! Everything here is derived deterministically from a page's raw source; there

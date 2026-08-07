@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! Structural proof that the git engine cannot lose data.
 //!
 //! The engine's whole safety argument is that its source expresses none of the

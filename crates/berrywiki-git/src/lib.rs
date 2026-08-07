@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+
 //! `berrywiki-git` — a deliberately small, safe wrapper over the `git` CLI.
 //!
 //! This is the production sync engine's contact point with git. Its entire job

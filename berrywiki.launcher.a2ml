@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 #
 # berrywiki.launcher.a2ml — per-app launcher config for BerryWiki.
@@ -12,7 +12,7 @@ display      = "BerryWiki"
 description  = "Companion authoring, navigation, indexing and synchronisation layer for GitHub.com Wikis"
 categories   = ["Development", "Documentation", "Utility"]
 version      = "0.0.1"
-license      = "MIT OR Apache-2.0"
+license      = "MPL-2.0"
 
 [repo]
 # NOTE: repo-dir is resolved at runtime from the launcher script location.

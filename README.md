@@ -10,47 +10,141 @@ Markdown in ordinary Git storage.
 > editor, commit, push, and view it through GitHub's normal Wiki UI.
 > BerryWiki *enhances* the files; it never makes them depend on the app.
 
-## Status — Phase 0 (Compatibility & Authentication Spike)
+## What works today
 
-This repository is at **Phase 0**: proving the vertical path and building the
-deterministic core engine. No production GitHub synchronisation and no rich
-editor yet. See [`docs/architecture/phase-0-plan.adoc`](docs/architecture/phase-0-plan.adoc).
+A local wiki folder can be browsed and edited end to end:
 
-Implemented so far:
+```sh
+berrywiki serve ./my-wiki          # three-pane explorer + editor at :8080
+```
 
-- `berrywiki-core` — deterministic, I/O-free engine:
-  - hidden BerryWiki metadata block parse/serialise (round-trip stable),
-  - heading + wiki-link/Markdown-link extraction,
-  - page hierarchy from stable ids, sibling ordering, backlinks,
-  - consistency diagnostics (broken links, missing parent, cycles, duplicate ids),
-  - deterministic `_Sidebar.md` generation.
-- `fixtures/test-wiki/` — a small, human-readable fixture notebook.
+* **Hierarchical notebook over flat files.** Tree, sibling ordering, backlinks
+  and a generated `_Sidebar.md` that GitHub renders natively — all driven by a
+  hidden metadata block that is invisible in the rendered wiki, never by
+  filenames.
+* **Zero-JavaScript editor.** Source editing with preview, page create and
+  delete, explicit **Save** and **Save-draft**. Drafts live outside the clone,
+  survive a killed process, and are visible as a banner, a badge and a marker in
+  the tree. No `<script>` is served anywhere — a test asserts it on every route.
+* **Writes that refuse rather than clobber.** If a page changed on disk, or
+  changed since your editor was opened, Save is refused with a 409 — and your
+  text is kept, both in the form and as a draft. Nothing you typed is discarded.
+* **Consistency diagnostics.** Broken links, missing parents, cycles and
+  duplicate ids, surfaced in the UI and via `berrywiki check`.
+* **Git sync engine** (`berrywiki-sync`): each completed store mutation becomes
+  one atomic logical commit. Never force-pushes, never discards local work.
 
-## Technology
+## What does not work yet
 
-- **Engine & tooling: Rust** (estate default *Rust/GNATprove*;
-  mathematically sound base).
-- **Web UI: typed-wasm**, deferred until the language reaches base-language completion.
-- **Docs:** AsciiDoc (`.adoc`) for technical docs and ADRs; Markdown (`.md`) for wiki content and community-health files.
+Being explicit, because the difference matters:
+
+* **In-app push/pull and conflict resolution** — the sync engine exists; the
+  conflict UX (P3-conflict) does not.
+* **Subtree move/rename** — moving a page with descendants is a cascade that
+  rewrites inbound links; not implemented (P2-move).
+* **GitHub serving is read-only.** `serve --github` mirrors a wiki and renders
+  no edit affordances.
+* **Live GitHub behaviour is unverified.** Every GitHub Wiki behaviour BerryWiki
+  relies on is recorded in [`docs/compatibility/github-wiki.adoc`](docs/compatibility/github-wiki.adoc)
+  and, as of today, **none has been tested against a real wiki** — those spikes
+  are credential-gated. Treat the compatibility report as a hypothesis list.
+* **No importers, no packaging, no proofs yet** — CherryTree/Zim import, Guix
+  packaging and the SPARK proof work are Phase 5.
+
+Current position: Phases 0–3 largely built, Phase 4–5 open. See
+[`docs/execution/work-packages.adoc`](docs/execution/work-packages.adoc) for the
+package-by-package state and [`docs/execution/debt-register.adoc`](docs/execution/debt-register.adoc)
+for known debt.
+
+## Install and use
+
+Requires Rust 1.85 or newer. No other runtime.
+
+```sh
+cargo build --release
+./target/release/berrywiki --help
+```
+
+```sh
+berrywiki check ./my-wiki           # tree + diagnostics; exit 1 on any error
+berrywiki sidebar ./my-wiki --write # regenerate _Sidebar.md
+berrywiki serve ./my-wiki           # browse and edit at http://127.0.0.1:8080
+berrywiki serve --github owner/repo # mirror a GitHub wiki (read-only)
+```
+
+For a private wiki, supply a token via `BERRYWIKI_GITHUB_TOKEN` — never as a
+command-line argument, so it stays out of shell history and process listings.
+
+`fixtures/test-wiki/` is a small notebook you can point any of these at.
+
+## How a page looks on disk
+
+Ordinary Markdown, preceded by a comment GitHub does not render:
+
+```markdown
+<!-- berrywiki
+id: 0195f6ec-36a2-7a42-b519-5f558842e256
+parent: 0195f6d0-b787-7c3a-a48f-c1a04fb2ea84
+position: 30
+kind: page
+tags:
+  - assessment
+-->
+
+# Assessment Plan
+
+Ordinary Markdown from here on.
+```
+
+Delete the comment and the page is still a perfectly good wiki page — it simply
+stops being part of the tree. That is the point.
+
+## Architecture
+
+Eleven crates, layered so the parts that must be provably correct have no I/O
+to be wrong about — see [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+* **Engine:** Rust. No JavaScript or TypeScript, hand-written or generated
+  (ADR-0003); the UI is server-rendered and script-free by test.
+* **`berrywiki-serve`** has no third-party dependencies at all — a hand-rolled
+  `std::net` server, no async runtime, no web framework.
+* **Docs:** AsciiDoc (`.adoc`) for technical docs and ADRs; Markdown (`.md`) for
+  wiki content and community-health files.
 
 ## Layout
 
 ```
-crates/berrywiki-core/   deterministic engine (no I/O)
-fixtures/test-wiki/       fixture notebook (Markdown)
-docs/architecture/        plan + overview
-docs/compatibility/       GitHub Wiki compatibility findings
-docs/decisions/           architecture decision records
+crates/berrywiki-core/      deterministic engine (no I/O)
+crates/berrywiki-store/     WikiStore trait + LocalFolderStore (atomic writes)
+crates/berrywiki-serve/     zero-JS three-pane explorer and editor
+crates/berrywiki-git/       closed-set git wrapper · -sync/-github/-git-compat
+crates/berrywiki-appstate/  out-of-clone app state · -draft for drafts
+crates/berrywiki-cli/       the `berrywiki` command
+fixtures/test-wiki/         fixture notebook (Markdown)
+docs/architecture/          plan + overview
+docs/compatibility/         GitHub Wiki compatibility findings (unverified)
+docs/decisions/             architecture decision records
+docs/execution/             work packages + debt register
 ```
 
 ## Build & test
 
 ```sh
-cargo test        # unit tests for the core engine
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
+cargo test --workspace     # includes the no-<script> and no-data-loss harnesses
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
 ```
+
+`cargo test` *is* the safety gate: it carries the script-free SSR assertions and
+the git conflict / no-data-loss harness.
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). Security reports:
+[`SECURITY.md`](SECURITY.md).
 
 ## Licence
 
-Dual-licensed under MPL-2.0 for code and CC-BY-SA-4.0 for docs.
+Code is licensed under **MPL-2.0**; documentation under **CC-BY-SA-4.0**.
+Full texts in [`LICENSES/`](LICENSES/); machine-readable mapping in
+[`REUSE.toml`](REUSE.toml).
