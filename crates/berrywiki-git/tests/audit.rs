@@ -39,6 +39,7 @@ fn engine_source_contains_no_destructive_git_tokens() {
         "--mirror",         // push --mirror can delete remote refs
         "--delete",         // push --delete removes a remote ref
         // Local history / working-tree discarding.
+        "--abort",   // merge --abort throws away the in-progress merge and its resolutions
         "--hard",    // reset --hard
         "reset",     // any reset; the engine uses none
         "restore",   // discards uncommitted changes to tracked files

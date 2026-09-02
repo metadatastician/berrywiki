@@ -23,6 +23,10 @@
 //! out to git itself, so the engine's "destructive operations are
 //! unrepresentable" guarantee still bounds every behaviour here.
 
+pub mod conflict;
+
+pub use conflict::{ConflictKind, ConflictReport, FileConflict};
+
 use std::path::Path;
 
 use berrywiki_core::{PageGraph, WikiPage};
@@ -54,6 +58,11 @@ pub enum SyncError {
     },
     /// `HEAD` is detached; a commit would be unreachable and eventually lost.
     DetachedHead,
+    /// A merge someone started is recorded but not concluded. An ordinary
+    /// commit here would silently become that merge commit, so we refuse.
+    MergeInProgress,
+    /// Asked to conclude a merge when none is under way.
+    NoMergeInProgress,
 }
 
 impl std::fmt::Display for SyncError {
@@ -67,6 +76,15 @@ impl std::fmt::Display for SyncError {
                  resolve or abort it before saving — your local work is untouched",
                 paths.len(),
                 paths.first().map(String::as_str).unwrap_or("?"),
+            ),
+            SyncError::MergeInProgress => write!(
+                f,
+                "a merge that BerryWiki did not start is unfinished in the wiki clone; \
+                 finish it on the conflicts page, or settle it in git — nothing was changed",
+            ),
+            SyncError::NoMergeInProgress => write!(
+                f,
+                "there is no merge to conclude in the wiki clone; nothing was changed",
             ),
             SyncError::DetachedHead => write!(
                 f,
@@ -454,6 +472,13 @@ impl<S: WikiStore> SyncedStore<S> {
         // unreachable. Refuse before touching anything.
         if self.git.current_branch()?.is_none() {
             return Err(SyncError::DetachedHead);
+        }
+        // Also checked before the clean/dirty split: a merge whose conflicts have
+        // all been settled leaves a tree that looks like ordinary pending work,
+        // so committing it here would quietly turn a checkpoint into someone
+        // else's merge commit. Concluding a merge is `finish_merge`'s job.
+        if self.git.merge_in_progress()? {
+            return Err(SyncError::MergeInProgress);
         }
         let status = self.git.status()?;
         if status.is_clean() {

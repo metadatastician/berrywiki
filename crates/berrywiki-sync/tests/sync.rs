@@ -296,10 +296,46 @@ fn an_in_progress_merge_is_refused() {
 
     let mut w = synced(&sb.ours);
     let err = w.create_page(page("X", "x-1", None)).unwrap_err();
+    // MERGE_HEAD is present, so the more precise refusal wins: this is a merge
+    // BerryWiki can offer to conclude, not merely a tree it cannot commit.
     assert!(
-        matches!(err, SyncError::UnmergedPaths { .. }),
-        "unmerged tree refused: {err}"
+        matches!(err, SyncError::MergeInProgress),
+        "unfinished merge refused: {err}"
     );
+}
+
+/// The `UnmergedPaths` arm of `ensure_committable` is reached when the index
+/// holds conflicted entries but no merge is under way. A halted cherry-pick is
+/// the plainest way to be in that state: it writes CHERRY_PICK_HEAD, never
+/// MERGE_HEAD, so the merge guard above does not fire.
+#[test]
+fn unmerged_paths_without_a_merge_are_refused() {
+    let sb = GitSandbox::create(&fixture_dir());
+    sb.commit_change(
+        &sb.theirs,
+        "Research.md",
+        "# Research\n\ntheirs\n",
+        "Theirs",
+    );
+    let theirs = sb.head(&sb.theirs);
+    sb.git(&sb.theirs, &["push", "origin", "main"])
+        .expect_success("push");
+    sb.commit_change(&sb.ours, "Research.md", "# Research\n\nours\n", "Ours");
+    sb.git(&sb.ours, &["fetch", "origin"])
+        .expect_success("fetch");
+    assert!(!sb.git(&sb.ours, &["cherry-pick", &theirs]).success);
+
+    let mut w = synced(&sb.ours);
+    let err = w.create_page(page("X", "x-2", None)).unwrap_err();
+    match err {
+        SyncError::UnmergedPaths { paths } => {
+            assert!(
+                paths.iter().any(|p| p.contains("Research.md")),
+                "names the conflicted file: {paths:?}"
+            );
+        }
+        other => panic!("unmerged tree refused: {other}"),
+    }
 }
 
 #[test]

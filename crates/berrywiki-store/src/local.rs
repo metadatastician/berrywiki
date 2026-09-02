@@ -41,7 +41,9 @@ use crate::{
     PlannedRewrite, Result, WikiStore,
 };
 
-const SIDEBAR_FILE: &str = "_Sidebar.md";
+/// The generated navigation file. It is derived output, never authored, so
+/// the sync layer may regenerate it rather than ask a person to reconcile it.
+pub const SIDEBAR_FILE: &str = "_Sidebar.md";
 const FOOTER_FILE: &str = "_Footer.md";
 const ASSETS_DIR: &str = "assets";
 

@@ -172,6 +172,50 @@ impl Status {
     }
 }
 
+/// One side of a three-way merge, named by the index stage git records it in.
+///
+/// While a merge is unresolved the index holds up to three blobs per
+/// conflicted path instead of one. Which of them exist is the whole
+/// classification: all three means both sides edited the file, a missing
+/// [`Stage::Base`] means both sides created it, a missing side means that side
+/// removed it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stage {
+    /// Stage 1 — the common ancestor both sides started from.
+    Base,
+    /// Stage 2 — what the local branch has.
+    Ours,
+    /// Stage 3 — what the incoming commit has.
+    Theirs,
+}
+
+impl Stage {
+    fn number(self) -> u8 {
+        match self {
+            Stage::Base => 1,
+            Stage::Ours => 2,
+            Stage::Theirs => 3,
+        }
+    }
+}
+
+/// One path the index holds in more than one stage, and which stages those are.
+///
+/// Reported verbatim: this crate says what git recorded and leaves the meaning
+/// to the layer above, which knows which paths are pages and which is the
+/// generated sidebar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnmergedEntry {
+    /// Repository-relative path, exactly as git spells it.
+    pub path: String,
+    /// Stage 1 present — the path existed in the common ancestor.
+    pub base: bool,
+    /// Stage 2 present — the local branch still has the path.
+    pub ours: bool,
+    /// Stage 3 present — the incoming commit still has the path.
+    pub theirs: bool,
+}
+
 /// Something went wrong talking to git.
 #[derive(Debug)]
 pub enum GitError {
@@ -387,6 +431,68 @@ impl GitRepo {
         }
     }
 
+    /// Is a merge recorded as started but not concluded (`MERGE_HEAD` present)?
+    ///
+    /// BerryWiki never begins a merge (ADR-0010), so this is only ever true of
+    /// one a person started in the wiki folder themselves. The engine reads it
+    /// so the layers above can refuse to bury a half-finished merge under an
+    /// ordinary commit.
+    pub fn merge_in_progress(&self) -> Result<bool, GitError> {
+        let out = self.exec("merge-head", &["rev-parse", "-q", "--verify", "MERGE_HEAD"])?;
+        Ok(out.success)
+    }
+
+    /// Every path the index currently holds in more than one stage.
+    ///
+    /// Read NUL-delimited (`-z`), so a file name containing a quote, a newline
+    /// or a non-ASCII byte survives verbatim rather than arriving octal-escaped
+    /// as git's default quoting would render it. Each record is
+    /// `<mode> <sha> <stage>\t<path>`, one per stage, so a path appears up to
+    /// three times and is folded back into a single entry here. First-seen
+    /// order is preserved, which is git's own sort order.
+    pub fn unmerged(&self) -> Result<Vec<UnmergedEntry>, GitError> {
+        let out = self.checked("ls-files", &["ls-files", "-u", "-z"])?;
+        let mut entries: Vec<UnmergedEntry> = Vec::new();
+        for record in out.stdout.split('\0').filter(|s| !s.is_empty()) {
+            let Some((meta, path)) = record.split_once('\t') else {
+                continue;
+            };
+            let stage = meta.split_whitespace().next_back().unwrap_or("");
+            if !entries.iter().any(|e| e.path == path) {
+                entries.push(UnmergedEntry {
+                    path: path.to_string(),
+                    base: false,
+                    ours: false,
+                    theirs: false,
+                });
+            }
+            let slot = entries
+                .iter_mut()
+                .find(|e| e.path == path)
+                .expect("entry inserted immediately above");
+            match stage {
+                "1" => slot.base = true,
+                "2" => slot.ours = true,
+                "3" => slot.theirs = true,
+                _ => {}
+            }
+        }
+        Ok(entries)
+    }
+
+    /// The content one side of an unresolved merge has for a path, or `None`
+    /// when the index holds no blob at that stage — which is itself the signal
+    /// that the side in question removed the file, or never had it.
+    ///
+    /// The object argument is always `:<stage>:<path>`, so it opens with a
+    /// colon and no path, however it is spelled, can be read as an option.
+    /// Bytes are decoded lossily; callers ask only about text files.
+    pub fn show_stage(&self, stage: Stage, path: &str) -> Result<Option<String>, GitError> {
+        let object = format!(":{}:{}", stage.number(), path);
+        let out = self.exec("show", &["show", object.as_str()])?;
+        Ok(if out.success { Some(out.stdout) } else { None })
+    }
+
     // ----- committing -----
 
     /// Stage every change and commit it, returning the new commit id — or
@@ -411,6 +517,20 @@ impl GitRepo {
         Ok(Some(self.head()?))
     }
 
+    /// Stage everything and conclude a merge someone else already started,
+    /// returning the resulting commit id.
+    ///
+    /// Unlike [`GitRepo::commit_all`] this always commits: concluding a merge
+    /// is meaningful even when the merged tree happens to match `HEAD`, and
+    /// stopping short would strand the clone with `MERGE_HEAD` still set. It
+    /// records the second parent git already noted, so no history is replaced
+    /// and nothing is discarded. Verifying that no path is still unmerged is
+    /// the caller's job — staging conflict markers would bury them.
+    pub fn commit_merge(&self, message: &str) -> Result<CommitId, GitError> {
+        self.checked("stage", &["add", "-A"])?;
+        self.checked("commit", &["commit", "--quiet", "-m", message])?;
+        self.head()
+    }
     // ----- remote synchronisation -----
 
     /// Update remote-tracking refs from the configured remote. Does not touch

@@ -150,10 +150,27 @@ commit WITHOUT reloading (keeps StaleWrite live). `refresh`/`advance`/`sync`/
 merge, no ff, no push, remote unchanged. ADR-0010; 16 behavioural + 1 structural
 test vs `GitSandbox`. | Live-GitHub write path is P3-spike-write. Edit UI (P2)
 and conflict resolution (P3-conflict) still consume this.
-| P3-conflict | opus | Conflict classification (`git show :1:/:2:/:3:`), page
-conflicts surfaced (never auto-merged); sidebar conflicts auto-resolved by
-regeneration only. | Inherently opus. Metadata conflicts are surfaced, never
-unioned.
+| P3-conflict | *DONE* | **Done 2026-09-02.** Classification reads the git
+index of a merge the *operator* started, never the working tree: `ls-files -u`
+plus `show :1:`, `:2:` and `:3:` give ancestor, ours and theirs, which is what
+makes the body-versus-metadata split decidable (the working tree holds a
+marker-laced blend of both sides). Kinds: `Sidebar`, `Body`, `Metadata`,
+`AddedBoth`, `DeletedByThem`, `DeletedByUs`, `Opaque`. Page bodies and metadata
+are surfaced with all three sides and are never merged or unioned; only the
+generated `_Sidebar.md` is auto-settled, by reloading the store and
+regenerating it from the settled page set before the merge commit is recorded.
+`SyncError` gained `MergeInProgress` (a mutation is refused while an operator's
+merge is unfinished) and `NoMergeInProgress`. `MergeInProgress` displaces
+`UnmergedPaths` whenever `MERGE_HEAD` is present; `UnmergedPaths` stays
+reachable for an unmerged index with no merge under way (a halted cherry-pick)
+and keeps its own witness test. `/conflicts` shows the three sides per file and
+`POST /conflicts/finish` concludes a sidebar-only merge. No `<script>` on any
+new path. ADR-0010 Consequences amended to record that the enum did change.
+Evidence: `crates/berrywiki-sync/tests/conflict.rs` (9 tests) and the
+P3-conflict section of `crates/berrywiki-serve/tests/sync.rs` (6 tests), both
+over `GitSandbox`. | Inherently opus. Metadata conflicts are surfaced, never
+unioned. Any change that would merge two authored sides on the user's behalf
+-> stop.
 | P3-serve-sync | *DONE* | **Done 2026-09-02.** `serve` holds
 `SyncedStore<LocalFolderStore>` by default: every editor create/save/delete is
 one logical commit, sidebar in the same commit; outside changes checkpointed

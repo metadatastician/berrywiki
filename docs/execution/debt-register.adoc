@@ -10,9 +10,9 @@ link:work-packages.adoc[work-package register] tracks progress; this file
 tracks *liabilities*.
 
 Compiled 2026-08-07 during a full documentation audit; revised 2026-09-02 with
-Gate 0 (P3-serve-sync, X-lock, P0-ledger). Items marked *CLEARED*
-were fixed in that same pass and are listed only so the history is legible;
-they will be deleted at the next revision.
+Gate 0 (P3-serve-sync, X-lock, P0-ledger, P2-move, P3-conflict). Items marked
+*CLEARED* were fixed in that same pass and are listed only so the history is
+legible; they will be deleted at the next revision.
 
 == Severity
 
@@ -214,7 +214,8 @@ they will be deleted at the next revision.
 
 | L
 | The `/changes` page lists the last 50 commits and the `/conflicts` page
-  renders a hand-off, but neither is reachable from the native GitHub
+  renders a hand-off and, for a merge the operator started, the classified
+  clash with all three sides, but neither is reachable from the native GitHub
   reader; nothing about their content is a live-GitHub claim. Whether a
   wiki remote accepts the fast-forward push shape is still P3-spike-write.
 
@@ -228,6 +229,27 @@ they will be deleted at the next revision.
 | Page ids are minted in `berrywiki-serve` while `berrywiki-store` documents
   id generation as the application layer's job. A second writing front end
   would need to duplicate or share that code.
+
+| L
+| There is no offline three-way preview of a diverged but unmerged history.
+  `/conflicts` can classify only a merge the operator has already started,
+  because the classification reads git's index stages; before that there is
+  nothing to read, so the operator learns which pages clash only after
+  running `git merge`. Deliberately not built: a preview would be a
+  *prediction* of what git would do rather than a fact taken from the index,
+  and producing it would widen `berrywiki-git`'s closed literal set. Clearing
+  it is a ruling, not a task.
+
+| L
+| The `no_script` helper is duplicated in
+  `crates/berrywiki-serve/tests/editor.rs` and
+  `crates/berrywiki-serve/tests/sync.rs`, and both copies are naive substring
+  probes: lowercase the response, then assert it contains none of `<script`,
+  `javascript:`, `onerror=` or `onclick=` (the last two each preceded by a
+  space). Escaped page text that merely contains an attribute-looking
+  substring trips them, which forced a test payload change during P3-conflict
+  rather than a fix to the probe. Clearing it: one shared helper that inspects
+  elements and attributes instead of raw substrings.
 |===
 
 == Proof debt
@@ -244,7 +266,7 @@ they will be deleted at the next revision.
   `docs/proofs/invariants.adoc` (INV-1..6, each naming its witnessing tests,
   CI-checked by `scripts/check-invariants-ledger.sh`), and are covered by
   tests only. Tracked as *P5-spark*. Until then, no document may describe any
-  BerryWiki property as "proved"; 207 passing tests are evidence, not proof.
+  BerryWiki property as "proved"; 231 passing tests are evidence, not proof.
 
 |===
 

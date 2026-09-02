@@ -27,7 +27,7 @@ pub mod local;
 pub mod paths;
 
 pub use error::StoreError;
-pub use local::LocalFolderStore;
+pub use local::{LocalFolderStore, SIDEBAR_FILE};
 
 use berrywiki_core::{PageGraph, PageKind, WikiPage};
 

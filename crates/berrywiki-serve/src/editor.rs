@@ -26,7 +26,7 @@ use berrywiki_store::{CreatePageInput, MovePageInput, MovePlan, StoreError, Wiki
 use berrywiki_sync::{SyncError, SyncOutcome};
 
 use crate::{
-    changes_page, escape_attr, escape_html, form_value, ids, layout, normalize_newlines,
+    changes_page, escape_attr, escape_html, form_value, git_text, ids, layout, normalize_newlines,
     not_found_page, percent_decode, query_value, source_hash, App, Ctx, Recorded, Response,
 };
 
@@ -41,6 +41,9 @@ pub(crate) fn handle_post(app: &mut App, path: &str, body: &str) -> Response {
     }
     if path == "/sync" {
         return post_sync(app);
+    }
+    if path == "/conflicts/finish" {
+        return post_finish_merge(app);
     }
     if let Some(rest) = path.strip_prefix("/page/") {
         if let Some(id) = rest.strip_suffix("/edit") {
@@ -311,6 +314,7 @@ fn is_refusal(e: &SyncError) -> bool {
         e,
         SyncError::Store(StoreError::StaleWrite { .. })
             | SyncError::UnmergedPaths { .. }
+            | SyncError::MergeInProgress
             | SyncError::DetachedHead
     )
 }
@@ -930,6 +934,42 @@ fn post_sync(app: &mut App) -> Response {
             let mut r = changes_page(app.ctx(), "", Some(&msg));
             r.status = 500;
             r
+        }
+    }
+}
+
+// --- concluding a merge ----------------------------------------------------
+
+/// `POST /conflicts/finish`: conclude a merge whose every remaining clash is
+/// the generated navigation file. Regenerating that file is the only
+/// resolution BerryWiki performs, because it is derived output and no one
+/// authored either side of it. A clash in anything a person wrote is refused
+/// with 409 and left exactly as it was.
+fn post_finish_merge(app: &mut App) -> Response {
+    let Some(sync) = app.sync_mut() else {
+        return Response::html(
+            400,
+            layout(
+                app.ctx(),
+                None,
+                "Nothing to conclude",
+                "<p class=\"error-banner\">Commit-on-save is off in this session, so BerryWiki \
+                 is not tracking a merge. Use git directly.</p>"
+                    .to_string(),
+            ),
+        );
+    };
+    match sync.finish_merge() {
+        Ok(_) => Response::see_other("/changes?notice=merge-finished"),
+        Err(e) => {
+            let status = if is_refusal(&e) { 409 } else { 500 };
+            let body = format!(
+                "<p class=\"error-banner\">The merge was not concluded: {}</p>\
+                 <p>Nothing was committed and nothing in the wiki folder was changed. \
+                 <a href=\"/conflicts\">Back to the conflicts page</a></p>",
+                git_text(&e.to_string())
+            );
+            Response::html(status, layout(app.ctx(), None, "Merge not concluded", body))
         }
     }
 }

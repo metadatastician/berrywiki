@@ -116,7 +116,9 @@ would create a cycle before anything is written.
 pages produce byte-identical output on every run, archived pages are
 excluded, and the generated file is rewritten only when its content would
 change. A page titled "Sidebar" can never clobber the generated file, and
-every tree mutation regenerates the sidebar in the same commit.
+every tree mutation regenerates the sidebar in the same commit. Concluding a
+merge BerryWiki did not start regenerates the sidebar from the settled pages
+before the merge commit is recorded, never merging the two authored copies.
 
 *Enforced in.* `berrywiki-core` (`sidebar.rs`); write-if-changed and
 clobber refusal in `berrywiki-store`; same-commit rule in `berrywiki-sync`.
@@ -135,6 +137,8 @@ the forest builder target).
 | `crates/berrywiki-store/tests/local_store.rs` | `page_titled_sidebar_cannot_clobber_generated_sidebar`
 | `crates/berrywiki-sync/tests/sync.rs` | `create_is_one_commit_carrying_the_sidebar`
 | `crates/berrywiki-serve/tests/sync.rs` | `create_commits_page_and_sidebar_in_one_commit`
+| `crates/berrywiki-sync/tests/conflict.rs` | `a_sidebar_only_clash_is_settled_by_regenerating_it`
+| `crates/berrywiki-serve/tests/sync.rs` | `concluding_a_sidebar_only_merge_records_one_merge_commit`
 |===
 
 == INV-4 — Never lose local work
@@ -146,7 +150,9 @@ remote and the local commit intact; a diverged history is handed off
 without any merge; a file changed on disk since it was loaded is refused as
 a stale write rather than overwritten; outside edits are checkpointed as
 their own commit before any save commit; a refused editor save keeps the
-typed text; and a second writer on the same clone is refused while the
+typed text; a merge BerryWiki did not start is never absorbed into a
+checkpoint commit, and concluding it is refused while any page is still
+unsettled; and a second writer on the same clone is refused while the
 first holds the lock.
 
 *Enforced in.* `berrywiki-git` (closed literal set, audited by source
@@ -180,6 +186,11 @@ behavioural half of this invariant is test-only for good.
 | `crates/berrywiki-serve/tests/editor.rs` | `a_stale_base_from_an_older_editor_is_refused`
 | `crates/berrywiki-serve/tests/sync.rs` | `outside_change_is_checkpointed_before_the_save_commit`
 | `crates/berrywiki-serve/tests/sync.rs` | `diverged_sync_hands_off_to_the_conflicts_page_and_touches_nothing`
+| `crates/berrywiki-sync/tests/sync.rs` | `an_in_progress_merge_is_refused`
+| `crates/berrywiki-sync/tests/sync.rs` | `unmerged_paths_without_a_merge_are_refused`
+| `crates/berrywiki-sync/tests/conflict.rs` | `saving_a_page_is_refused_mid_merge`
+| `crates/berrywiki-sync/tests/conflict.rs` | `concluding_is_refused_while_a_page_is_unsettled`
+| `crates/berrywiki-serve/tests/sync.rs` | `saving_is_refused_while_a_merge_is_unfinished`
 |===
 
 == INV-5 — Never half-moved
