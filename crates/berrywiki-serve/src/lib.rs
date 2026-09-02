@@ -407,6 +407,9 @@ fn dispatch(ctx: Ctx<'_>, path: &str, query: &str) -> Response {
         return tag_page(ctx, &percent_decode(rest));
     }
     if let Some(rest) = path.strip_prefix("/page/") {
+        if let Some(id) = rest.strip_suffix("/history") {
+            return history_page(ctx, &percent_decode(id));
+        }
         let notice = query_value(query, "notice");
         return page_view(ctx, &percent_decode(rest), &notice);
     }
@@ -488,9 +491,92 @@ fn page_view(ctx: Ctx<'_>, id: &str, notice: &str) -> Response {
     }
     let rendered = render_markdown(&page.body);
     main.push_str(&format!("<article class=\"page\">{rendered}</article>"));
+    // Last-edited footer. `lead` is already escaped by `git_text` above, so it
+    // is interpolated as markup on purpose; nothing else here comes from git.
+    // The History link is unconditional, so the page's revisions stay reachable
+    // even with commit-on-save off, where the history page explains itself.
+    let mut lead = String::new();
+    if let Some(sync) = ctx.sync {
+        if let Ok(entries) = sync.git().history(&page.path, 1) {
+            if let Some(e) = entries.first() {
+                lead = format!(
+                    "Last edited by {} on {} · ",
+                    git_text(&e.author),
+                    git_text(&e.date)
+                );
+            }
+        }
+    }
+    main.push_str(&format!(
+        "<p class=\"page-footer\">{lead}<a href=\"/page/{id_a}/history\">History</a></p>",
+        id_a = escape_attr(id)
+    ));
     let aside = context_pane(ctx, id);
     let body = layout_three(ctx, Some(id), &page.title, &main, &aside);
     Response::html(200, body)
+}
+
+/// How many revisions `/page/<id>/history` lists. A page's own file changes
+/// far less often than the wiki as a whole, so this is deliberately deeper
+/// than the 50 commits `/changes` shows for the repository.
+const HISTORY_LIMIT: usize = 100;
+
+/// `/page/<id>/history`: the commits that touched one page's file, newest
+/// first.
+///
+/// The id is resolved through the store before anything is asked of git, so
+/// what reaches the engine is the store's own repository-relative path for a
+/// page that exists, never a fragment of the URL. A page the store does not
+/// know is a 404 here exactly as it is on the page itself.
+fn history_page(ctx: Ctx<'_>, id: &str) -> Response {
+    let page = match ctx.store.read_page(id) {
+        Ok(p) => p,
+        Err(_) => return not_found_page(ctx, id),
+    };
+    let title = format!("History of {}", page.title);
+    let mut main = String::new();
+    main.push_str(&format!(
+        "<p class=\"page-actions\"><a href=\"/page/{id_a}\">Back to the page</a></p>",
+        id_a = escape_attr(id)
+    ));
+    main.push_str(&format!(
+        "<p class=\"hint\">Revisions of <code>{}</code>. A page that was moved has a \
+         history that ends at the move; its earlier commits are in the log under the \
+         previous filename.</p>",
+        escape_html(&page.path)
+    ));
+
+    match ctx.sync {
+        None => main.push_str(
+            "<p class=\"notice\">Commit-on-save is off (or this folder is not a git \
+             working tree), so there is no repository to read revisions from.</p>",
+        ),
+        Some(sync) => match sync.git().history(&page.path, HISTORY_LIMIT) {
+            Ok(entries) if entries.is_empty() => main.push_str(
+                "<p>No commits touch this file yet. It will appear here after the next \
+                 save or sync records it.</p>",
+            ),
+            Ok(entries) => {
+                main.push_str("<ol class=\"commits\">");
+                for e in &entries {
+                    main.push_str(&format!(
+                        "<li><code>{}</code> {} <span class=\"when\">{} by {}</span></li>",
+                        git_text(e.id.short()),
+                        git_text(&e.subject),
+                        git_text(&e.date),
+                        git_text(&e.author)
+                    ));
+                }
+                main.push_str("</ol>");
+            }
+            Err(e) => main.push_str(&format!(
+                "<p class=\"error-banner\">Could not read this page's history: {}</p>",
+                git_text(&e.to_string())
+            )),
+        },
+    }
+    let aside = context_pane(ctx, id);
+    Response::html(200, layout_three(ctx, Some(id), &title, &main, &aside))
 }
 
 // --- git-facing pages (P3-serve-sync) ---------------------------------------
@@ -1176,6 +1262,7 @@ a.tag:hover,a.tag:focus{background:#e2c8cc;text-decoration:underline}\
 .status-strip{margin:0;padding:.3rem 1rem;font-size:.85rem;background:#f6f1f2;border-bottom:1px solid #e5e5e5;color:#444}\
 .status-on{color:#2e7d32;font-weight:600}.status-off{color:#7a5b00;font-weight:600}\
 .commits{padding-left:1.4rem}.commits .when{color:#888;font-size:.85rem}\
+.page-footer{margin-top:1.6rem;padding-top:.6rem;border-top:1px solid #e3e3e3;color:#666;font-size:.85rem}\
 .pending{padding-left:1.4rem}.hint{font-size:.85rem;color:#555}\
 .handoff th{text-align:left;padding-right:1rem}\
 .plan{border-collapse:collapse;margin:.5rem 0}.plan th,.plan td{text-align:left;padding:.2rem .8rem .2rem 0;vertical-align:top}\
@@ -1593,11 +1680,19 @@ mod tests {
             ("/search", "tag=teaching"),
             ("/search", "q=e&tag=teaching"),
             ("/search", "tag=%22%3E%3Cscript%3Ealert(1)%3C/script%3E"),
+            // P4-history. The 404 case is listed on purpose: a history route
+            // for a page the store does not know must not render a page.
+            (&format!("/page/{HOME_ID}/history"), ""),
+            ("/page/missing/history", ""),
         ] {
             let r = route(&s, path, query);
             // Same reason as the synced sweep: an absent route 404s, and a 404
             // is script-free, so without this the sweep passes vacuously.
-            let expected = if path == "/page/missing" { 404 } else { 200 };
+            let expected = if path.starts_with("/page/missing") {
+                404
+            } else {
+                200
+            };
             assert_eq!(r.status, expected, "{path}?{query}");
             no_script(&r.body);
         }

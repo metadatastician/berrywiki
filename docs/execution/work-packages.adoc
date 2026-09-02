@@ -201,7 +201,16 @@ save to a single commit on the synced backend. `/tags` counts pages per tag;
 editor and the new-page form carry a tag field whose parser trims, drops empties
 and drops duplicates. The store validates and never normalises: a tag that would
 not round-trip is refused and nothing is written. | git contact → opus.
-| P4-history | sonnet | Per-page revision list via git log (read-only). | —
+| P4-history | sonnet | *DONE* — **Done 2026-09-02.** `GitRepo::history` reads
+`git log` for one repository-relative path, passing it after `--` so a filename
+that begins with a dash can never be read as an option. A path git has never
+seen yields an empty list, not an error, so a page saved with commit-on-save off
+is a page without revisions rather than a failure. `/page/<id>/history` resolves
+the id through the store first, so what reaches the engine is the store's own
+path and never a fragment of the URL, and every page carries a last-edited
+footer naming the author and date. A page that was moved has a history that ends
+at the move; the page says so rather than implying otherwise. | git contact →
+opus.
 | P4-attach | sonnet | Attachment upload UI over the store's id-keyed dirs;
 schedule the missing attachment-conflict integration test. | conflict-flow
 contact → opus.

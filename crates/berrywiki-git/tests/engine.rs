@@ -386,3 +386,75 @@ fn recent_on_an_unborn_branch_is_empty_not_an_error() {
     assert!(repo.recent(10).unwrap().is_empty());
     let _ = fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn history_lists_only_the_commits_that_touched_that_path() {
+    let sb = GitSandbox::create(&fixture_dir());
+    let repo = GitRepo::open(&sb.ours).expect("open clone");
+    sb.commit_change(&sb.ours, "Extra.md", "extra\n", "Add an extra page");
+    sb.commit_change(&sb.ours, "Other.md", "other\n", "Add an unrelated page");
+    sb.commit_change(
+        &sb.ours,
+        "Extra.md",
+        "extra twice\n",
+        "Revise the extra page",
+    );
+
+    let entries = repo.history("Extra.md", 50).expect("log reads");
+    let subjects: Vec<&str> = entries.iter().map(|e| e.subject.as_str()).collect();
+    assert_eq!(
+        subjects,
+        vec!["Revise the extra page", "Add an extra page"],
+        "newest first, and the unrelated commit is not in this page's history"
+    );
+    assert_eq!(
+        repo.history("Extra.md", 1).expect("log reads").len(),
+        1,
+        "limit is honoured"
+    );
+}
+
+#[test]
+fn history_carries_the_author_name() {
+    let sb = GitSandbox::create(&fixture_dir());
+    let repo = GitRepo::open(&sb.ours)
+        .expect("open")
+        .with_identity(Identity {
+            name: "Ada Lovelace".to_string(),
+            email: "ada@example.invalid".to_string(),
+        });
+    fs::write(sb.ours.join("Research.md"), "# Research\n\nby ada\n").unwrap();
+    repo.commit_all("Ada edits").unwrap().unwrap();
+
+    let entries = repo.history("Research.md", 5).expect("log reads");
+    assert_eq!(entries[0].author, "Ada Lovelace");
+    assert!(
+        entries[0].date.contains('T'),
+        "author date is still ISO 8601: {}",
+        entries[0].date
+    );
+}
+
+#[test]
+fn history_of_a_path_git_has_never_seen_is_empty_not_an_error() {
+    let sb = GitSandbox::create(&fixture_dir());
+    let repo = GitRepo::open(&sb.ours).expect("open clone");
+    assert!(repo
+        .history("Never-Existed.md", 50)
+        .expect("an unknown path is not an error")
+        .is_empty());
+}
+
+#[test]
+fn history_never_reads_a_path_as_an_option() {
+    // The engine passes the path after `--`. Without that separator git would
+    // parse a leading dash as a flag and fail with "unknown switch", so this
+    // test fails the moment the separator is dropped. The path need not exist:
+    // what is under test is that git parses it as a path at all.
+    let sb = GitSandbox::create(&fixture_dir());
+    let repo = GitRepo::open(&sb.ours).expect("open clone");
+    assert!(repo
+        .history("-not-a-flag.md", 50)
+        .expect("a leading dash is a filename, never an option")
+        .is_empty());
+}
