@@ -30,16 +30,38 @@ lock, the search index — lives under the XDG *state* directory, in a directory
 keyed by a stable hash of the wiki's canonical path. Nothing app-private is
 ever written inside the clone, so a plain-git user cannot commit it.
 
-=== Repository lock — deferred (not yet needed)
+=== Repository lock (implemented 2026-09-02)
 
-The Git rules require single-writer locking so two *server* operations cannot
-mutate the same clone at once. There is **no concurrent-writer surface today**
-(the server is read-only; the CLI is single-shot), so locking is *deferred*
-rather than shipped. An initial hand-rolled pid lock file was removed after
-review: it was never acquired (false safety) and its stale-reclaim was racy.
-When in-app mutation / a long-running server lands, locking will use an OS
-advisory lock (`flock`, auto-released on process death — no stale-lock problem)
-acquired around the writing session. Tracked as a work package.
+The Git rules require single-writer locking so two processes cannot mutate the
+same clone at once. That surface exists since P2-edit/P3-serve-sync: `serve`
+is a long-running writer, and `sidebar --write` is a CLI writer. The lock is
+`berrywiki_appstate::RepoLock`:
+
+* An OS advisory lock on `<state>/lock` taken with `std::fs::File::try_lock`
+  (`flock` on Unix, `LockFileEx` on Windows; stable since Rust 1.89, which is
+  why the MSRV moved from 1.85 to 1.89). It lives in app state, never in the
+  clone. Because `repo_id` canonicalises the wiki path, `serve ./wiki` and
+  `serve /abs/wiki` contend for the same file.
+* Held for the life of a `serve` process (`--no-commit` included; `--github`
+  is a read-only mirror and takes no lock) and around `sidebar --write`.
+* Never waits. A second writer fails fast with exit 2 and a message naming
+  the holder (`pid=… program=… since=…`), which is the record the holder
+  wrote *after* acquiring.
+* **Holder text is diagnostic only.** It is never consulted to decide whether
+  the lock is free; the kernel decides that, and the OS releases the lock when
+  the holder exits however it exits. There is no reclaim logic, and none may
+  be added: the first attempt was a pid lock file whose stale-reclaim raced
+  and which was never actually acquired (false safety). Its removal is the
+  reason this section existed as "deferred" until now.
+* If app state cannot be resolved (no `$XDG_STATE_HOME`, `$HOME` or temp
+  dir) the writer prints a warning and continues unlocked, the same visible
+  degradation drafts already have. It never silently pretends to be locked.
+
+Evidence: `crates/berrywiki-appstate/src/lock.rs` (in-process refusal, record
+blanked on release) and `crates/berrywiki-appstate/tests/lock.rs` (a second
+*process* is refused while a helper process holds the lock, and succeeds after
+the helper is killed with no clean-up step). `berrywiki-cli` asserts that
+`sidebar --write` exits 2 while another writer holds the wiki.
 
 === Stale-write guard (optimistic concurrency)
 
@@ -86,9 +108,10 @@ are the fixes.
 * *Content-hash staleness* instead of mtime+length — stronger but re-reads every
   file on every check; deferred as an optional upgrade if the mtime blind spot
   bites in practice.
-* *OS file locks (`flock`)* instead of a pid lock file — not in std, and the pid
-  lock file gives portable dead-holder recovery; revisit if advisory `flock`
-  semantics are needed.
+* *A pid lock file* instead of an OS advisory lock — was the first attempt;
+  removed for reclaim races. When this ADR was written `flock` was "not in
+  std"; `File::try_lock` stabilised in Rust 1.89 and was adopted 2026-09-02
+  (section above), at the cost of raising the MSRV.
 
 == Consequences
 
@@ -101,5 +124,5 @@ are the fixes.
 == Revisit triggers
 
 * The mtime+length blind spot causes a real lost edit → move to content hashing.
-* A hosted/multi-user deployment needs cross-host locking → replace the pid lock
+* A hosted/multi-user deployment needs cross-host locking → replace the advisory lock
   with a coordinated lock (the git remote itself, or a lock service).

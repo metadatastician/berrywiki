@@ -5,10 +5,11 @@ toc::[]
 
 == Why CI carries the lint gates
 
-The development host runs a distro Rust (`/usr/bin/{rustc,cargo}` 1.85) with
-**no rustup, and therefore no `rustfmt` or `clippy`**. Those gates cannot run
-locally, so CI is the first and only place they are enforced. `cargo test` and
-`cargo build` *are* run locally and are expected green before every commit.
+The development host runs a rustup toolchain newer than the MSRV (1.97 against
+1.89 at the time of writing) with `rustfmt` and `clippy` installed, so all four
+gates run locally; the `rust:1.89-slim` podman recipe in `CLAUDE.md` repeats
+fmt, clippy and build under the exact MSRV. `cargo test` and `cargo build` are
+expected green before every commit.
 
 == Workflow: `.github/workflows/ci.yml`
 
@@ -20,11 +21,12 @@ Two jobs, least-privilege (`permissions: contents: read`):
   crates. The full suite's `no-<script>` SSR assertions and the git
   no-data-loss harness run under *test*, so `cargo test` is the security/safety
   gate.
-* *test* (matrix `1.85.0` + `stable`): `cargo build --locked` and
-  `cargo test --workspace --locked`. `1.85.0` pins the declared MSRV
+* *test* (matrix `1.89.0` + `stable`): `cargo build --locked` and
+  `cargo test --workspace --locked`. `1.89.0` pins the declared MSRV
   (`rust-version` in the workspace); `stable` catches what the pinned toolchain
   misses. `--locked` fails on `Cargo.lock` drift (the lock freezes the
-  rustc-1.85-compatible comrak resolution).
+  rustc-1.89-compatible comrak resolution). The MSRV is 1.89 because the
+  repository lock uses `std::fs::File::try_lock` (ADR-0008).
 
 Actions: `actions/checkout@v5`, `dtolnay/rust-toolchain@{stable,master}`,
 `Swatinem/rust-cache@v2`. Dependabot (`.github/dependabot.yml`) keeps these and
@@ -32,9 +34,8 @@ the Cargo deps current.
 
 == Before the first push to a remote
 
-. rustfmt cannot run on this host, so the code is *not yet* rustfmt-normalised.
-  On a rustfmt-capable machine run `cargo fmt --all` and commit, or expect the
-  first *lint* run to fail on formatting only.
+. The tree is rustfmt-normalised as of 2026-09-02 (`cargo fmt --all -- --check`
+  passes on the host and under 1.89). Keep it so before each commit.
 . Pushing `.github/workflows/**` needs a token with the `workflow` scope; the
   default `gh` token does not have it. Run `gh auth refresh -s workflow` first.
 

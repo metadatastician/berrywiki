@@ -50,7 +50,7 @@ failure it cannot mechanically fix, or contact with git/sync/data safety
 
 | P1-render | *DONE* | `berrywiki-render`: comrak GFM → HTML; raw HTML escaped
 /omitted, dangerous URL schemes neutralised at the AST level; deterministic; 9
-tests. comrak default features off (rustc-1.85 compat). Divergence recorded in
+tests. comrak default features off (rustc-1.85 compat at the time). Divergence recorded in
 the compatibility report. | Residual: GitHub parity unverified until the live
 spike (→ opus); syntax highlighting deferred behind a feature.
 | P1-serve | *DONE* | `berrywiki serve`: zero-dep `std::net` three-pane SSR
@@ -62,10 +62,10 @@ yet; no `_Footer`; single-threaded (fine for single user).
 in tests (element + inline `on*=` + `javascript:`). | Remaining: promote to a
 CI gate; the render layer already blocks raw HTML at the source.
 | P1-ci | *DONE* | `.github/workflows/ci.yml`: lint (fmt+clippy, stable) +
-test matrix (MSRV 1.85 + stable), `--locked`, least-privilege, checkout@v5 /
+test matrix (MSRV 1.89 + stable), `--locked`, least-privilege, checkout@v5 /
 rust-cache@v2. Dependabot for actions+cargo. docs/development/ci.adoc. | Not run
 yet (local-only); first push needs `gh auth refresh -s workflow` + a `cargo fmt`
-normalisation pass (rustfmt unavailable on host). Two-git matrix = follow-up.
+normalisation pass (done 2026-09-02; tree is fmt-clean). Two-git matrix = follow-up.
 | P1-spike-read | opus | Live-GitHub *read-side* spike: clone a real private
 `.wiki.git`, record link/filename/metadata-invisibility/sidebar evidence into
 the compatibility report. **Includes the auth row** (does the chosen credential
@@ -86,8 +86,8 @@ AND as a draft. Two-layer stale guard: store fingerprint (ADR-0008) + hidden
 `base` source-hash per editor session. Drafts wired through appstate
 (`berrywiki-serve::App`); degraded visibly when appstate is unresolvable. |
 Former blocker resolved by ADR-0006 (explicit Save-draft, no autosave
-promise). **X-lock's trigger has now fired** — the serve process is a
-long-running writer; schedule X-lock before a second writer surface ships.
+promise). X-lock (below) now guards the serve process, which is a
+long-running writer.
 | P2-move | opus | Transactional *subtree* move/rename: validate → compute all
 descendant renames → rewrite inbound links → regenerate sidebar → single
 commit; never half-moved. | *Blocked-by* critique major "non-leaf move is a
@@ -97,9 +97,20 @@ update/delete/move refuse a `StaleWrite` if a file changed on disk since load.
 Critique major resolved (ADR-0008). | Blind spot: an edit preserving both mtime
 and length within one tick (documented) → content-hash upgrade if it bites.
 | P2-app-state | *DONE* | `berrywiki-appstate`: XDG-state home keyed by a stable
-repo hash for drafts/journal/lock/index; repo lock with dead-holder recovery.
+repo hash for drafts/journal/lock/index; `RepoLock` (OS advisory lock, see
+X-lock).
 Nothing app-private in the clone. Critique major resolved (ADR-0008). | Wire the
 search index + draft dir through it when those land.
+| X-lock | *DONE* | **Done 2026-09-02.** `berrywiki_appstate::RepoLock`: OS
+advisory lock (`std::fs::File::try_lock`, Rust 1.89, hence the MSRV bump) on
+`<state>/lock`, held for the life of `serve` and around `sidebar --write`
+(the only two CLI writers today; `check` is read-only and takes no lock). A
+second writer exits 2 naming the holder; the holder record is diagnostic only
+and never consulted for acquisition (no reclaim); the OS releases the lock on
+process death. Unresolvable app state degrades to a warning. Evidence: two-
+process test in `crates/berrywiki-appstate/tests/lock.rs`, CLI refusal test.
+| Never add reclaim logic (ADR-0008). Cross-host locking is a hosted-deployment
+question, not this package.
 |===
 
 == Phase 3 — In-app sync (commit / pull / push / conflict)
@@ -131,6 +142,19 @@ and conflict resolution (P3-conflict) still consume this.
 conflicts surfaced (never auto-merged); sidebar conflicts auto-resolved by
 regeneration only. | Inherently opus. Metadata conflicts are surfaced, never
 unioned.
+| P3-serve-sync | *DONE* | **Done 2026-09-02.** `serve` holds
+`SyncedStore<LocalFolderStore>` by default: every editor create/save/delete is
+one logical commit, sidebar in the same commit; outside changes checkpointed
+first; `/changes` (pending state, last 50 commits, `POST /sync` = fetch +
+fast-forward + push, never merge, never force), `/conflicts` (hand-off with
+manual steps), status strip, fixed `notice` tokens. `serve --no-commit` opts
+out; a non-git folder degrades to that with a warning; `--author` sets the
+identity. `berrywiki-github` fenced as mirror-only. Default port 23779 (TCP
+only, loopback), per the estate network policy. Evidence:
+`crates/berrywiki-serve/tests/sync.rs` over `GitSandbox`. | Any change
+that would merge, reset or force on the user's behalf → stop. Token text
+must pass `redact_secret` on every rendered path. P3-spike-write runs
+*after* this so the spike exercises the real path.
 | P3-spike-write | opus | Live-GitHub *write-side* spike: concurrent push
 rejection, conflict shape, default branch. | Credential-gated; never fake.
 |===
@@ -167,18 +191,6 @@ runtime-dep mechanism for `git`; a CI Guix lane. | *Blocked-by* critique major
 | P5-spark | opus | Differential SPARK proofs of the invariants ledger (metadata
 grammar → forest builder → move state machine); nothing labelled "proven"
 without a green `gnatprove` CI lane. | Post-MVP; inherently opus.
-|===
-
-== Deferred
-
-[cols="1,1,4", options="header"]
-|===
-| ID | Tier | Contract
-| X-lock | opus | Repository single-writer lock, needed when in-app mutation / a
-long-running server creates a concurrent-writer surface (Git rules). Implement
-with an OS advisory lock (`flock`, auto-released on process death) around the
-writing session — NOT a pid lock file (the first attempt was removed:
-never-acquired + racy stale-reclaim, per the ADR-0008 review).
 |===
 
 == Cross-cutting standing packages

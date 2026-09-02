@@ -160,13 +160,6 @@ they will be deleted at the next revision.
   co-architect / co-maintainer**. It is the owning organisation account, not
   a person.
 
-| M
-| `mise.toml` installs Node, Python, Go, Java, Bun, Deno, npm, yarn, pnpm,
-  black, ruff, prettier, stylua, cmake and ninja — for a repository whose
-  only toolchain is Rust. It is estate boilerplate. Cost: a slow, confusing
-  first-run for any contributor who uses mise. Clearing it: reduce to `rust`
-  and `just`, or delete the file.
-
 | L
 | `berrywiki-launcher.sh` (440 lines) and `berrywiki.launcher.a2ml` are
   undocumented in the README and untested by CI.
@@ -178,15 +171,6 @@ they will be deleted at the next revision.
 |===
 | Sev | Item
 
-| H
-| **No repository lock.** ADR-0008 deferred single-writer enforcement "until
-  in-app mutation / a long-running server lands" — which P2-edit has now
-  done. Two `berrywiki serve` processes, or a serve process alongside a CLI
-  write, can interleave mutations on one clone. The stale-write guard
-  narrows but does not close the window. Tracked as *X-lock*; implement with
-  an OS advisory lock (`flock`), never a pid file — the first attempt was
-  removed for reclaim races.
-
 | M
 | The stale guard fingerprints mtime + length. An edit that preserves both
   within one filesystem tick is undetectable. Documented in ADR-0008;
@@ -194,7 +178,21 @@ they will be deleted at the next revision.
 
 | M
 | `berrywiki-github` is read-only, so `serve --github` cannot edit. The
-  editor works only against a local folder.
+  editor works only against a local folder. Since P3-serve-sync the crate
+  docs fence it as mirror-only; the Team write path is `berrywiki-sync`
+  over a managed clone, not this crate.
+
+| M
+| `serve` runs git on the request path: a checkpoint + commit per save and
+  a fetch + push on `POST /sync`. With the single-threaded server a slow
+  remote blocks every other request for the duration. Acceptable for one
+  user on loopback; the push-off-the-request-path worker is P7-sync-worker.
+
+| L
+| The `/changes` page lists the last 50 commits and the `/conflicts` page
+  renders a hand-off, but neither is reachable from the native GitHub
+  reader; nothing about their content is a live-GitHub claim. Whether a
+  wiki remote accepts the fast-forward push shape is still P3-spike-write.
 
 | L
 | `crates/berrywiki-serve/src/ids.rs` mints UUIDv7-shaped ids from
@@ -221,7 +219,7 @@ they will be deleted at the next revision.
   invariants that would be proved — metadata round-trip idempotence,
   sidebar determinism, no-data-loss on move — are currently covered by tests
   only. Tracked as *P5-spark*. Until then, no document may describe any
-  BerryWiki property as "proved"; 183 passing tests are evidence, not proof.
+  BerryWiki property as "proved"; 207 passing tests are evidence, not proof.
 
 | L
 | The invariants ledger P5-spark refers to is not written down as a ledger.
@@ -267,11 +265,11 @@ they will be deleted at the next revision.
 | M
 | The lint job is the *only* gate that runs `rustfmt` and `clippy`, and it
   never executed until 2026-08-03. Its first real run found four defects.
-  There is no equivalent local gate, because the development host has no
-  rustup; contributors depend entirely on CI catching lint.
+  Both now run locally (host toolchain and the 1.89 podman recipe), but
+  nothing enforces them before a commit; CI is still the only hard gate.
 
 | M
-| No REUSE lint, no link checker, no MSRV-drift check beyond the 1.85 matrix
+| No REUSE lint, no link checker, no MSRV-drift check beyond the 1.89 matrix
   leg, and no coverage measurement.
 
 | L

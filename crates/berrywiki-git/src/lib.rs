@@ -72,6 +72,25 @@ impl std::fmt::Display for CommitId {
     }
 }
 
+impl CommitId {
+    /// The conventional 7-character abbreviation for display. Never used to
+    /// address a commit: git only ever receives the full id.
+    pub fn short(&self) -> &str {
+        let end = self.0.len().min(7);
+        &self.0[..end]
+    }
+}
+
+/// One line of history as read by [`GitRepo::recent`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogEntry {
+    pub id: CommitId,
+    /// The commit subject (first line of the message).
+    pub subject: String,
+    /// The author date in strict ISO 8601 (`%aI`), as git prints it.
+    pub date: String,
+}
+
 /// How the local branch and its fetched upstream relate.
 ///
 /// `ahead`/`behind` are counted against the *already-fetched* upstream, so the
@@ -316,6 +335,41 @@ impl GitRepo {
     pub fn merge_base_with_upstream(&self) -> Result<CommitId, GitError> {
         let out = self.checked("merge-base", &["merge-base", "HEAD", "@{u}"])?;
         Ok(CommitId(out.stdout.trim().to_string()))
+    }
+
+    /// The most recent `limit` commits reachable from `HEAD`, newest first.
+    /// A fixed-shape `log` read: id, subject and author date, nothing else
+    /// (no paths, no diffs). An unborn branch yields an empty list rather
+    /// than an error, so a freshly initialised clone can still be described.
+    pub fn recent(&self, limit: usize) -> Result<Vec<LogEntry>, GitError> {
+        let n = limit.to_string();
+        let out = self.exec(
+            "log",
+            &["log", "--format=%H%x1f%s%x1f%aI", "-n", n.as_str()],
+        )?;
+        if !out.success {
+            // The only expected failure: `HEAD` names a branch with no commits.
+            if out.stderr.contains("does not have any commits") {
+                return Ok(Vec::new());
+            }
+            return Err(GitError::Git {
+                op: "log",
+                stderr: out.stderr,
+            });
+        }
+        Ok(out
+            .stdout
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|line| {
+                let mut f = line.splitn(3, '\u{1f}');
+                LogEntry {
+                    id: CommitId(f.next().unwrap_or("").to_string()),
+                    subject: f.next().unwrap_or("").to_string(),
+                    date: f.next().unwrap_or("").to_string(),
+                }
+            })
+            .collect())
     }
 
     /// The name of the branch `HEAD` points at, or `None` when `HEAD` is not on

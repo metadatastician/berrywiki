@@ -46,14 +46,16 @@ cargo build --workspace    # must be warning-free
 and the git conflict / no-data-loss harness. Do not report work complete on a
 build alone.
 
-There is no rustup on the development host, so `rustfmt`/`clippy` run in a
-container:
+Host Rust is a rustup toolchain (1.97, newer than the 1.89 MSRV) with rustfmt
+and clippy installed. Run them on the host, then repeat them plus a build under
+the MSRV toolchain in a container, because 1.89 can reject what 1.97 accepts:
 
 ```sh
-podman run --rm -v "$PWD":/work -w /work docker.io/library/rust:1.86-slim sh -c \
+podman run --rm -v "$PWD":/work -w /work docker.io/library/rust:1.89-slim sh -c \
   'rustup component add clippy rustfmt >/dev/null 2>&1
    cargo fmt --all -- --check
-   cargo clippy --workspace --all-targets -- -D warnings'
+   cargo clippy --workspace --all-targets -- -D warnings
+   cargo build --workspace'
 ```
 
 CI denies warnings. Check runs with `gh run list`, never `gh pr checks` —

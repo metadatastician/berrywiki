@@ -376,6 +376,20 @@ impl<S: WikiStore> SyncedStore<S> {
         Ok(last.expect("at least one attempt always runs"))
     }
 
+    /// The divergence hand-off as of the last fetch, or `None` when the local
+    /// branch and its upstream are still compatible (or there is no upstream).
+    /// Read-only: nothing is fetched, committed or touched. Call
+    /// [`SyncedStore::refresh`] or [`SyncedStore::sync`] first for a current
+    /// answer; this is what a conflict page renders.
+    pub fn diverged(&self) -> Result<Option<DivergedHandoff>> {
+        let d = self.git.divergence()?;
+        if d.needs_merge() {
+            Ok(Some(self.handoff(&d)?))
+        } else {
+            Ok(None)
+        }
+    }
+
     // ----- conflict re-entry seam (used by the conflict layer, not the UI) -----
 
     /// Read-only git handle (for three-way reads and a controlled merge).

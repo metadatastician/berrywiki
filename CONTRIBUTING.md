@@ -34,7 +34,7 @@ violates one will not be merged, however useful it otherwise is:
 
 ## Getting set up
 
-You need **Rust 1.85 or newer** and nothing else — no Node, no database, no
+You need **Rust 1.89 or newer** and nothing else — no Node, no database, no
 container runtime.
 
 ```sh

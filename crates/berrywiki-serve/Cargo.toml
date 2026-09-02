@@ -1,6 +1,6 @@
 [package]
 name = "berrywiki-serve"
-description = "Zero-JavaScript server-side-rendered read-only explorer for BerryWiki (ADR-0005): a testable route() core plus a small std::net blocking server. No async runtime, no web framework — deliberately buildable on the host's rustc 1.85."
+description = "Zero-JavaScript server-side-rendered explorer and editor for BerryWiki (ADR-0005): a testable route()/handle() core plus a small std::net blocking server. Editor mutations go through berrywiki-sync (commit-on-save) unless the caller opts out. No async runtime, no web framework — deliberately buildable on the host's rustc 1.85."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -17,6 +17,11 @@ berrywiki-core = { path = "../berrywiki-core" }
 berrywiki-store = { path = "../berrywiki-store" }
 berrywiki-render = { path = "../berrywiki-render" }
 berrywiki-draft = { path = "../berrywiki-draft" }
+berrywiki-git = { path = "../berrywiki-git" }
+berrywiki-sync = { path = "../berrywiki-sync" }
+
+[dev-dependencies]
+berrywiki-git-compat = { path = "../berrywiki-git-compat" }
 
 [lints.rust]
 unsafe_code = "forbid"

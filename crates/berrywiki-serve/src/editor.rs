@@ -21,10 +21,11 @@
 use berrywiki_core::PageKind;
 use berrywiki_render::render_markdown;
 use berrywiki_store::{CreatePageInput, StoreError, WikiStore};
+use berrywiki_sync::{SyncError, SyncOutcome};
 
 use crate::{
-    escape_attr, escape_html, form_value, ids, layout, normalize_newlines, not_found_page,
-    percent_decode, query_value, source_hash, App, Ctx, Response,
+    changes_page, escape_attr, escape_html, form_value, ids, layout, normalize_newlines,
+    not_found_page, percent_decode, query_value, source_hash, App, Ctx, Recorded, Response,
 };
 
 // --- POST dispatch ---------------------------------------------------------
@@ -35,6 +36,9 @@ pub(crate) fn handle_post(app: &mut App, path: &str, body: &str) -> Response {
     }
     if path == "/reload" {
         return post_reload(app, body);
+    }
+    if path == "/sync" {
+        return post_sync(app);
     }
     if let Some(rest) = path.strip_prefix("/page/") {
         if let Some(id) = rest.strip_suffix("/edit") {
@@ -201,7 +205,7 @@ fn post_edit(app: &mut App, id: &str, form: &str) -> Response {
     let base = form_value(form, "base");
 
     // Snapshot what rendering needs before any mutable borrow of the store.
-    let (title, current_hash) = match app.store.read_page(id) {
+    let (title, current_hash) = match app.store().read_page(id) {
         Ok(p) => (p.title.clone(), source_hash(&p.source)),
         Err(_) => return not_found_page(app.ctx(), id),
     };
@@ -258,16 +262,18 @@ fn post_edit(app: &mut App, id: &str, form: &str) -> Response {
                     "The page changed after this editor was opened.".to_string(),
                 );
             }
-            match app.store.update_page(id, &submitted) {
-                Ok(()) => {
+            match app.update_page(id, &submitted) {
+                Ok(rec) => {
                     if let Some(drafts) = &app.drafts {
                         // The draft is superseded by the save; failure to
                         // remove it is only cosmetic.
                         let _ = drafts.discard(id);
                     }
-                    Response::see_other(format!("/page/{id}"))
+                    Response::see_other(with_notice(&format!("/page/{id}"), rec))
                 }
-                Err(e @ StoreError::StaleWrite { .. }) => {
+                // A refusal that keeps the text: stale write, or a clone that
+                // must not be committed to (merge in progress, detached HEAD).
+                Err(e) if is_refusal(&e) => {
                     stale_conflict(app, id, &title, &submitted, &current_hash, e.to_string())
                 }
                 Err(e) => editor_error(app.ctx(), id, &title, &submitted, &base, e.to_string()),
@@ -282,6 +288,26 @@ fn post_edit(app: &mut App, id: &str, form: &str) -> Response {
             "Unknown editor action.".to_string(),
         ),
     }
+}
+
+/// Append the post-save notice token (commit-on-save only) to a redirect.
+fn with_notice(target: &str, rec: Recorded) -> String {
+    match rec.notice_token() {
+        Some(t) => format!("{target}?notice={t}"),
+        None => target.to_string(),
+    }
+}
+
+/// Errors where the right answer is "keep the text, let the user sort out the
+/// repository": the store's stale guard, and sync's refusals to commit into a
+/// clone mid-merge or with a detached HEAD. Everything else is a plain error.
+fn is_refusal(e: &SyncError) -> bool {
+    matches!(
+        e,
+        SyncError::Store(StoreError::StaleWrite { .. })
+            | SyncError::UnmergedPaths { .. }
+            | SyncError::DetachedHead
+    )
 }
 
 /// A refused Save: 409, submitted text intact in the form AND persisted as a
@@ -470,8 +496,8 @@ fn post_new(app: &mut App, form: &str) -> Response {
         tags: Vec::new(),
         body: body_text.clone(),
     };
-    match app.store.create_page(input) {
-        Ok(id) => Response::see_other(format!("/page/{id}")),
+    match app.create_page(input) {
+        Ok((id, rec)) => Response::see_other(with_notice(&format!("/page/{id}"), rec)),
         Err(e) => render_new(
             app.ctx(),
             &NewView {
@@ -488,7 +514,7 @@ fn post_new(app: &mut App, form: &str) -> Response {
 
 /// New pages append after their siblings: max sibling position + 1.
 fn next_position(app: &App, parent_id: Option<&str>) -> i64 {
-    let graph = app.store.graph();
+    let graph = app.store().graph();
     let siblings = match parent_id {
         Some(p) => graph.children_of(p),
         None => graph.roots(),
@@ -545,24 +571,66 @@ pub(crate) fn delete_confirm(ctx: Ctx<'_>, id: &str, error: Option<(u16, String)
 
 fn post_delete(app: &mut App, id: &str) -> Response {
     // The redirect target must be captured before the page is gone.
-    let parent = match app.store.read_page(id) {
+    let parent = match app.store().read_page(id) {
         Ok(p) => p.metadata.as_ref().and_then(|m| m.parent_id.clone()),
         Err(_) => return not_found_page(app.ctx(), id),
     };
-    match app.store.delete_page(id) {
-        Ok(()) => {
+    match app.delete_page(id) {
+        Ok(rec) => {
             if let Some(drafts) = &app.drafts {
                 let _ = drafts.discard(id);
             }
             match parent {
-                Some(p) => Response::see_other(format!("/page/{p}")),
-                None => Response::see_other("/"),
+                Some(p) => Response::see_other(with_notice(&format!("/page/{p}"), rec)),
+                None => Response::see_other(with_notice("/", rec)),
             }
         }
-        Err(e @ StoreError::StaleWrite { .. }) => {
-            delete_confirm(app.ctx(), id, Some((409, e.to_string())))
-        }
+        Err(e) if is_refusal(&e) => delete_confirm(app.ctx(), id, Some((409, e.to_string()))),
         Err(e) => delete_confirm(app.ctx(), id, Some((400, e.to_string()))),
+    }
+}
+
+// --- sync ------------------------------------------------------------------
+
+/// `POST /sync`: fetch, fast-forward, push — bounded retries, never a merge,
+/// never a force. Diverged histories go to `/conflicts`; everything else
+/// redirects to `/changes` with a fixed notice token.
+fn post_sync(app: &mut App) -> Response {
+    let Some(sync) = app.sync_mut() else {
+        return Response::html(
+            400,
+            layout(
+                app.ctx(),
+                None,
+                "Sync unavailable",
+                "<p class=\"error-banner\">Commit-on-save is off in this session, so there \
+                 is nothing for BerryWiki to synchronise. Use git directly.</p>"
+                    .to_string(),
+            ),
+        );
+    };
+    match sync.sync_retrying(3) {
+        Ok(report) => {
+            let token = match &report.outcome {
+                SyncOutcome::NoRemote => "synced-no-remote",
+                SyncOutcome::UpToDate => "synced-up-to-date",
+                SyncOutcome::Integrated { .. } => "synced-integrated",
+                SyncOutcome::Published { .. } => "synced-published",
+                SyncOutcome::PushRaced => "synced-raced",
+                SyncOutcome::Diverged(_) => {
+                    app.last_sync = Some(report.outcome);
+                    return Response::see_other("/conflicts");
+                }
+            };
+            app.last_sync = Some(report.outcome);
+            Response::see_other(format!("/changes?notice={token}"))
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            let mut r = changes_page(app.ctx(), "", Some(&msg));
+            r.status = 500;
+            r
+        }
     }
 }
 
@@ -577,7 +645,7 @@ fn post_reload(app: &mut App, form: &str) -> Response {
     } else {
         "/".to_string()
     };
-    match app.store.reload() {
+    match app.reload() {
         Ok(()) => {
             let sep = if target.contains('?') { '&' } else { '?' };
             Response::see_other(format!("{target}{sep}notice=reloaded"))

@@ -10,8 +10,9 @@
 //!
 //! * [`AppState`] — a canonical home under the XDG *state* directory, keyed by
 //!   a stable hash of the wiki's path, with sub-paths for each kind of state.
-//! * [`RepoLock`] — an advisory lock so two processes never mutate the same
-//!   clone at once (a Git-rules requirement), with dead-holder recovery.
+//! * [`RepoLock`] — an OS advisory lock so two processes never mutate the same
+//!   clone at once (a Git-rules requirement); released by the OS when the
+//!   holder exits, so there is no stale lock to reclaim.
 //! * [`journal`] — a roll-forward operation journal for crash recovery that
 //!   only ever touches the operation's own files, never a blanket working-tree
 //!   reset (soundly replacing the rejected `git restore`/`reset --hard` design).
@@ -19,16 +20,10 @@
 use std::path::{Path, PathBuf};
 
 pub mod journal;
+pub mod lock;
 
 pub use journal::MoveJournal;
-
-// NOTE: repository locking (single-writer enforcement) is intentionally NOT
-// implemented here yet. An earlier hand-rolled pid lock file had reclaim races
-// and, more importantly, nothing acquired it — false safety. There is no
-// concurrent-writer surface today (the server is read-only; the CLI is
-// single-shot). When in-app mutation / a long-running server lands, add locking
-// with an OS advisory lock (`flock`, auto-released on process death) rather than
-// a pid file. Tracked in docs/execution/work-packages.adoc.
+pub use lock::{LockError, RepoLock};
 
 /// Stable 64-bit FNV-1a hash. Hand-rolled (not `DefaultHasher`, whose output is
 /// not guaranteed stable across Rust versions) so the app-state location does
@@ -110,6 +105,11 @@ impl AppState {
     pub fn index_dir(&self) -> PathBuf {
         self.root.join("index")
     }
+
+    /// Path of the single-writer lock file (see [`RepoLock`]).
+    pub fn lock_path(&self) -> PathBuf {
+        self.root.join("lock")
+    }
 }
 
 #[cfg(test)]
@@ -126,6 +126,19 @@ mod tests {
         assert_eq!(a.len(), 16);
     }
 
+    #[test]
+    fn repo_id_ignores_how_the_path_is_spelled() {
+        // `serve ./wiki` and `serve /abs/wiki` must share one lock file.
+        let wiki = std::env::temp_dir().join(format!("bw-canon-{}", std::process::id()));
+        std::fs::create_dir_all(&wiki).unwrap();
+        let dotted = wiki.join(".").join("..").join(wiki.file_name().unwrap());
+        assert_ne!(dotted, wiki);
+        assert_eq!(repo_id(&dotted), repo_id(&wiki));
+        assert!(AppState::for_wiki(&wiki)
+            .unwrap()
+            .lock_path()
+            .starts_with(AppState::for_wiki(&dotted).unwrap().root()));
+    }
     #[test]
     fn app_state_lives_outside_the_wiki() {
         let wiki = std::env::temp_dir().join(format!("bw-wiki-{}", std::process::id()));
