@@ -35,9 +35,11 @@ repo. **The wiki must stay fully usable without BerryWiki.**
 - The repo lives in WSL at `~/developer/meta-repos/berrywiki`. **Only WSL
   tooling may write to it or run git in it** — Windows git/editors cause
   clone desync. Author files Windows-side, `cp` in from inside WSL.
-- WSL Rust is distro 1.85 at `/usr/bin` — **no rustup, so no rustfmt/clippy
-  on the host**. Do not skip those gates: run them in a container instead
-  (recipe below). No `rsync` (use `cp`).
+- Host Rust is a rustup toolchain under `~/developer/tools/opt/cargo/bin`
+  (1.97 at last check, newer than the 1.89 MSRV; `rustc --version`).
+  rustfmt and clippy are installed there, so run them on the host **and**
+  in the MSRV container (recipe below): 1.89 can reject what 1.97 accepts.
+  No `rsync` (use `cp`).
 - `gh` **is** installed and authenticated.
 - Long commit messages: write to a temp file and `git commit -F`.
 
@@ -51,14 +53,16 @@ cargo build --workspace         # must be warning-free
 `cargo test` IS the safety gate — it carries the script-free SSR assertions
 and the git conflict / no-data-loss harness.
 
-rustfmt and clippy have no host toolchain, so run them through podman before
-pushing (CI denies warnings, and a first-ever lint run finds real problems):
+Run rustfmt and clippy on the host, then repeat them plus a build under the
+MSRV toolchain before pushing (CI denies warnings, and the `test` matrix builds
+on 1.89.0):
 
 ```sh
-podman run --rm -v "$PWD":/work -w /work docker.io/library/rust:1.86-slim sh -c \
+podman run --rm -v "$PWD":/work -w /work docker.io/library/rust:1.89-slim sh -c \
   'rustup component add clippy rustfmt >/dev/null 2>&1
    cargo fmt --all -- --check
-   cargo clippy --workspace --all-targets -- -D warnings'
+   cargo clippy --workspace --all-targets -- -D warnings
+   cargo build --workspace'
 ```
 
 Note the container toolchain is older than CI's `stable`, so it can miss a

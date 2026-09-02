@@ -1,6 +1,6 @@
 [package]
 name = "berrywiki-cli"
-description = "The `berrywiki` command-line tool: inspect (check) and regenerate the sidebar of a wiki folder. Tooling, not a second UI."
+description = "The `berrywiki` command-line tool: inspect (check), regenerate the sidebar, and serve a wiki folder with commit-on-save. Tooling, not a second UI."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,10 +10,13 @@ repository.workspace = true
 # Zero third-party dependencies: only the workspace crates. Argument parsing is
 # hand-rolled to keep the tool buildable on the offline distro toolchain.
 [dependencies]
+berrywiki-appstate = { path = "../berrywiki-appstate" }
 berrywiki-core = { path = "../berrywiki-core" }
 berrywiki-store = { path = "../berrywiki-store" }
 berrywiki-serve = { path = "../berrywiki-serve" }
 berrywiki-github = { path = "../berrywiki-github" }
+berrywiki-git = { path = "../berrywiki-git" }
+berrywiki-sync = { path = "../berrywiki-sync" }
 
 [[bin]]
 name = "berrywiki"

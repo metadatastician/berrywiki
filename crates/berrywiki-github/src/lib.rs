@@ -16,6 +16,17 @@
 //! [`GitHubWiki::pull`]. In-app editing and push are Phase 2/3, with a
 //! different (never-discard-local-work) sync strategy.
 //!
+//! # Read-only fence (P3-serve-sync)
+//!
+//! This crate is the **mirror** path and only the mirror path. It is wired
+//! to `berrywiki serve --github`, which is read-only by construction
+//! (`serve_readonly`), and to `check`/`sidebar` over a mirror. The
+//! hard-reset in [`GitHubWiki::pull`] is safe *only* because nothing in this
+//! crate ever holds a local edit. Editing against a real wiki goes through
+//! `berrywiki-sync` over an ordinary clone (commit-on-save, fetch, fast-forward
+//! or hand off, never reset, never force). Do not add write paths here and do
+//! not point the editor at a mirror.
+//!
 //! # Credentials & honesty
 //!
 //! Public wikis clone anonymously. Private wikis authenticate with a token via

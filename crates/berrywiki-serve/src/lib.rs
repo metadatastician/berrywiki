@@ -24,7 +24,8 @@ use std::net::{TcpListener, TcpStream};
 
 use berrywiki_draft::DraftStore;
 use berrywiki_render::render_markdown;
-use berrywiki_store::{LocalFolderStore, WikiStore};
+use berrywiki_store::{CreatePageInput, LocalFolderStore, WikiStore};
+use berrywiki_sync::{DivergedHandoff, Saved, SyncError, SyncOutcome, SyncedStore};
 
 mod editor;
 mod ids;
@@ -120,33 +121,181 @@ fn split_target(target: &str) -> (String, String) {
 /// home cannot be resolved the editor still works but Save-draft is visibly
 /// unavailable — degrade, never panic.
 pub struct App {
-    pub(crate) store: LocalFolderStore,
+    pub(crate) backend: Backend,
     pub(crate) drafts: Option<DraftStore>,
+    /// Outcome of the last `POST /sync` in this process, shown on `/changes`.
+    pub(crate) last_sync: Option<SyncOutcome>,
+}
+
+/// Where editor mutations go. `Plain` writes files and stops (the caller
+/// commits with git); `Synced` turns every mutation into one logical commit
+/// through `berrywiki-sync`, sidebar in the same commit (ADR-0010).
+pub(crate) enum Backend {
+    Plain(LocalFolderStore),
+    Synced(SyncedStore<LocalFolderStore>),
+}
+
+/// What one editor mutation recorded in git, for the post-save notice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Recorded {
+    /// The backend commits at all (`false` for `Backend::Plain`).
+    pub(crate) synced: bool,
+    /// Changes made outside BerryWiki were checkpointed as their own commit
+    /// before this mutation.
+    pub(crate) checkpoint: bool,
+    /// The mutation itself produced a commit (`false` when the write was
+    /// byte-identical, so there was nothing to commit).
+    pub(crate) commit: bool,
+}
+
+impl Recorded {
+    fn plain() -> Self {
+        Recorded {
+            synced: false,
+            checkpoint: false,
+            commit: false,
+        }
+    }
+    fn from_saved<T>(s: &Saved<T>) -> Self {
+        Recorded {
+            synced: true,
+            checkpoint: s.checkpoint.is_some(),
+            commit: s.commit.is_some(),
+        }
+    }
+    /// The fixed `notice` token for the redirect after a successful save;
+    /// `None` in plain mode, where the page view has nothing to report.
+    pub(crate) fn notice_token(self) -> Option<&'static str> {
+        if !self.synced {
+            None
+        } else if self.commit && self.checkpoint {
+            Some("committed-after-checkpoint")
+        } else if self.commit {
+            Some("committed")
+        } else {
+            Some("unchanged")
+        }
+    }
 }
 
 impl App {
-    /// Wire the draft store through the store's app-state home
+    /// An editor over a plain folder (saves change files only), with the
+    /// draft store wired through the store's app-state home
     /// (`$XDG_STATE_HOME/berrywiki/<repo-id>/drafts/`).
     pub fn new(store: LocalFolderStore) -> Self {
         let drafts = store.appstate().map(|a| DraftStore::new(a.drafts_dir()));
-        App { store, drafts }
+        App::with_drafts(store, drafts)
     }
 
     /// Explicit draft store (or `None` for the degraded mode) — used by tests
     /// so they never depend on environment variables.
     pub fn with_drafts(store: LocalFolderStore, drafts: Option<DraftStore>) -> Self {
-        App { store, drafts }
+        App {
+            backend: Backend::Plain(store),
+            drafts,
+            last_sync: None,
+        }
+    }
+
+    /// An editor with commit-on-save: every mutation is one logical commit.
+    pub fn synced(store: SyncedStore<LocalFolderStore>) -> Self {
+        let drafts = store
+            .store()
+            .appstate()
+            .map(|a| DraftStore::new(a.drafts_dir()));
+        App::synced_with_drafts(store, drafts)
+    }
+
+    /// Commit-on-save with an explicit draft store (tests).
+    pub fn synced_with_drafts(
+        store: SyncedStore<LocalFolderStore>,
+        drafts: Option<DraftStore>,
+    ) -> Self {
+        App {
+            backend: Backend::Synced(store),
+            drafts,
+            last_sync: None,
+        }
     }
 
     pub fn store(&self) -> &LocalFolderStore {
-        &self.store
+        match &self.backend {
+            Backend::Plain(s) => s,
+            Backend::Synced(s) => s.store(),
+        }
+    }
+
+    /// Whether editor mutations are committed (commit-on-save).
+    pub fn commits_on_save(&self) -> bool {
+        matches!(self.backend, Backend::Synced(_))
+    }
+
+    pub(crate) fn sync(&self) -> Option<&SyncedStore<LocalFolderStore>> {
+        match &self.backend {
+            Backend::Plain(_) => None,
+            Backend::Synced(s) => Some(s),
+        }
+    }
+
+    pub(crate) fn sync_mut(&mut self) -> Option<&mut SyncedStore<LocalFolderStore>> {
+        match &mut self.backend {
+            Backend::Plain(_) => None,
+            Backend::Synced(s) => Some(s),
+        }
     }
 
     pub(crate) fn ctx(&self) -> Ctx<'_> {
         Ctx {
-            store: &self.store,
+            store: self.store(),
             drafts: self.drafts.as_ref(),
             editing: true,
+            sync: self.sync(),
+            last_sync: self.last_sync.as_ref(),
+        }
+    }
+
+    // ----- mutations: the editor's only write path -----
+    // Each goes through the backend so that, with commit-on-save, the store
+    // write and its commit are one operation the editor cannot split.
+
+    pub(crate) fn create_page(
+        &mut self,
+        input: CreatePageInput,
+    ) -> Result<(String, Recorded), SyncError> {
+        match &mut self.backend {
+            Backend::Plain(s) => Ok((s.create_page(input)?, Recorded::plain())),
+            Backend::Synced(s) => {
+                let saved = s.create_page(input)?;
+                let rec = Recorded::from_saved(&saved);
+                Ok((saved.value, rec))
+            }
+        }
+    }
+
+    pub(crate) fn update_page(&mut self, id: &str, body: &str) -> Result<Recorded, SyncError> {
+        match &mut self.backend {
+            Backend::Plain(s) => {
+                s.update_page(id, body)?;
+                Ok(Recorded::plain())
+            }
+            Backend::Synced(s) => Ok(Recorded::from_saved(&s.update_page(id, body)?)),
+        }
+    }
+
+    pub(crate) fn delete_page(&mut self, id: &str) -> Result<Recorded, SyncError> {
+        match &mut self.backend {
+            Backend::Plain(s) => {
+                s.delete_page(id)?;
+                Ok(Recorded::plain())
+            }
+            Backend::Synced(s) => Ok(Recorded::from_saved(&s.delete_page(id)?)),
+        }
+    }
+
+    pub(crate) fn reload(&mut self) -> Result<(), SyncError> {
+        match &mut self.backend {
+            Backend::Plain(s) => Ok(s.reload()?),
+            Backend::Synced(s) => s.reload(),
         }
     }
 }
@@ -158,6 +307,10 @@ pub(crate) struct Ctx<'a> {
     pub(crate) store: &'a LocalFolderStore,
     pub(crate) drafts: Option<&'a DraftStore>,
     pub(crate) editing: bool,
+    /// The sync engine when commit-on-save is on; `None` in plain mode and on
+    /// the read-only path.
+    pub(crate) sync: Option<&'a SyncedStore<LocalFolderStore>>,
+    pub(crate) last_sync: Option<&'a SyncOutcome>,
 }
 
 /// Handle a request against an editable app. Pure and socket-free — the unit
@@ -194,6 +347,8 @@ pub fn route(store: &LocalFolderStore, path: &str, query: &str) -> Response {
             store,
             drafts: None,
             editing: false,
+            sync: None,
+            last_sync: None,
         },
         path,
         query,
@@ -202,7 +357,7 @@ pub fn route(store: &LocalFolderStore, path: &str, query: &str) -> Response {
 
 fn dispatch(ctx: Ctx<'_>, path: &str, query: &str) -> Response {
     if path == "/" {
-        return home_page(ctx);
+        return home_page(ctx, &query_value(query, "notice"));
     }
     if path == "/diagnostics" {
         return diagnostics_page(ctx);
@@ -210,8 +365,15 @@ fn dispatch(ctx: Ctx<'_>, path: &str, query: &str) -> Response {
     if path == "/search" {
         return search_page(ctx, &query_value(query, "q"));
     }
+    if path == "/changes" {
+        return changes_page(ctx, &query_value(query, "notice"), None);
+    }
+    if path == "/conflicts" {
+        return conflicts_page(ctx);
+    }
     if let Some(rest) = path.strip_prefix("/page/") {
-        return page_view(ctx, &percent_decode(rest));
+        let notice = query_value(query, "notice");
+        return page_view(ctx, &percent_decode(rest), &notice);
     }
     Response::html(
         404,
@@ -219,10 +381,10 @@ fn dispatch(ctx: Ctx<'_>, path: &str, query: &str) -> Response {
     )
 }
 
-fn home_page(ctx: Ctx<'_>) -> Response {
+fn home_page(ctx: Ctx<'_>, notice: &str) -> Response {
     // Land on the first root page if there is one, else an empty-state.
     if let Some(root) = ctx.store.graph().roots().first() {
-        return page_view(ctx, &root.id);
+        return page_view(ctx, &root.id, notice);
     }
     let hint = if ctx.editing {
         "<p>This wiki has no pages yet. <a href=\"/new\">Create the first page.</a></p>"
@@ -244,7 +406,22 @@ pub(crate) fn not_found_page(ctx: Ctx<'_>, id: &str) -> Response {
     )
 }
 
-fn page_view(ctx: Ctx<'_>, id: &str) -> Response {
+/// Fixed notice tokens for the page view; the query string never reaches the
+/// page verbatim (editor doctrine).
+fn page_notice_text(token: &str) -> Option<&'static str> {
+    match token {
+        "committed" => Some("Saved and committed."),
+        "committed-after-checkpoint" => Some(
+            "Saved and committed. Changes made outside BerryWiki were first \
+             recorded in their own commit.",
+        ),
+        "unchanged" => Some("Nothing changed, so nothing was committed."),
+        "reloaded" => Some("Wiki reloaded from disk."),
+        _ => None,
+    }
+}
+
+fn page_view(ctx: Ctx<'_>, id: &str, notice: &str) -> Response {
     let page = match ctx.store.read_page(id) {
         Ok(p) => p,
         Err(_) => return not_found_page(ctx, id),
@@ -252,6 +429,9 @@ fn page_view(ctx: Ctx<'_>, id: &str) -> Response {
 
     let mut main = String::new();
     if ctx.editing {
+        if let Some(n) = page_notice_text(notice) {
+            main.push_str(&format!("<p class=\"notice\">{n}</p>"));
+        }
         let has_draft = ctx.drafts.map(|d| d.has(id)).unwrap_or(false);
         let badge = if has_draft {
             format!(
@@ -275,6 +455,251 @@ fn page_view(ctx: Ctx<'_>, id: &str) -> Response {
     let aside = context_pane(ctx, id);
     let body = layout_three(ctx, Some(id), &page.title, &main, &aside);
     Response::html(200, body)
+}
+
+// --- git-facing pages (P3-serve-sync) ---------------------------------------
+// Everything git says (branch names, subjects, stderr) passes through
+// `redact_secret` and then `escape_html` before it reaches a response: the
+// engine never puts the token on a command line, but a remote URL or a
+// pasted page can carry one, and ADR-0002's rule is "never in logs or HTML".
+
+/// Mask the outbound token wherever it appears in text destined for HTML.
+pub(crate) fn redact_secret(text: &str) -> String {
+    match std::env::var("BERRYWIKI_GITHUB_TOKEN") {
+        Ok(tok) if !tok.is_empty() => text.replace(&tok, "[redacted]"),
+        _ => text.to_string(),
+    }
+}
+
+fn git_text(s: &str) -> String {
+    escape_html(&redact_secret(s))
+}
+
+/// What one line of `/changes` says about the last `POST /sync`.
+fn sync_outcome_text(outcome: &SyncOutcome) -> String {
+    match outcome {
+        SyncOutcome::NoRemote => {
+            "No remote is configured, so commits stay local. Nothing to publish.".to_string()
+        }
+        SyncOutcome::UpToDate => "Local and remote already agree.".to_string(),
+        SyncOutcome::Integrated { fetched } => {
+            format!("Fast-forwarded onto {fetched} commit(s) from the remote.")
+        }
+        SyncOutcome::Published { pushed } => format!("Published {pushed} local commit(s)."),
+        SyncOutcome::Diverged(h) => format!(
+            "Local and remote have both moved ({} ahead, {} behind). Nothing was merged or \
+             pushed; see the conflicts page.",
+            h.ahead, h.behind
+        ),
+        SyncOutcome::PushRaced => "The remote advanced between fetch and push; nothing was \
+                                   forced. Sync again to reclassify."
+            .to_string(),
+    }
+}
+
+fn sync_notice_text(token: &str) -> Option<&'static str> {
+    match token {
+        "synced-up-to-date" => Some("Synchronised: local and remote already agree."),
+        "synced-published" => Some("Synchronised: local commits published."),
+        "synced-integrated" => Some("Synchronised: remote commits integrated (fast-forward)."),
+        "synced-no-remote" => Some("No remote is configured; commits stay local."),
+        "synced-raced" => {
+            Some("The remote moved while publishing; nothing was forced. Sync again to reclassify.")
+        }
+        _ => None,
+    }
+}
+
+/// The one-line git status under the top bar. Rendered only in editing mode:
+/// the read-only path has no repository to report on.
+fn status_strip(ctx: Ctx<'_>) -> String {
+    if !ctx.editing {
+        return String::new();
+    }
+    let Some(sync) = ctx.sync else {
+        return "<p class=\"status-strip\"><span class=\"status-off\">commit-on-save off</span> \
+                · saves change files only; commit with git yourself</p>"
+            .to_string();
+    };
+    let git = sync.git();
+    let branch = match git.current_branch() {
+        Ok(Some(b)) => git_text(&b),
+        Ok(None) => "detached HEAD".to_string(),
+        Err(e) => format!("branch unknown ({})", git_text(&e.to_string())),
+    };
+    let pending = match git.status() {
+        Ok(s) => s.entries.len(),
+        Err(_) => 0,
+    };
+    let publication = match git.divergence() {
+        Ok(d) if !d.has_upstream => "no remote".to_string(),
+        Ok(d) if d.ahead == 0 && d.behind == 0 => "in sync with remote".to_string(),
+        Ok(d) => format!("{} ahead, {} behind", d.ahead, d.behind),
+        Err(e) => format!("remote unknown ({})", git_text(&e.to_string())),
+    };
+    let pending_text = if pending == 0 {
+        "working tree clean".to_string()
+    } else {
+        format!("{pending} uncommitted change(s) outside BerryWiki")
+    };
+    format!(
+        "<p class=\"status-strip\"><span class=\"status-on\">commit-on-save</span> · \
+         branch <code>{branch}</code> · {pending_text} · {publication} · \
+         <a href=\"/changes\">Changes</a> · <a href=\"/conflicts\">Conflicts</a></p>"
+    )
+}
+
+/// `/changes`: what is pending, what is published, recent commits, and the
+/// Sync form. `error` renders a banner (used by `POST /sync` failures).
+pub(crate) fn changes_page(ctx: Ctx<'_>, notice: &str, error: Option<&str>) -> Response {
+    let mut main = String::new();
+    let Some(sync) = ctx.sync else {
+        let why = if ctx.editing {
+            "This server was started with <code>--no-commit</code> (or the folder is not \
+             a git working tree), so saves change files only. Commit and push with git \
+             yourself."
+        } else {
+            "This is the read-only view; there is no repository to report on."
+        };
+        main.push_str(&format!(
+            "<p class=\"notice\">Commit-on-save is off.</p><p>{why}</p>"
+        ));
+        return Response::html(200, layout(ctx, None, "Changes", main));
+    };
+    if let Some(n) = sync_notice_text(notice) {
+        main.push_str(&format!("<p class=\"notice\">{n}</p>"));
+    }
+    if let Some(e) = error {
+        main.push_str(&format!(
+            "<p class=\"error-banner\">Sync failed: {}</p>",
+            git_text(e)
+        ));
+    }
+    let git = sync.git();
+
+    // Pending (uncommitted) changes made outside BerryWiki.
+    main.push_str("<h2>Pending changes</h2>");
+    match git.status() {
+        Ok(s) if s.is_clean() => {
+            main.push_str("<p>Working tree clean — every change is committed.</p>")
+        }
+        Ok(s) => {
+            main.push_str(
+                "<p>These files changed outside BerryWiki. The next save or sync records \
+                 them first as their own commit, <em>Record changes made outside \
+                 BerryWiki</em>, so nothing is mixed into a page edit.</p><ul class=\"pending\">",
+            );
+            for e in &s.entries {
+                main.push_str(&format!("<li><code>{}</code></li>", git_text(e)));
+            }
+            main.push_str("</ul>");
+        }
+        Err(e) => main.push_str(&format!(
+            "<p class=\"error-banner\">Could not read the working tree: {}</p>",
+            git_text(&e.to_string())
+        )),
+    }
+
+    // Publication state.
+    main.push_str("<h2>Publication</h2>");
+    match git.divergence() {
+        Ok(d) if !d.has_upstream => main.push_str(
+            "<p>No remote is configured for this branch; commits stay local until you \
+             add one.</p>",
+        ),
+        Ok(d) => main.push_str(&format!(
+            "<p>{} local commit(s) not yet published; {} remote commit(s) not yet \
+             integrated (as of the last fetch).</p>",
+            d.ahead, d.behind
+        )),
+        Err(e) => main.push_str(&format!(
+            "<p class=\"error-banner\">Could not compare with the remote: {}</p>",
+            git_text(&e.to_string())
+        )),
+    }
+    if let Some(o) = ctx.last_sync {
+        main.push_str(&format!(
+            "<p>Last sync in this session: {}</p>",
+            escape_html(&sync_outcome_text(o))
+        ));
+    }
+    if ctx.editing {
+        main.push_str(
+            "<form method=\"post\" action=\"/sync\"><div class=\"editor-buttons\">\
+             <button type=\"submit\">Sync now</button></div>\
+             <p class=\"hint\">Fetch, fast-forward if possible, then push. BerryWiki \
+             never merges, rebases or force-pushes; if both sides moved it stops and \
+             shows the <a href=\"/conflicts\">conflicts page</a>.</p></form>",
+        );
+    }
+
+    // Recent history.
+    main.push_str("<h2>Recent commits</h2>");
+    match git.recent(50) {
+        Ok(entries) if entries.is_empty() => main.push_str("<p>No commits yet.</p>"),
+        Ok(entries) => {
+            main.push_str("<ol class=\"commits\">");
+            for e in &entries {
+                main.push_str(&format!(
+                    "<li><code>{}</code> {} <span class=\"when\">{}</span></li>",
+                    git_text(e.id.short()),
+                    git_text(&e.subject),
+                    git_text(&e.date)
+                ));
+            }
+            main.push_str("</ol>");
+        }
+        Err(e) => main.push_str(&format!(
+            "<p class=\"error-banner\">Could not read history: {}</p>",
+            git_text(&e.to_string())
+        )),
+    }
+    Response::html(200, layout(ctx, None, "Changes", main))
+}
+
+/// `/conflicts`: the diverged hand-off, rendered for a person to resolve
+/// with git. BerryWiki does not merge (ADR-0010).
+fn conflicts_page(ctx: Ctx<'_>) -> Response {
+    let Some(sync) = ctx.sync else {
+        let main = "<p class=\"notice\">Commit-on-save is off, so BerryWiki tracks no \
+                    remote and reports no conflicts.</p>"
+            .to_string();
+        return Response::html(200, layout(ctx, None, "Conflicts", main));
+    };
+    let main = match sync.diverged() {
+        Ok(None) => "<p>No conflict: the local branch and its remote have not both moved \
+                     since they last agreed.</p>\
+                     <p><a href=\"/changes\">Back to changes</a></p>"
+            .to_string(),
+        Ok(Some(h)) => render_handoff(&h),
+        Err(e) => format!(
+            "<p class=\"error-banner\">Could not compare with the remote: {}</p>",
+            git_text(&e.to_string())
+        ),
+    };
+    Response::html(200, layout(ctx, None, "Conflicts", main))
+}
+
+fn render_handoff(h: &DivergedHandoff) -> String {
+    format!(
+        "<p class=\"error-banner\">Local and remote have diverged: {ahead} local commit(s) \
+         and {behind} remote commit(s) since their common ancestor.</p>\
+         <table class=\"handoff\"><tr><th>Local tip</th><td><code>{local}</code></td></tr>\
+         <tr><th>Remote tip</th><td><code>{upstream}</code></td></tr>\
+         <tr><th>Common base</th><td><code>{base}</code></td></tr></table>\
+         <p>BerryWiki has fetched the remote but will not merge, rebase or force-push \
+         (ADR-0010): your pages and the remote's are both intact and the working tree \
+         is at the local tip. Resolve with git in the wiki folder:</p>\
+         <pre>git fetch\ngit merge @{{u}}      # or: git rebase @{{u}}\n# resolve any conflicts, then\ngit push</pre>\
+         <p>Then <a href=\"/changes\">sync again</a>. If the merge touched the tree, \
+         regenerate the sidebar with <code>berrywiki sidebar</code> before pushing so \
+         the native GitHub reader stays consistent.</p>",
+        ahead = h.ahead,
+        behind = h.behind,
+        local = git_text(h.local.short()),
+        upstream = git_text(h.upstream.short()),
+        base = git_text(h.base.short()),
+    )
 }
 
 fn diagnostics_page(ctx: Ctx<'_>) -> Response {
@@ -442,6 +867,7 @@ pub(crate) fn layout_three(
     } else {
         ""
     };
+    let strip = status_strip(ctx);
     format!(
         "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
@@ -450,12 +876,13 @@ pub(crate) fn layout_three(
 <form class=\"search\" method=\"get\" action=\"/search\" role=\"search\">\
 <input type=\"search\" name=\"q\" placeholder=\"Search…\" aria-label=\"Search\">\
 <button type=\"submit\">Search</button></form>\
-<a class=\"diag-link\" href=\"/diagnostics\">Diagnostics</a></header>\
+<a class=\"diag-link\" href=\"/diagnostics\">Diagnostics</a></header>{strip}\
 <div class=\"grid\">{nav}<main class=\"main\"><h1>{title_h1}</h1>{main}</main>{aside_html}</div>\
 </body></html>",
         title = escape_html(title),
         title_h1 = escape_html(title),
         new_link = new_link,
+        strip = strip,
         nav = nav,
         main = main,
         aside_html = aside_html,
@@ -511,7 +938,12 @@ body{margin:0;font:15px/1.5 system-ui,sans-serif;color:#1a1a1a;background:#fff}\
 .preview{border-top:1px dashed #bbb;margin-top:1.2rem;padding-top:.6rem}\
 .inline-form{display:inline}\
 .inline-form button{padding:.2rem .6rem;border:1px solid #7a1f2b;border-radius:3px;background:#fff;color:#7a1f2b;cursor:pointer}\
-@media(prefers-color-scheme:dark){body{background:#161616;color:#e6e6e6}.tree,.context{border-color:#333}.tree-item a{color:#cfcfcf}.tree-item a:hover{background:#222}.page pre{background:#222}\
+.status-strip{margin:0;padding:.3rem 1rem;font-size:.85rem;background:#f6f1f2;border-bottom:1px solid #e5e5e5;color:#444}\
+.status-on{color:#2e7d32;font-weight:600}.status-off{color:#7a5b00;font-weight:600}\
+.commits{padding-left:1.4rem}.commits .when{color:#888;font-size:.85rem}\
+.pending{padding-left:1.4rem}.hint{font-size:.85rem;color:#555}\
+.handoff th{text-align:left;padding-right:1rem}\
+@media(prefers-color-scheme:dark){.status-strip{background:#1d1d1d;border-color:#333;color:#cfcfcf}body{background:#161616;color:#e6e6e6}.tree,.context{border-color:#333}.tree-item a{color:#cfcfcf}.tree-item a:hover{background:#222}.page pre{background:#222}\
 .editor textarea{background:#1d1d1d;color:#e6e6e6;border-color:#444}\
 .editor-field input,.editor-field select{background:#1d1d1d;color:#e6e6e6;border-color:#444}\
 .notice{background:#12290f}.error-banner{background:#2e1212}.draft-banner{background:#2b230c}}";
@@ -867,10 +1299,42 @@ mod tests {
             ("/", ""),
             ("/diagnostics", ""),
             ("/search", "q=e"),
+            ("/changes", ""),
+            ("/changes", "notice=synced-published"),
+            ("/conflicts", ""),
             (&format!("/page/{HOME_ID}"), ""),
+            (&format!("/page/{HOME_ID}"), "notice=committed"),
             ("/page/missing", ""),
         ] {
             no_script(&route(&s, path, query).body);
+        }
+    }
+
+    #[test]
+    fn read_only_route_never_renders_git_affordances() {
+        let s = store();
+        for path in ["/changes", "/conflicts", &format!("/page/{HOME_ID}")] {
+            let body = route(&s, path, "").body;
+            assert!(
+                !body.contains("class=\"status-strip\""),
+                "{path} shows a status strip"
+            );
+            assert!(
+                !body.contains("action=\"/sync\""),
+                "{path} shows a sync form"
+            );
+        }
+        // The plain-mode explanation is honest about why.
+        assert!(route(&s, "/changes", "")
+            .body
+            .contains("Commit-on-save is off"));
+    }
+
+    #[test]
+    fn redact_secret_masks_only_the_configured_token() {
+        // Without the env var set, text passes through unchanged.
+        if std::env::var("BERRYWIKI_GITHUB_TOKEN").is_err() {
+            assert_eq!(redact_secret("ghp_abc"), "ghp_abc");
         }
     }
 }

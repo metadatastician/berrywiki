@@ -50,9 +50,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 1.85.0 enforces the declared MSRV (workspace rust-version); stable
+        # 1.89.0 enforces the declared MSRV (workspace rust-version); stable
         # catches issues the pinned toolchain would miss.
-        rust: ["1.85.0", "stable"]
+        rust: ["1.89.0", "stable"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master

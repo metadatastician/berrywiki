@@ -350,3 +350,39 @@ fn status_folds_a_staged_rename_into_one_entry() {
         st.entries
     );
 }
+
+// ---------- history read ----------
+
+#[test]
+fn recent_lists_commits_newest_first_with_subject_and_date() {
+    let sb = GitSandbox::create(&fixture_dir());
+    let repo = GitRepo::open(&sb.ours).expect("open clone");
+    sb.commit_change(&sb.ours, "Extra.md", "extra\n", "Add an extra page");
+    let entries = repo.recent(50).expect("log reads");
+    assert_eq!(entries.len(), 2, "seed + one change");
+    assert_eq!(entries[0].subject, "Add an extra page");
+    assert_eq!(entries[0].id.0, sb.head(&sb.ours), "newest first");
+    assert_eq!(entries[1].subject, "Seed fixture wiki");
+    assert_eq!(entries[0].id.short().len(), 7);
+    assert!(
+        entries[0].date.len() >= 20 && entries[0].date.contains('T'),
+        "author date is ISO 8601: {}",
+        entries[0].date
+    );
+    assert_eq!(repo.recent(1).unwrap().len(), 1, "limit is honoured");
+}
+
+#[test]
+fn recent_on_an_unborn_branch_is_empty_not_an_error() {
+    let tmp = std::env::temp_dir().join(format!("berrywiki-git-unborn-{}", std::process::id()));
+    fs::create_dir_all(&tmp).unwrap();
+    let init = std::process::Command::new("git")
+        .args(["init", "-q", "-b", "main"])
+        .current_dir(&tmp)
+        .output()
+        .expect("git init");
+    assert!(init.status.success());
+    let repo = GitRepo::open(&tmp).expect("open unborn repo");
+    assert!(repo.recent(10).unwrap().is_empty());
+    let _ = fs::remove_dir_all(&tmp);
+}

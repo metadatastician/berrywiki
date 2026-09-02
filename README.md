@@ -15,7 +15,7 @@ Markdown in ordinary Git storage.
 A local wiki folder can be browsed and edited end to end:
 
 ```sh
-berrywiki serve ./my-wiki          # three-pane explorer + editor at :8080
+berrywiki serve ./my-wiki          # three-pane explorer + editor at :23779
 ```
 
 * **Hierarchical notebook over flat files.** Tree, sibling ordering, backlinks
@@ -31,15 +31,22 @@ berrywiki serve ./my-wiki          # three-pane explorer + editor at :8080
   text is kept, both in the form and as a draft. Nothing you typed is discarded.
 * **Consistency diagnostics.** Broken links, missing parents, cycles and
   duplicate ids, surfaced in the UI and via `berrywiki check`.
-* **Git sync engine** (`berrywiki-sync`): each completed store mutation becomes
-  one atomic logical commit. Never force-pushes, never discards local work.
+* **Commit-on-save** (`berrywiki-sync`, wired into `serve`): when the folder
+  is a git working tree, every save, create and delete is one atomic commit
+  with the sidebar in the same commit. Changes made outside BerryWiki are
+  checkpointed as their own commit first, never clobbered. `/changes` lists
+  unpublished commits and offers fetch + fast-forward + push; if the branch
+  has diverged, `/conflicts` hands off with the exact `git` steps. Never
+  force-pushes, never merges for you, never discards local work.
+  `serve --no-commit` serves the folder without touching git.
 
 ## What does not work yet
 
 Being explicit, because the difference matters:
 
-* **In-app push/pull and conflict resolution** — the sync engine exists; the
-  conflict UX (P3-conflict) does not.
+* **In-app conflict resolution** — divergence is detected and handed off
+  (`/conflicts`), but merging inside BerryWiki (P3-conflict) does not exist;
+  you resolve it with git.
 * **Subtree move/rename** — moving a page with descendants is a cascade that
   rewrites inbound links; not implemented (P2-move).
 * **GitHub serving is read-only.** `serve --github` mirrors a wiki and renders
@@ -58,7 +65,7 @@ for known debt.
 
 ## Install and use
 
-Requires Rust 1.85 or newer. No other runtime.
+Requires Rust 1.89 or newer. No other runtime.
 
 ```sh
 cargo build --release
@@ -68,7 +75,9 @@ cargo build --release
 ```sh
 berrywiki check ./my-wiki           # tree + diagnostics; exit 1 on any error
 berrywiki sidebar ./my-wiki --write # regenerate _Sidebar.md
-berrywiki serve ./my-wiki           # browse and edit at http://127.0.0.1:8080
+berrywiki serve ./my-wiki           # browse and edit at http://127.0.0.1:23779
+berrywiki serve ./my-wiki --no-commit           # same, without commit-on-save
+berrywiki serve ./my-wiki --author "Ada <ada@example.org>"   # commit identity
 berrywiki serve --github owner/repo # mirror a GitHub wiki (read-only)
 ```
 

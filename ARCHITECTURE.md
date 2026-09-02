@@ -59,7 +59,9 @@ I/O to be wrong about.
   navigation land together.
 * **`berrywiki-appstate`** — resolves the out-of-clone home under
   `$XDG_STATE_HOME/berrywiki/<repo-id>/`, keyed by a stable hash of the wiki
-  path, and holds the roll-forward operation journal.
+  path, holds the roll-forward operation journal, and owns the single-writer
+  `RepoLock` (an OS advisory lock, released by the OS on process death) that
+  `serve` holds for its lifetime and CLI writes take for their duration.
 * **`berrywiki-draft`** — per-page drafts, atomically written, stored in that
   out-of-clone home.
 
@@ -69,9 +71,13 @@ I/O to be wrong about.
   CLI operations. No force-push, no `reset --hard`, no blanket working-tree
   discard; fetch before push.
 * **`berrywiki-sync`** — turns each completed store mutation into one atomic
-  logical commit.
+  logical commit. Wired into `serve` as the default editor backend
+  (commit-on-save, `/changes`, `/conflicts`, `POST /sync`); `--no-commit`
+  bypasses it and the editor writes files only.
 * **`berrywiki-github`** — clones/updates a `<repo>.wiki.git` working copy and
-  exposes it as a store. Read-only today.
+  exposes it as a store. Read-only by construction: it is a hard-reset mirror,
+  fenced off from the editor; the write path is always `berrywiki-sync` over an
+  ordinary clone.
 * **`berrywiki-git-compat`** — an evidence harness, not a feature: it
   reproduces remote-change, non-fast-forward and merge-conflict situations and
   asserts no data is lost. It exists so the safety claims above are tested
@@ -92,11 +98,13 @@ I/O to be wrong about.
 ```
                  berrywiki-cli
                        │
-        ┌──────────────┴───────────────┐
-   berrywiki-serve                berrywiki-sync
-   (+ -render, -draft)                  │
-        │                          berrywiki-git
-        └──────────┬───────────────────┘
+                 berrywiki-serve ──── berrywiki-github
+                 (+ -render, -draft)   (--github: read-only mirror)
+                       │
+                 berrywiki-sync   (--no-commit skips this layer)
+                       │
+                 berrywiki-git
+                       │
              berrywiki-store ── berrywiki-appstate
                    │                 (out-of-clone state)
              berrywiki-core
