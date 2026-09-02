@@ -47,16 +47,21 @@ Being explicit, because the difference matters:
 * **In-app conflict resolution** — divergence is detected and handed off
   (`/conflicts`), but merging inside BerryWiki (P3-conflict) does not exist;
   you resolve it with git.
-* **Subtree move/rename** — moving a page with descendants is a cascade that
-  rewrites inbound links; not implemented (P2-move).
+* **Subtree move/rename has no UI yet.** The engine is done: a non-leaf move
+  cascades descendant filenames, rewrites inbound links, regenerates the
+  sidebar and lands as one commit, and a crashed move is recovered on open,
+  all under test. The editor route with a dry-run preview is P2-move.
 * **GitHub serving is read-only.** `serve --github` mirrors a wiki and renders
   no edit affordances.
 * **Live GitHub behaviour is unverified.** Every GitHub Wiki behaviour BerryWiki
   relies on is recorded in [`docs/compatibility/github-wiki.adoc`](docs/compatibility/github-wiki.adoc)
   and, as of today, **none has been tested against a real wiki** — those spikes
   are credential-gated. Treat the compatibility report as a hypothesis list.
-* **No importers, no packaging, no proofs yet** — CherryTree/Zim import, Guix
-  packaging and the SPARK proof work are Phase 5.
+* **No importers, no packaging, no proofs yet** — CherryTree/Zim import and
+  Guix packaging are Phase 5. The invariants a proof would cover are written
+  down in [`docs/proofs/invariants.adoc`](docs/proofs/invariants.adoc), each
+  with the tests that witness it and a CI gate that keeps the list honest.
+  They are tested, not proved.
 
 Current position: Phases 0–3 largely built, Phase 4–5 open. See
 [`docs/execution/work-packages.adoc`](docs/execution/work-packages.adoc) for the
@@ -134,6 +139,8 @@ docs/architecture/          plan + overview
 docs/compatibility/         GitHub Wiki compatibility findings (unverified)
 docs/decisions/             architecture decision records
 docs/execution/             work packages + debt register
+docs/proofs/                invariants ledger INV-1..6 (tested, proof scheduled)
+scripts/                    CI gates (invariants-ledger check)
 ```
 
 ## Build & test

@@ -66,3 +66,11 @@ jobs:
       # safety gate.
       - name: test (locked)
         run: cargo test --workspace --locked
+      # docs/proofs/invariants.adoc names the test that witnesses each
+      # INV-n. This gate fails when a named test no longer exists or is not
+      # registered, so the ledger cannot rot silently. The list is written
+      # to a file, never piped, so the exit status is cargo's own.
+      - name: invariants ledger (witnesses registered)
+        run: |
+          cargo test --workspace --locked -- --list > "$RUNNER_TEMP/test-list.txt"
+          scripts/check-invariants-ledger.sh "$RUNNER_TEMP/test-list.txt"

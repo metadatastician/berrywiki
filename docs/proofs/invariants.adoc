@@ -1,0 +1,252 @@
+= BerryWiki — Invariants Ledger
+:toc: macro
+:toclevels: 2
+
+toc::[]
+
+This is the single list of properties BerryWiki is built to keep. Each
+invariant states what must hold, names the crate that enforces it, and names
+every Rust test that currently *witnesses* it. Nothing in this file is
+proved. The word "proof" in the directory name records where the SPARK work
+of P5-spark / P9-spark will land, not a claim about today: every status
+below is **tested, proof scheduled**, and the
+link:../execution/debt-register.adoc[debt register] rule that no document
+may describe a BerryWiki property as "proved" applies to this one as well.
+
+== How this file is checked
+
+CI reads this file. `scripts/check-invariants-ledger.sh` extracts every
+witness row, that is every table row of exactly the shape
+
+----
+| `crates/<crate>/<path>.rs` | `<test_fn>`
+----
+
+and fails the build unless, for each row: the file exists; a function of
+that exact name is declared in it; and the name appears as a registered test
+in the output of `cargo test --workspace -- --list`. It also fails if any
+invariant section has no witness row at all, and if the extracted set is
+empty. A renamed or deleted test therefore breaks CI until this ledger is
+updated, so the ledger cannot silently rot.
+
+Rows in the tables below carry only that two-column shape so the extraction
+is a declared convention rather than a guess.
+
+== Proof scope
+
+The SPARK target (implementation plan §"Proof targets") is the I/O-free
+`berrywiki-core` crate plus two small kernels from `berrywiki-store`: the
+metadata grammar (INV-1), the forest builder (INV-2), sidebar generation
+(INV-3), the path-safety kernel `validate_component` (INV-6), and the move
+state machine with the git argv constructor (INV-5, and the argv half of
+INV-4). Everything that touches a real filesystem, a real git process or a
+real socket is **test-only for good**: it is witnessed by behavioural tests
+against sandboxes and will never carry a proof claim. The table below makes
+that split explicit per invariant.
+
+[cols="1,3,2", options="header"]
+|===
+| Invariant | Proof target (scheduled) | Test-only for good
+| INV-1 | metadata parse/serialise in `berrywiki-core` | store byte-preservation, editor round trip
+| INV-2 | forest builder in `berrywiki-core` | store reload, move refusal
+| INV-3 | sidebar generator in `berrywiki-core` | write-if-changed, clobber refusal, sync commit shape
+| INV-4 | git argv constructor (closed literal set) | every behavioural git, sync, lock and editor test
+| INV-5 | move state machine (plan → apply → recover) | crash recovery on a real filesystem, atomic commit
+| INV-6 | `validate_component` in `berrywiki-store` | symlink, collision and redirect behaviour
+|===
+
+== INV-1 — Metadata round-trip idempotence
+
+*Statement.* For any page text, `serialise(parse(text))` is a fixed point:
+serialising a parsed block and parsing it again yields the same block and
+the same bytes. Unknown keys and their values survive the round trip
+unchanged. Malformed values degrade to a diagnostic and never destroy the
+block or the page body.
+
+*Enforced in.* `berrywiki-core` (`metadata.rs`); byte-preservation through
+the store and the editor.
+
+*Status.* Tested, proof scheduled (P5-spark: metadata grammar).
+
+.Witnesses
+[cols="3,3", options="header"]
+|===
+| File | Test
+| `crates/berrywiki-core/src/metadata.rs` | `round_trip_is_stable`
+| `crates/berrywiki-core/src/metadata.rs` | `serialisation_is_idempotent`
+| `crates/berrywiki-core/src/metadata.rs` | `unknown_fields_are_preserved`
+| `crates/berrywiki-core/src/metadata.rs` | `multiline_unknown_metadata_survives_round_trip`
+| `crates/berrywiki-core/src/metadata.rs` | `malformed_position_warns_but_survives`
+| `crates/berrywiki-core/src/metadata.rs` | `empty_tags_round_trip_as_inline`
+| `crates/berrywiki-core/src/metadata.rs` | `unknown_kind_preserved`
+| `crates/berrywiki-core/tests/fixture_wiki.rs` | `fixture_metadata_round_trips`
+| `crates/berrywiki-store/tests/local_store.rs` | `update_preserves_metadata_bytes`
+| `crates/berrywiki-serve/tests/editor.rs` | `save_round_trip_preserves_metadata_and_updates_sidebar`
+|===
+
+== INV-2 — Hierarchy acyclicity and deterministic sibling order
+
+*Statement.* The parent relation over pages is a forest: no page is its own
+ancestor. A parent reference that would create a cycle, or that names a
+missing page, is reported as a diagnostic and the page is placed at the
+root; the builder always terminates. Siblings are ordered by `position`
+with a total, deterministic tie-break, so two builds over the same pages
+walk the tree in the same order.
+
+*Enforced in.* `berrywiki-core` (`graph.rs`); the store refuses a move that
+would create a cycle before anything is written.
+
+*Status.* Tested, proof scheduled (P5-spark: forest builder).
+
+.Witnesses
+[cols="3,3", options="header"]
+|===
+| File | Test
+| `crates/berrywiki-core/src/graph.rs` | `detects_cycle_without_infinite_loop`
+| `crates/berrywiki-core/src/graph.rs` | `missing_parent_becomes_root_with_diagnostic`
+| `crates/berrywiki-core/src/graph.rs` | `walk_is_preorder_and_deterministic`
+| `crates/berrywiki-core/tests/fixture_wiki.rs` | `fixture_reports_expected_diagnostics`
+| `crates/berrywiki-store/tests/local_store.rs` | `move_refuses_cycles`
+| `crates/berrywiki-store/tests/local_store.rs` | `reload_is_deterministic`
+|===
+
+== INV-3 — Sidebar determinism
+
+*Statement.* `_Sidebar.md` is a pure function of the page set: the same
+pages produce byte-identical output on every run, archived pages are
+excluded, and the generated file is rewritten only when its content would
+change. A page titled "Sidebar" can never clobber the generated file, and
+every tree mutation regenerates the sidebar in the same commit.
+
+*Enforced in.* `berrywiki-core` (`sidebar.rs`); write-if-changed and
+clobber refusal in `berrywiki-store`; same-commit rule in `berrywiki-sync`.
+
+*Status.* Tested, proof scheduled (P5-spark: sidebar generator, as part of
+the forest builder target).
+
+.Witnesses
+[cols="3,3", options="header"]
+|===
+| File | Test
+| `crates/berrywiki-core/src/sidebar.rs` | `output_is_deterministic`
+| `crates/berrywiki-core/src/sidebar.rs` | `generates_expected_nested_sidebar`
+| `crates/berrywiki-core/tests/fixture_wiki.rs` | `fixture_sidebar_is_deterministic_and_excludes_archived`
+| `crates/berrywiki-store/tests/local_store.rs` | `sidebar_regeneration_is_write_if_changed`
+| `crates/berrywiki-store/tests/local_store.rs` | `page_titled_sidebar_cannot_clobber_generated_sidebar`
+| `crates/berrywiki-sync/tests/sync.rs` | `create_is_one_commit_carrying_the_sidebar`
+| `crates/berrywiki-serve/tests/sync.rs` | `create_commits_page_and_sidebar_in_one_commit`
+|===
+
+== INV-4 — Never lose local work
+
+*Statement.* No operation BerryWiki performs can discard uncommitted or
+unpushed local content. The git engine cannot express a force-push, a
+history rewrite or a working-tree discard; a rejected push leaves the
+remote and the local commit intact; a diverged history is handed off
+without any merge; a file changed on disk since it was loaded is refused as
+a stale write rather than overwritten; outside edits are checkpointed as
+their own commit before any save commit; a refused editor save keeps the
+typed text; and a second writer on the same clone is refused while the
+first holds the lock.
+
+*Enforced in.* `berrywiki-git` (closed literal set, audited by source
+scan), `berrywiki-git-compat` (harness), `berrywiki-sync`,
+`berrywiki-store` (stale guard), `berrywiki-appstate` (lock),
+`berrywiki-serve` (409 path).
+
+*Status.* Tested; only the argv constructor is a proof target. The
+behavioural half of this invariant is test-only for good.
+
+.Witnesses
+[cols="3,3", options="header"]
+|===
+| File | Test
+| `crates/berrywiki-git/tests/audit.rs` | `engine_source_contains_no_destructive_git_tokens`
+| `crates/berrywiki-git/tests/audit.rs` | `engine_runs_git_hermetically`
+| `crates/berrywiki-git/tests/engine.rs` | `push_is_rejected_when_remote_moved_and_nothing_is_overwritten`
+| `crates/berrywiki-git/tests/engine.rs` | `fast_forward_refuses_to_touch_a_diverged_history`
+| `crates/berrywiki-git-compat/tests/conflicts.rs` | `non_fast_forward_push_is_rejected_and_local_commit_survives`
+| `crates/berrywiki-git-compat/tests/conflicts.rs` | `same_page_conflict_preserves_both_versions_and_aborts_safely`
+| `crates/berrywiki-git-compat/tests/conflicts.rs` | `remote_delete_of_locally_edited_page_keeps_local_content`
+| `crates/berrywiki-git-compat/tests/conflicts.rs` | `sidebar_conflict_behaves_like_any_page_conflict`
+| `crates/berrywiki-sync/tests/sync.rs` | `diverged_history_is_handed_off_without_any_merge`
+| `crates/berrywiki-sync/tests/sync.rs` | `external_edit_is_checkpointed_as_its_own_commit`
+| `crates/berrywiki-sync/tests/sync.rs` | `external_edit_to_the_same_page_is_checkpointed_not_clobbered`
+| `crates/berrywiki-sync/tests/sync.rs` | `a_push_race_maps_to_pushraced_then_diverged_on_resync`
+| `crates/berrywiki-sync/tests/structural.rs` | `sync_layer_runs_no_raw_git`
+| `crates/berrywiki-store/tests/local_store.rs` | `external_modification_is_refused_as_stale_write`
+| `crates/berrywiki-appstate/tests/lock.rs` | `second_process_is_refused_until_holder_dies`
+| `crates/berrywiki-serve/tests/editor.rs` | `external_disk_change_makes_save_a_409_that_keeps_the_text`
+| `crates/berrywiki-serve/tests/editor.rs` | `a_stale_base_from_an_older_editor_is_refused`
+| `crates/berrywiki-serve/tests/sync.rs` | `outside_change_is_checkpointed_before_the_save_commit`
+| `crates/berrywiki-serve/tests/sync.rs` | `diverged_sync_hands_off_to_the_conflicts_page_and_touches_nothing`
+|===
+
+== INV-5 — Never half-moved
+
+*Statement.* A subtree move or rename is all-or-nothing: descendant
+filenames are cascaded, inbound links are rewritten so they still resolve,
+the sidebar is regenerated, and the whole change is one commit. If the
+process dies mid-move, opening the store completes or reverts the move
+before any read is served, and a file edited by hand after the crash is
+never overwritten by the recovery.
+
+*Enforced in.* `berrywiki-store` (move journal and recovery on open);
+`berrywiki-sync` (single atomic commit).
+
+*Status.* Tested, proof scheduled (P5-spark: move state machine). Crash
+recovery on a real filesystem is test-only for good.
+
+.Witnesses
+[cols="3,3", options="header"]
+|===
+| File | Test
+| `crates/berrywiki-store/tests/local_store.rs` | `move_reparents_renames_and_regenerates_sidebar`
+| `crates/berrywiki-store/tests/local_store.rs` | `move_nonleaf_cascades_descendant_filenames`
+| `crates/berrywiki-store/tests/local_store.rs` | `move_rewrites_inbound_links_so_they_still_resolve`
+| `crates/berrywiki-store/tests/local_store.rs` | `move_with_duplicate_title_siblings_does_not_rotate_or_corrupt_links`
+| `crates/berrywiki-store/tests/local_store.rs` | `move_rewrites_whitespace_padded_links`
+| `crates/berrywiki-store/tests/local_store.rs` | `crashed_move_is_recovered_on_open`
+| `crates/berrywiki-store/tests/local_store.rs` | `recovery_completes_inbound_link_rewrites`
+| `crates/berrywiki-store/tests/local_store.rs` | `recovery_preserves_an_old_file_edited_after_the_crash`
+| `crates/berrywiki-sync/tests/sync.rs` | `nonleaf_move_is_a_single_atomic_commit`
+|===
+
+== INV-6 — Path safety (root containment)
+
+*Statement.* Every path the store reads or writes stays inside the wiki
+root. Page ids and attachment names are validated as single components:
+traversal (`..`), separators, empty and hostile components are rejected
+before any filesystem call. A symlink planted at a temporary or page path
+cannot redirect a write outside the root, and symlinked pages are ignored
+on reload. Case-insensitive filename collisions are suffixed rather than
+merged.
+
+*Enforced in.* `berrywiki-store` (`paths.rs::validate_component` and the
+atomic-write path); `berrywiki-serve` (redirect targets stay local).
+
+*Status.* Tested, proof scheduled (P5-spark: path-safety kernel). Symlink
+behaviour on a real filesystem is test-only for good.
+
+.Witnesses
+[cols="3,3", options="header"]
+|===
+| File | Test
+| `crates/berrywiki-store/src/paths.rs` | `rejects_traversal_and_separators`
+| `crates/berrywiki-store/tests/local_store.rs` | `create_rejects_hostile_or_empty_ids`
+| `crates/berrywiki-store/tests/local_store.rs` | `attachments_are_id_keyed_and_traversal_proof`
+| `crates/berrywiki-store/tests/local_store.rs` | `planted_symlink_at_temp_path_cannot_redirect_writes`
+| `crates/berrywiki-store/tests/local_store.rs` | `reload_ignores_symlinked_pages`
+| `crates/berrywiki-store/tests/local_store.rs` | `case_insensitive_filename_collision_is_suffixed`
+| `crates/berrywiki-serve/tests/editor.rs` | `reload_rejects_non_local_redirect_targets`
+|===
+
+== Adjacent properties that are not invariants
+
+Two tested properties are deliberately *not* numbered here because they are
+doctrine, not data-safety invariants, and each already has a gate of its
+own: the script-free rendering rule (ADR-0003; `every_synced_route_is_script_free`,
+`hostile_input_stays_inert_across_all_editor_surfaces`,
+`raw_html_block_never_emits_a_live_script`) and render determinism
+(`rendering_is_deterministic`). They are listed so a reader does not go
+looking for INV-7.

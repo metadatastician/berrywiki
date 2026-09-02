@@ -9,7 +9,8 @@ would clear it. Entries are removed when fixed, not marked done — the
 link:work-packages.adoc[work-package register] tracks progress; this file
 tracks *liabilities*.
 
-Compiled 2026-08-07 during a full documentation audit. Items marked *CLEARED*
+Compiled 2026-08-07 during a full documentation audit; revised 2026-09-02 with
+Gate 0 (P3-serve-sync, X-lock, P0-ledger). Items marked *CLEARED*
 were fixed in that same pass and are listed only so the history is legible;
 they will be deleted at the next revision.
 
@@ -216,15 +217,12 @@ they will be deleted at the next revision.
 | **There are no proofs.** The README's technology note has referenced a
   "mathematically sound base" and SPARK/GNATprove since Phase 0, but no
   `.gpr` project, no `gnatprove` lane and no proof obligations exist. The
-  invariants that would be proved — metadata round-trip idempotence,
-  sidebar determinism, no-data-loss on move — are currently covered by tests
-  only. Tracked as *P5-spark*. Until then, no document may describe any
+  invariants that would be proved are now written down as a ledger,
+  `docs/proofs/invariants.adoc` (INV-1..6, each naming its witnessing tests,
+  CI-checked by `scripts/check-invariants-ledger.sh`), and are covered by
+  tests only. Tracked as *P5-spark*. Until then, no document may describe any
   BerryWiki property as "proved"; 207 passing tests are evidence, not proof.
 
-| L
-| The invariants ledger P5-spark refers to is not written down as a ledger.
-  The properties are stated across ADRs and enforced by scattered tests, so
-  there is no single list to prove *against*.
 |===
 
 == CI/CD debt
@@ -285,10 +283,11 @@ they will be deleted at the next revision.
 | Sev | Item
 
 | M
-| `main` has **no branch protection and no rulesets**. Anything can be pushed
-  directly, and a red CI run blocks nothing. Cheap to fix; a deliberate
-  choice for a single-maintainer repo, but it should be a recorded choice
-  rather than an omission.
+| `main` now carries rulesets, but their required contexts do not match the
+  job names `ci.yml` actually reports, so every merge is made with
+  `gh pr merge --admin` and a red CI run still blocks nothing. Clearing it:
+  P6-branch-protect re-cuts the ruleset to the real job names and drops
+  the bypass.
 
 | L
 | `SECURITY.md` offers a PGP key whose fingerprint was `TBD` while telling

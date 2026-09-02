@@ -40,6 +40,9 @@ failure it cannot mechanically fix, or contact with git/sync/data safety
 | P0-store | `berrywiki-store` + `LocalFolderStore`, hardened against 20 review findings | opus
 | P0-git | `berrywiki-git-compat` no-data-loss harness (7 tests) | opus
 | P0-fixtures | fixture wiki | haiku
+| P0-ledger | `docs/proofs/invariants.adoc`: INV-1..6, each naming the tests that
+witness it (58 rows); `scripts/check-invariants-ledger.sh` runs in CI and fails on
+any renamed or unregistered witness. Tested, proof scheduled. Done 2026-09-02. | sonnet
 |===
 
 == Phase 1 — Read-only explorer (SSR)
@@ -88,10 +91,16 @@ AND as a draft. Two-layer stale guard: store fingerprint (ADR-0008) + hidden
 Former blocker resolved by ADR-0006 (explicit Save-draft, no autosave
 promise). X-lock (below) now guards the serve process, which is a
 long-running writer.
-| P2-move | opus | Transactional *subtree* move/rename: validate → compute all
-descendant renames → rewrite inbound links → regenerate sidebar → single
-commit; never half-moved. | *Blocked-by* critique major "non-leaf move is a
-subtree cascade". This is inherently opus.
+| P2-move | opus | **Engine DONE, UI outstanding.** The store already cascades
+descendant filenames, rewrites inbound links, regenerates the sidebar and
+recovers a crashed move on open; sync lands it as one commit (ledger INV-5:
+`move_nonleaf_cascades_descendant_filenames`,
+`move_rewrites_inbound_links_so_they_still_resolve`,
+`crashed_move_is_recovered_on_open`, `nonleaf_move_is_a_single_atomic_commit`).
+Remaining: the editor route — choose new parent / position / title, a
+**dry-run preview** listing every rename and link rewrite, confirm → the one
+commit. | Former blocker (subtree cascade) resolved by the engine tests. Any
+change to the cascade itself, or a move that would touch git history, → stop.
 | P2-stale-guard | *DONE* | Store fingerprints (mtime+len) every file at load;
 update/delete/move refuse a `StaleWrite` if a file changed on disk since load.
 Critique major resolved (ADR-0008). | Blind spot: an edit preserving both mtime
@@ -188,7 +197,8 @@ Escalate novel conversion semantics → opus.
 | P5-guix | opus | Guix package (estate-primary) + Nix fallback; correct
 runtime-dep mechanism for `git`; a CI Guix lane. | *Blocked-by* critique major
 "Guix under-sized / CI only builds Nix".
-| P5-spark | opus | Differential SPARK proofs of the invariants ledger (metadata
+| P5-spark | opus | Differential SPARK proofs of the invariants ledger
+(`docs/proofs/invariants.adoc`, INV-1..6; metadata
 grammar → forest builder → move state machine); nothing labelled "proven"
 without a green `gnatprove` CI lane. | Post-MVP; inherently opus.
 |===
