@@ -380,8 +380,9 @@ do_integ_linux() {
     write_linux_desktop_file "$DESKTOP_SHORTCUT_TARGET"
     log "  + desktop:  $DESKTOP_SHORTCUT_TARGET"
 
-    command -v update-desktop-database >/dev/null 2>&1 && \
+    if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database "$APPS_DIR" 2>/dev/null || true
+    fi
     if command -v gio >/dev/null 2>&1; then
         gio set "$DESKTOP_FILE_TARGET"     "metadata::trusted" true 2>/dev/null || true
         gio set "$DESKTOP_SHORTCUT_TARGET" "metadata::trusted" true 2>/dev/null || true
@@ -450,8 +451,9 @@ if is_running; then
             removed_anything="true"
         fi
     done
-    [ "$PLATFORM" = "linux" ] && command -v update-desktop-database >/dev/null 2>&1 && \
+    if [ "$PLATFORM" = "linux" ] && command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database "$APPS_DIR" 2>/dev/null || true
+    fi
     rm -f "$PID_FILE"
     if [ "$removed_anything" = "true" ]; then
         log "✓ $APP_DISPLAY removed from your system."

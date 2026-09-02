@@ -43,7 +43,7 @@ if [ -z "$shellcheck_bin" ] && command -v shellcheck >/dev/null 2>&1; then
     shellcheck_bin="$(command -v shellcheck)"
 fi
 if [ -n "$shellcheck_bin" ]; then
-    "$shellcheck_bin" "${scripts[@]}" || fail "shellcheck"
+    "$shellcheck_bin" -S style "${scripts[@]}" || fail "shellcheck"
     ok "shellcheck ($("$shellcheck_bin" --version | sed -n 's/^version: //p'))"
 elif [ "${CHECK_LAUNCHER_NO_SHELLCHECK:-0}" = "1" ]; then
     printf 'check-launcher: WARNING: shellcheck not found, skipped by request\n' >&2
