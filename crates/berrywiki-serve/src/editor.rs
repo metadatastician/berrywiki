@@ -18,9 +18,11 @@
 //!   store re-fingerprints after every mutation, so its guard alone would let
 //!   two sequential in-app editors silently clobber each other.
 
+use std::collections::HashSet;
+
 use berrywiki_core::PageKind;
 use berrywiki_render::render_markdown;
-use berrywiki_store::{CreatePageInput, StoreError, WikiStore};
+use berrywiki_store::{CreatePageInput, MovePageInput, MovePlan, StoreError, WikiStore};
 use berrywiki_sync::{SyncError, SyncOutcome};
 
 use crate::{
@@ -46,6 +48,9 @@ pub(crate) fn handle_post(app: &mut App, path: &str, body: &str) -> Response {
         }
         if let Some(id) = rest.strip_suffix("/delete") {
             return post_delete(app, &percent_decode(id));
+        }
+        if let Some(id) = rest.strip_suffix("/move") {
+            return post_move(app, &percent_decode(id), body);
         }
     }
     not_found_page(app.ctx(), path)
@@ -587,6 +592,301 @@ fn post_delete(app: &mut App, id: &str) -> Response {
         }
         Err(e) if is_refusal(&e) => delete_confirm(app.ctx(), id, Some((409, e.to_string()))),
         Err(e) => delete_confirm(app.ctx(), id, Some((400, e.to_string()))),
+    }
+}
+
+// --- move ------------------------------------------------------------------
+//
+// P2-move UI over the store's transactional subtree move. **Preview is a dry
+// run** (`LocalFolderStore::plan_move`), which writes nothing; **Move
+// re-plans against the live graph** and applies. A previewed plan is never
+// carried in the form, so a preview can never be applied to a wiki that
+// changed after it was shown — the user only ever confirms "move this page
+// here", and the store decides afresh what that means.
+//
+// The hidden `from_parent` / `from_position` pair is the move form's `base`,
+// for the same reason the editor carries one: the store's fingerprint guard
+// sees only on-disk changes since its last reload, so without it a confirm
+// after another editor moved the same page would re-parent from a starting
+// point this user never saw. A mismatch is a 409 with the form refreshed.
+//
+// Retitling is not part of a move: the title is the page's H1, edited in the
+// editor; the filename follows the title on the next move (the planner
+// recomputes every name from current titles).
+
+struct MoveView<'a> {
+    id: &'a str,
+    title: &'a str,
+    /// The `<select>` value: a parent id, or `""` for top level.
+    parent_value: &'a str,
+    position_value: &'a str,
+    /// Where the page is right now, carried as the form's base.
+    from_parent: &'a str,
+    from_position: &'a str,
+    status: u16,
+    error: Option<String>,
+    /// A dry run to show under the form.
+    plan: Option<&'a MovePlan>,
+}
+
+pub(crate) fn move_form(ctx: Ctx<'_>, id: &str) -> Response {
+    let Ok(page) = ctx.store.read_page(id) else {
+        return not_found_page(ctx, id);
+    };
+    if page.metadata.is_none() {
+        return unmanaged_page(ctx, id, &page.title);
+    }
+    let parent = page.parent_id().unwrap_or("").to_string();
+    let position = page.position().to_string();
+    render_move(
+        ctx,
+        &MoveView {
+            id,
+            title: &page.title,
+            parent_value: &parent,
+            position_value: &position,
+            from_parent: &parent,
+            from_position: &position,
+            status: 200,
+            error: None,
+            plan: None,
+        },
+    )
+}
+
+/// A page without a metadata block has no place in the tree, so there is
+/// nothing to move it from; the store would refuse (`UnmanagedPage`).
+fn unmanaged_page(ctx: Ctx<'_>, id: &str, title: &str) -> Response {
+    Response::html(
+        400,
+        layout(
+            ctx,
+            Some(id),
+            &format!("Move — {title}"),
+            format!(
+                "<p class=\"error-banner\">“{}” has no BerryWiki metadata block, so it \
+                 is outside the tree and cannot be moved within it.</p>\
+                 <p class=\"page-actions\"><a href=\"/page/{}\">Back to the page</a></p>",
+                escape_html(title),
+                escape_attr(id),
+            ),
+        ),
+    )
+}
+
+fn render_move(ctx: Ctx<'_>, v: &MoveView<'_>) -> Response {
+    let id_a = escape_attr(v.id);
+    let mut main = String::new();
+    if let Some(e) = &v.error {
+        main.push_str(&format!("<p class=\"error-banner\">{}</p>", escape_html(e)));
+    }
+
+    // The page's own subtree is never offered as a destination: that is the
+    // cycle the store refuses, so the form does not present it as a choice.
+    // (The store still enforces it on a forged POST.)
+    let graph = ctx.store.graph();
+    let mut excluded: HashSet<String> = HashSet::new();
+    let mut queue = vec![v.id.to_string()];
+    while let Some(next) = queue.pop() {
+        for child in graph.children_of(&next) {
+            queue.push(child.id.clone());
+        }
+        excluded.insert(next);
+    }
+    let mut options = String::from("<option value=\"\">(top level)</option>");
+    for (depth, page) in graph.walk() {
+        if page.metadata.is_none() || excluded.contains(&page.id) {
+            continue;
+        }
+        let selected = if page.id == v.parent_value {
+            " selected"
+        } else {
+            ""
+        };
+        options.push_str(&format!(
+            "<option value=\"{}\"{selected}>{}{}</option>",
+            escape_attr(&page.id),
+            "\u{a0}\u{a0}".repeat(depth),
+            escape_html(&page.title),
+        ));
+    }
+
+    main.push_str(&format!(
+        "<p>Move “{}” to another parent or position. Its subpages come with it. \
+         Because filenames follow the ancestry, the files of the whole subtree are \
+         renamed and every link to them across the wiki is rewritten, in one \
+         operation{}. <strong>Preview</strong> lists what would change without \
+         changing anything. (To rename the page, edit its title heading.)</p>\
+         <form class=\"editor\" method=\"post\" action=\"/page/{id_a}/move\">\
+         <input type=\"hidden\" name=\"from_parent\" value=\"{}\">\
+         <input type=\"hidden\" name=\"from_position\" value=\"{}\">\
+         <div class=\"editor-field\"><label for=\"parent\">Parent</label>\
+         <select id=\"parent\" name=\"parent\">{options}</select></div>\
+         <div class=\"editor-field\"><label for=\"position\">Position among siblings \
+         (lower sorts first)</label>\
+         <input id=\"position\" name=\"position\" type=\"number\" value=\"{}\" required></div>\
+         <div class=\"editor-buttons\">\
+         <button type=\"submit\" name=\"action\" value=\"preview\" class=\"secondary\">Preview</button>\
+         <button type=\"submit\" name=\"action\" value=\"move\">Move</button>\
+         </div></form>",
+        escape_html(v.title),
+        if ctx.sync.is_some() {
+            " and one commit"
+        } else {
+            ""
+        },
+        escape_attr(v.from_parent),
+        escape_attr(v.from_position),
+        escape_attr(v.position_value),
+    ));
+
+    if let Some(plan) = v.plan {
+        main.push_str(&render_plan(ctx, plan));
+    }
+    main.push_str(&format!(
+        "<p class=\"page-actions\"><a href=\"/page/{id_a}\">Cancel</a></p>"
+    ));
+
+    let title = format!("Move — {}", v.title);
+    let body = layout(ctx, Some(v.id), &title, main);
+    Response::html(v.status, body)
+}
+
+/// The dry run, rendered. Every row comes from the same staged plan the
+/// store would apply, so the list is exact, not an estimate.
+fn render_plan(ctx: Ctx<'_>, plan: &MovePlan) -> String {
+    let destination = match &plan.new_parent_id {
+        Some(p) => {
+            let title = ctx
+                .store
+                .read_page(p)
+                .map(|q| q.title.clone())
+                .unwrap_or_else(|_| p.clone());
+            format!("a child of “{}”", escape_html(&title))
+        }
+        None => "a top-level page".to_string(),
+    };
+    let mut s = format!(
+        "<section class=\"preview\"><h2>What this move would do</h2>\
+         <p>The page becomes {destination}, at position {}.</p>",
+        plan.new_position
+    );
+    if plan.renames.is_empty() {
+        s.push_str("<p>No files are renamed.</p>");
+    } else {
+        s.push_str(
+            "<table class=\"plan\"><tr><th>Page</th><th>File now</th><th>File after</th></tr>",
+        );
+        for r in &plan.renames {
+            s.push_str(&format!(
+                "<tr><td>{}</td><td><code>{}</code></td><td><code>{}</code></td></tr>",
+                escape_html(&r.title),
+                escape_html(&r.old_path),
+                escape_html(&r.new_path),
+            ));
+        }
+        s.push_str("</table>");
+    }
+    if plan.link_rewrites.is_empty() {
+        s.push_str("<p>No links elsewhere need rewriting.</p>");
+    } else {
+        s.push_str("<p>Links rewritten in place:</p><ul class=\"plan-rewrites\">");
+        for w in &plan.link_rewrites {
+            s.push_str(&format!(
+                "<li>{} (<code>{}</code>)</li>",
+                escape_html(&w.title),
+                escape_html(&w.path),
+            ));
+        }
+        s.push_str("</ul>");
+    }
+    s.push_str("<p>Nothing has been changed. Press <strong>Move</strong> to apply.</p></section>");
+    s
+}
+
+fn post_move(app: &mut App, id: &str, form: &str) -> Response {
+    let (title, cur_parent, cur_position, managed) = match app.store().read_page(id) {
+        Ok(p) => (
+            p.title.clone(),
+            p.parent_id().unwrap_or("").to_string(),
+            p.position().to_string(),
+            p.metadata.is_some(),
+        ),
+        Err(_) => return not_found_page(app.ctx(), id),
+    };
+    if !managed {
+        return unmanaged_page(app.ctx(), id, &title);
+    }
+    let parent = form_value(form, "parent");
+    let position = form_value(form, "position");
+    let action = form_value(form, "action");
+
+    // Re-render with the submitted values kept and the base refreshed to
+    // where the page is now.
+    let mut v = MoveView {
+        id,
+        title: &title,
+        parent_value: &parent,
+        position_value: &position,
+        from_parent: &cur_parent,
+        from_position: &cur_position,
+        status: 200,
+        error: None,
+        plan: None,
+    };
+
+    if form_value(form, "from_parent") != cur_parent
+        || form_value(form, "from_position") != cur_position
+    {
+        v.status = 409;
+        v.error = Some(
+            "This page was moved after this form was opened, so the move was not made. \
+             The form now shows where the page is; check the destination and submit again."
+                .to_string(),
+        );
+        return render_move(app.ctx(), &v);
+    }
+
+    let new_position: i64 = match position.trim().parse() {
+        Ok(n) => n,
+        Err(_) => {
+            v.status = 400;
+            v.error = Some("Position must be a whole number.".to_string());
+            return render_move(app.ctx(), &v);
+        }
+    };
+    let input = MovePageInput {
+        id: id.to_string(),
+        new_parent_id: if parent.is_empty() {
+            None
+        } else {
+            Some(parent.clone())
+        },
+        new_position,
+    };
+
+    if action == "preview" {
+        return match app.store().plan_move(&input) {
+            Ok(plan) => {
+                v.plan = Some(&plan);
+                render_move(app.ctx(), &v)
+            }
+            Err(e) => {
+                let e = SyncError::from(e);
+                v.status = if is_refusal(&e) { 409 } else { 400 };
+                v.error = Some(e.to_string());
+                render_move(app.ctx(), &v)
+            }
+        };
+    }
+
+    match app.move_page(input) {
+        Ok(rec) => Response::see_other(with_notice(&format!("/page/{id}"), rec)),
+        Err(e) => {
+            v.status = if is_refusal(&e) { 409 } else { 400 };
+            v.error = Some(e.to_string());
+            render_move(app.ctx(), &v)
+        }
     }
 }
 

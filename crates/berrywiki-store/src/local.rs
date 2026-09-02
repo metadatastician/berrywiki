@@ -36,7 +36,10 @@ fn fingerprint_of(abs: &Path) -> Option<Fingerprint> {
 
 use crate::error::StoreError;
 use crate::paths::{page_filename, validate_component, with_id_suffix};
-use crate::{Attachment, CreatePageInput, MovePageInput, PageSummary, Result, WikiStore};
+use crate::{
+    Attachment, CreatePageInput, MovePageInput, MovePlan, PageSummary, PlannedRename,
+    PlannedRewrite, Result, WikiStore,
+};
 
 const SIDEBAR_FILE: &str = "_Sidebar.md";
 const FOOTER_FILE: &str = "_Footer.md";
@@ -479,6 +482,246 @@ impl LocalFolderStore {
     }
 }
 
+impl LocalFolderStore {
+    /// Plan a move without touching the wiki folder.
+    ///
+    /// Runs every decision [`WikiStore::move_page`] makes — validation, the
+    /// new filename of every page in the moved subtree, the inbound-link
+    /// rewrites elsewhere, the stale checks against the files it would
+    /// overwrite or delete — and returns them as a [`MovePlan`]. It reads the
+    /// graph, one directory listing and file metadata; it writes nothing, so
+    /// it is safe to call as a preview. A refusal here (cycle, unmanaged
+    /// page, stale file, filename collision) is the refusal the move would
+    /// give.
+    pub fn plan_move(&self, input: &MovePageInput) -> Result<MovePlan> {
+        self.ensure_unambiguous(&input.id)?;
+        let page = self.page(&input.id)?;
+        if page.metadata.is_none() {
+            return Err(StoreError::UnmanagedPage(input.id.clone()));
+        }
+
+        self.check_parent(input.new_parent_id.as_deref())?;
+        if let Some(parent) = &input.new_parent_id {
+            if parent == &input.id || self.is_ancestor(parent, &input.id) {
+                return Err(StoreError::CycleDetected {
+                    page: input.id.clone(),
+                    parent: parent.clone(),
+                });
+            }
+        }
+
+        // Intended structure = current parents, with the moved page re-parented.
+        let mut parent_of: HashMap<String, Option<String>> = HashMap::new();
+        let mut title_of: HashMap<String, String> = HashMap::new();
+        for p in self.graph.pages() {
+            parent_of.insert(p.id.clone(), p.parent_id().map(|s| s.to_string()));
+            title_of.insert(p.id.clone(), p.title.clone());
+        }
+        parent_of.insert(input.id.clone(), input.new_parent_id.clone());
+
+        // Affected = the moved page + all descendants (subtree membership is
+        // unchanged by the move; only filenames of the subtree change, and only
+        // the moved page's parent metadata changes).
+        let affected = self.subtree_ids(&input.id);
+        let affected_set: HashSet<&str> = affected.iter().map(String::as_str).collect();
+
+        let mut old_path_of: HashMap<String, String> = HashMap::new();
+        for id in &affected {
+            old_path_of.insert(id.clone(), self.graph.get(id).unwrap().path.clone());
+        }
+
+        // ALL filenames currently on disk (case-insensitive). read_dir failure
+        // is fatal here — proceeding with an empty set would disable collision
+        // detection and let a recomputed name overwrite an unrelated page.
+        let mut on_disk: HashSet<String> = HashSet::new();
+        for e in fs::read_dir(&self.root)
+            .map_err(|e| StoreError::io("listing the wiki folder for the move", e))?
+        {
+            let e = e.map_err(|e| StoreError::io("listing the wiki folder for the move", e))?;
+            if let Some(name) = e.file_name().to_str() {
+                on_disk.insert(name.to_lowercase());
+            }
+        }
+
+        // Assign new filenames deterministically (sorted by id). A page may
+        // reuse ONLY its own current filename; it can never take another page's
+        // (a name stays "taken" even after its owner is reassigned). This keeps
+        // subtree names stable, so siblings never rotate names — which is what
+        // caused link double-rewrites and a crash-window that could lose a
+        // page's only copy.
+        let mut ordered = affected.clone();
+        ordered.sort();
+        let mut new_path_of: HashMap<String, String> = HashMap::new();
+        let mut assigned: HashSet<String> = HashSet::new();
+        for id in &ordered {
+            let own_old = old_path_of[id].to_lowercase();
+            let taken = |name_lc: &str| {
+                (on_disk.contains(name_lc) && name_lc != own_old) || assigned.contains(name_lc)
+            };
+            let ancestors = intended_ancestor_titles(id, &parent_of, &title_of);
+            let base = page_filename(&ancestors, &title_of[id])?;
+            let name = if taken(&base.to_lowercase()) {
+                let suffixed = with_id_suffix(&base, id);
+                validate_component(&suffixed)?;
+                if taken(&suffixed.to_lowercase()) {
+                    return Err(StoreError::InvalidName {
+                        name: suffixed,
+                        reason: "filename collision during subtree move".to_string(),
+                    });
+                }
+                suffixed
+            } else {
+                base
+            };
+            assigned.insert(name.to_lowercase());
+            new_path_of.insert(id.clone(), name);
+        }
+
+        // old stem -> new stem for every page whose filename actually changes.
+        // A map (not a chained replace list): each link target is rewritten by
+        // exactly one lookup, so no rename can chain into another.
+        let rename_map: HashMap<String, String> = affected
+            .iter()
+            .filter(|id| old_path_of[*id] != new_path_of[*id])
+            .map(|id| (stem(&old_path_of[id]), stem(&new_path_of[id])))
+            .collect();
+
+        // Stage every file write; `apply_move` writes them (new files first).
+        let mut writes: Vec<(String, Vec<u8>)> = Vec::new();
+
+        for id in &affected {
+            let page = self.graph.get(id).unwrap();
+            let meta = if id == &input.id {
+                let mut m = page.metadata.clone().unwrap();
+                m.parent_id = input.new_parent_id.clone();
+                m.position = input.new_position;
+                m
+            } else {
+                page.metadata.clone().unwrap()
+            };
+            let body = rewrite_links(&page.body, &rename_map);
+            let source = serialize_source(Some(&meta), &body);
+            writes.push((new_path_of[id].clone(), source.into_bytes()));
+        }
+
+        // Unaffected pages that link to a renamed page: rewrite in place.
+        let mut link_rewrites: Vec<PlannedRewrite> = Vec::new();
+        for page in self.graph.pages() {
+            if affected_set.contains(page.id.as_str()) {
+                continue;
+            }
+            let rewritten = rewrite_links(&page.source, &rename_map);
+            if rewritten != page.source {
+                link_rewrites.push(PlannedRewrite {
+                    id: page.id.clone(),
+                    title: page.title.clone(),
+                    path: page.path.clone(),
+                });
+                writes.push((page.path.clone(), rewritten.into_bytes()));
+            }
+        }
+
+        // Old files to delete: affected paths that changed and are not reused
+        // as some page's new path (so a just-written file is never removed).
+        let new_paths: HashSet<&str> = new_path_of.values().map(String::as_str).collect();
+        let deletes: Vec<String> = affected
+            .iter()
+            .filter(|id| old_path_of[*id] != new_path_of[*id])
+            .map(|id| old_path_of[id].clone())
+            .filter(|old| !new_paths.contains(old.as_str()))
+            .collect();
+
+        // Fail fast if any file we would overwrite or delete changed on disk
+        // since load (external editor / concurrent terminal git). Done BEFORE
+        // any mutation, so a stale file aborts with nothing written.
+        for (path, _) in &writes {
+            self.check_not_stale(path)?;
+        }
+        for old in &deletes {
+            self.check_not_stale(old)?;
+        }
+
+        // The rename set the journal records before any write, so a crash is
+        // recoverable. Each entry carries the old file's current fingerprint,
+        // so recovery can distinguish a stale leftover from a post-crash user
+        // edit and never deletes the latter. (Affected old files were just
+        // stale-checked via `deletes`, so these fingerprints are current.)
+        let mut renames: Vec<PlannedRename> = Vec::new();
+        let mut journal: Vec<RenameEntry> = Vec::new();
+        for id in &affected {
+            if old_path_of[id] == new_path_of[id] {
+                continue;
+            }
+            let old_path = old_path_of[id].clone();
+            let (old_mtime, old_len) = self
+                .fingerprints
+                .get(&old_path)
+                .copied()
+                .or_else(|| fingerprint_of(&self.root.join(&old_path)))
+                .unwrap_or((0, 0));
+            renames.push(PlannedRename {
+                id: id.clone(),
+                title: title_of[id].clone(),
+                old_path: old_path.clone(),
+                new_path: new_path_of[id].clone(),
+            });
+            journal.push(RenameEntry {
+                old_path,
+                new_path: new_path_of[id].clone(),
+                old_mtime,
+                old_len,
+            });
+        }
+
+        Ok(MovePlan {
+            id: input.id.clone(),
+            new_parent_id: input.new_parent_id.clone(),
+            new_position: input.new_position,
+            renames,
+            link_rewrites,
+            writes,
+            deletes,
+            journal,
+        })
+    }
+
+    /// Execute a plan: journal, write every new file, delete the old ones,
+    /// retire the journal, reload, regenerate the sidebar. The only mutating
+    /// half of a move; never called with a plan from another store state
+    /// (`move_page` plans and applies in one call).
+    fn apply_move(&mut self, plan: MovePlan) -> Result<()> {
+        let journal_path = self.appstate.as_ref().map(|a| a.journal_path());
+        if let Some(jp) = &journal_path {
+            if !plan.journal.is_empty() {
+                MoveJournal {
+                    entries: plan.journal,
+                }
+                .write(jp)
+                .map_err(|e| StoreError::io("writing the move journal", e))?;
+            }
+        }
+
+        // Apply: all writes (new content) first, then deletes.
+        for (path, bytes) in &plan.writes {
+            self.safe_write(path, bytes)?;
+        }
+        for old in &plan.deletes {
+            let abs = self.resolve(old)?;
+            fs::remove_file(&abs)
+                .map_err(|e| StoreError::io(format!("removing old file {old:?}"), e))?;
+        }
+
+        // Operation complete — retire the journal.
+        if let Some(jp) = &journal_path {
+            let _ = MoveJournal::clear(jp);
+        }
+
+        self.reload()?;
+        self.write_sidebar_if_changed()?;
+        Ok(())
+    }
+}
+
 impl WikiStore for LocalFolderStore {
     fn reload(&mut self) -> Result<()> {
         let mut load_diagnostics = Vec::new();
@@ -626,199 +869,12 @@ impl WikiStore for LocalFolderStore {
     /// affected subtree's filenames, rewrites inbound links across the wiki,
     /// writes-then-deletes (a crash leaves both files, never neither), and
     /// regenerates the sidebar.
+    ///
+    /// Exactly [`LocalFolderStore::plan_move`] followed by `apply_move`, so
+    /// a dry run and the real move can never disagree.
     fn move_page(&mut self, input: MovePageInput) -> Result<()> {
-        self.ensure_unambiguous(&input.id)?;
-        let page = self.page(&input.id)?;
-        if page.metadata.is_none() {
-            return Err(StoreError::UnmanagedPage(input.id));
-        }
-
-        self.check_parent(input.new_parent_id.as_deref())?;
-        if let Some(parent) = &input.new_parent_id {
-            if parent == &input.id || self.is_ancestor(parent, &input.id) {
-                return Err(StoreError::CycleDetected {
-                    page: input.id,
-                    parent: parent.clone(),
-                });
-            }
-        }
-
-        // Intended structure = current parents, with the moved page re-parented.
-        let mut parent_of: HashMap<String, Option<String>> = HashMap::new();
-        let mut title_of: HashMap<String, String> = HashMap::new();
-        for p in self.graph.pages() {
-            parent_of.insert(p.id.clone(), p.parent_id().map(|s| s.to_string()));
-            title_of.insert(p.id.clone(), p.title.clone());
-        }
-        parent_of.insert(input.id.clone(), input.new_parent_id.clone());
-
-        // Affected = the moved page + all descendants (subtree membership is
-        // unchanged by the move; only filenames of the subtree change, and only
-        // the moved page's parent metadata changes).
-        let affected = self.subtree_ids(&input.id);
-        let affected_set: HashSet<&str> = affected.iter().map(String::as_str).collect();
-
-        let mut old_path_of: HashMap<String, String> = HashMap::new();
-        for id in &affected {
-            old_path_of.insert(id.clone(), self.graph.get(id).unwrap().path.clone());
-        }
-
-        // ALL filenames currently on disk (case-insensitive). read_dir failure
-        // is fatal here — proceeding with an empty set would disable collision
-        // detection and let a recomputed name overwrite an unrelated page.
-        let mut on_disk: HashSet<String> = HashSet::new();
-        for e in fs::read_dir(&self.root)
-            .map_err(|e| StoreError::io("listing the wiki folder for the move", e))?
-        {
-            let e = e.map_err(|e| StoreError::io("listing the wiki folder for the move", e))?;
-            if let Some(name) = e.file_name().to_str() {
-                on_disk.insert(name.to_lowercase());
-            }
-        }
-
-        // Assign new filenames deterministically (sorted by id). A page may
-        // reuse ONLY its own current filename; it can never take another page's
-        // (a name stays "taken" even after its owner is reassigned). This keeps
-        // subtree names stable, so siblings never rotate names — which is what
-        // caused link double-rewrites and a crash-window that could lose a
-        // page's only copy.
-        let mut ordered = affected.clone();
-        ordered.sort();
-        let mut new_path_of: HashMap<String, String> = HashMap::new();
-        let mut assigned: HashSet<String> = HashSet::new();
-        for id in &ordered {
-            let own_old = old_path_of[id].to_lowercase();
-            let taken = |name_lc: &str| {
-                (on_disk.contains(name_lc) && name_lc != own_old) || assigned.contains(name_lc)
-            };
-            let ancestors = intended_ancestor_titles(id, &parent_of, &title_of);
-            let base = page_filename(&ancestors, &title_of[id])?;
-            let name = if taken(&base.to_lowercase()) {
-                let suffixed = with_id_suffix(&base, id);
-                validate_component(&suffixed)?;
-                if taken(&suffixed.to_lowercase()) {
-                    return Err(StoreError::InvalidName {
-                        name: suffixed,
-                        reason: "filename collision during subtree move".to_string(),
-                    });
-                }
-                suffixed
-            } else {
-                base
-            };
-            assigned.insert(name.to_lowercase());
-            new_path_of.insert(id.clone(), name);
-        }
-
-        // old stem -> new stem for every page whose filename actually changes.
-        // A map (not a chained replace list): each link target is rewritten by
-        // exactly one lookup, so no rename can chain into another.
-        let rename_map: HashMap<String, String> = affected
-            .iter()
-            .filter(|id| old_path_of[*id] != new_path_of[*id])
-            .map(|id| (stem(&old_path_of[id]), stem(&new_path_of[id])))
-            .collect();
-
-        // Stage every file write, then apply (new files first).
-        let mut writes: Vec<(String, Vec<u8>)> = Vec::new();
-
-        for id in &affected {
-            let page = self.graph.get(id).unwrap();
-            let meta = if id == &input.id {
-                let mut m = page.metadata.clone().unwrap();
-                m.parent_id = input.new_parent_id.clone();
-                m.position = input.new_position;
-                m
-            } else {
-                page.metadata.clone().unwrap()
-            };
-            let body = rewrite_links(&page.body, &rename_map);
-            let source = serialize_source(Some(&meta), &body);
-            writes.push((new_path_of[id].clone(), source.into_bytes()));
-        }
-
-        // Unaffected pages that link to a renamed page: rewrite in place.
-        for page in self.graph.pages() {
-            if affected_set.contains(page.id.as_str()) {
-                continue;
-            }
-            let rewritten = rewrite_links(&page.source, &rename_map);
-            if rewritten != page.source {
-                writes.push((page.path.clone(), rewritten.into_bytes()));
-            }
-        }
-
-        // Old files to delete: affected paths that changed and are not reused
-        // as some page's new path (so a just-written file is never removed).
-        let new_paths: HashSet<&str> = new_path_of.values().map(String::as_str).collect();
-        let deletes: Vec<String> = affected
-            .iter()
-            .filter(|id| old_path_of[*id] != new_path_of[*id])
-            .map(|id| old_path_of[id].clone())
-            .filter(|old| !new_paths.contains(old.as_str()))
-            .collect();
-
-        // Fail fast if any file we would overwrite or delete changed on disk
-        // since load (external editor / concurrent terminal git). Done BEFORE
-        // any mutation, so a stale file aborts with nothing written.
-        for (path, _) in &writes {
-            self.check_not_stale(path)?;
-        }
-        for old in &deletes {
-            self.check_not_stale(old)?;
-        }
-
-        // Journal the rename set BEFORE any write, so a crash is recoverable.
-        // Each entry carries the old file's current fingerprint, so recovery
-        // can distinguish a stale leftover from a post-crash user edit and
-        // never deletes the latter. (Affected old files were just stale-checked
-        // via `deletes`, so these fingerprints are current.)
-        let journal_path = self.appstate.as_ref().map(|a| a.journal_path());
-        let entries: Vec<RenameEntry> = affected
-            .iter()
-            .filter(|id| old_path_of[*id] != new_path_of[*id])
-            .map(|id| {
-                let old_path = old_path_of[id].clone();
-                let (old_mtime, old_len) = self
-                    .fingerprints
-                    .get(&old_path)
-                    .copied()
-                    .or_else(|| fingerprint_of(&self.root.join(&old_path)))
-                    .unwrap_or((0, 0));
-                RenameEntry {
-                    old_path,
-                    new_path: new_path_of[id].clone(),
-                    old_mtime,
-                    old_len,
-                }
-            })
-            .collect();
-        if let Some(jp) = &journal_path {
-            if !entries.is_empty() {
-                MoveJournal { entries }
-                    .write(jp)
-                    .map_err(|e| StoreError::io("writing the move journal", e))?;
-            }
-        }
-
-        // Apply: all writes (new content) first, then deletes.
-        for (path, bytes) in &writes {
-            self.safe_write(path, bytes)?;
-        }
-        for old in &deletes {
-            let abs = self.resolve(old)?;
-            fs::remove_file(&abs)
-                .map_err(|e| StoreError::io(format!("removing old file {old:?}"), e))?;
-        }
-
-        // Operation complete — retire the journal.
-        if let Some(jp) = &journal_path {
-            let _ = MoveJournal::clear(jp);
-        }
-
-        self.reload()?;
-        self.write_sidebar_if_changed()?;
-        Ok(())
+        let plan = self.plan_move(&input)?;
+        self.apply_move(plan)
     }
 
     fn delete_page(&mut self, id: &str) -> Result<()> {

@@ -847,3 +847,81 @@ fn reload_picks_up_external_edits() {
     store.reload().unwrap();
     assert!(store.list_pages().iter().any(|p| p.title == "Hand Written"));
 }
+
+#[test]
+fn plan_move_is_a_pure_dry_run_of_the_cascade() {
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    let input = MovePageInput {
+        id: TEACHING_ID.to_string(),
+        new_parent_id: Some(RESEARCH_ID.to_string()),
+        new_position: 5,
+    };
+    let home_before = fs::read_to_string(dir.join("Home.md")).unwrap();
+
+    let plan = store.plan_move(&input).unwrap();
+
+    // The summary names the moved page first, then its descendants.
+    let renames: Vec<(&str, &str)> = plan
+        .renames
+        .iter()
+        .map(|r| (r.old_path.as_str(), r.new_path.as_str()))
+        .collect();
+    assert_eq!(
+        renames,
+        vec![
+            ("Teaching.md", "Research--Teaching.md"),
+            ("Teaching--Course-A.md", "Research--Teaching--Course-A.md"),
+            (
+                "Teaching--Course-A--Assessment-Plan.md",
+                "Research--Teaching--Course-A--Assessment-Plan.md"
+            ),
+        ]
+    );
+    assert_eq!(plan.renames[0].id, TEACHING_ID);
+    assert_eq!(plan.renames[0].title, "Teaching");
+    // Only pages OUTSIDE the subtree count as link rewrites; the subtree's own
+    // internal links are rewritten as part of its renames. The unmanaged
+    // legacy page counts too: its plain Markdown link into the subtree is
+    // rewritten in place even though the page itself has no metadata.
+    let rewrites: Vec<&str> = plan.link_rewrites.iter().map(|w| w.path.as_str()).collect();
+    assert_eq!(rewrites, vec!["Home.md", "Plain-Legacy-Page.md"]);
+    assert_eq!(plan.link_rewrites[0].id, HOME_ID);
+    assert_eq!(plan.new_parent_id.as_deref(), Some(RESEARCH_ID));
+    assert_eq!(plan.new_position, 5);
+
+    // Planning touched nothing.
+    for (old, new) in &renames {
+        assert!(dir.join(old).exists(), "{old} still present");
+        assert!(!dir.join(new).exists(), "{new} not created");
+    }
+    assert_eq!(
+        fs::read_to_string(dir.join("Home.md")).unwrap(),
+        home_before
+    );
+    assert_eq!(
+        store.read_page(TEACHING_ID).unwrap().parent_id(),
+        Some(HOME_ID)
+    );
+
+    // The real move does exactly what the plan said.
+    store.move_page(input).unwrap();
+    for (old, new) in &renames {
+        assert!(!dir.join(old).exists(), "{old} gone");
+        assert!(dir.join(new).exists(), "{new} written");
+    }
+    assert!(fs::read_to_string(dir.join("Home.md"))
+        .unwrap()
+        .contains("[[Research--Teaching--Course-A--Assessment-Plan#Weighting]]"));
+
+    // A cycle is refused at planning time, before anything is staged.
+    let cyclic = MovePageInput {
+        id: RESEARCH_ID.to_string(),
+        new_parent_id: Some(PLAN_ID.to_string()),
+        new_position: 0,
+    };
+    assert!(matches!(
+        store.plan_move(&cyclic),
+        Err(StoreError::CycleDetected { .. })
+    ));
+}

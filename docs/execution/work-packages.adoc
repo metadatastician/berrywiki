@@ -91,16 +91,19 @@ AND as a draft. Two-layer stale guard: store fingerprint (ADR-0008) + hidden
 Former blocker resolved by ADR-0006 (explicit Save-draft, no autosave
 promise). X-lock (below) now guards the serve process, which is a
 long-running writer.
-| P2-move | opus | **Engine DONE, UI outstanding.** The store already cascades
-descendant filenames, rewrites inbound links, regenerates the sidebar and
-recovers a crashed move on open; sync lands it as one commit (ledger INV-5:
-`move_nonleaf_cascades_descendant_filenames`,
-`move_rewrites_inbound_links_so_they_still_resolve`,
-`crashed_move_is_recovered_on_open`, `nonleaf_move_is_a_single_atomic_commit`).
-Remaining: the editor route — choose new parent / position / title, a
-**dry-run preview** listing every rename and link rewrite, confirm → the one
-commit. | Former blocker (subtree cascade) resolved by the engine tests. Any
-change to the cascade itself, or a move that would touch git history, → stop.
+| P2-move | *DONE* | Engine and UI. The store cascades descendant filenames,
+rewrites inbound links, regenerates the sidebar and recovers a crashed move on
+open; sync lands it as one commit. `GET /page/<id>/move` offers a new parent
+(never the page itself or its own subtree) and a position; **Preview** is a
+pure dry run (`LocalFolderStore::plan_move`) listing every rename and link
+rewrite without writing anything; **Move** re-plans against the live graph
+and applies, so a stale preview can never be applied. A hidden base
+(`from_parent` / `from_position`) turns a form opened before another move
+into a 409. Titles are deliberately not part of a move: the title is the
+page's H1, changed in the editor, and the filename follows it on the next
+move (ledger INV-5: `plan_move_is_a_pure_dry_run_of_the_cascade`,
+`nonleaf_move_through_the_form_is_one_commit_with_the_sidebar`). | Any change
+to the cascade itself, or a move that would touch git history, → stop.
 | P2-stale-guard | *DONE* | Store fingerprints (mtime+len) every file at load;
 update/delete/move refuse a `StaleWrite` if a file changed on disk since load.
 Critique major resolved (ADR-0008). | Blind spot: an edit preserving both mtime
