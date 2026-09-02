@@ -868,7 +868,13 @@ fn history_escapes_a_hostile_author_and_subject() {
     let sb = GitSandbox::create(&fixture_dir());
     let mut app = synced_app(&sb);
     // Author name and commit subject are attacker-writable by anyone who can
-    // push to the wiki, so they are untrusted text on the way to HTML.
+    // push to the wiki, so they are untrusted text on the way to HTML. The
+    // sandbox pins `GIT_AUTHOR_NAME` in the environment for hermeticity, and
+    // the environment beats `-c user.name`, so the author is set with
+    // `--author`, which beats both. git's own ident sanitisation strips `<`
+    // and `>` from a name (`X <y> Z` is recorded as `X y Z`), so a name cannot
+    // carry a script vector; `&` and `"` survive and are what must be escaped.
+    // A subject carries no such restriction, so that is where the script goes.
     let file = sb.ours.join(PLAN_FILE);
     let mut source = fs::read_to_string(&file).expect("plan page exists");
     source.push_str("\nAppended outside BerryWiki.\n");
@@ -878,11 +884,8 @@ fn history_escapes_a_hostile_author_and_subject() {
     sb.git(
         &sb.ours,
         &[
-            "-c",
-            "user.name=\"><script>alert(1)</script>",
-            "-c",
-            "user.email=hostile@example.invalid",
             "commit",
+            "--author=A & B \"quoted\" R <hostile@example.invalid>",
             "-m",
             "<script>alert(1)</script> pushed by someone else",
         ],
@@ -894,12 +897,31 @@ fn history_escapes_a_hostile_author_and_subject() {
     no_script(&r.body);
     assert!(
         r.body.contains("&lt;script&gt;"),
-        "the hostile text is escaped rather than dropped, so the row is still \
-         readable: {}",
+        "the hostile subject is escaped rather than dropped, so the row is \
+         still readable: {}",
         r.body
     );
-}
+    assert!(
+        r.body.contains("A &amp; B &quot;quoted&quot; R"),
+        "the history row escapes the author: {}",
+        r.body
+    );
 
+    // The page footer renders the same untrusted author, so it is a second
+    // HTML surface and not a restatement of the assertion above.
+    let r = handle(&mut app, &Request::get(&format!("/page/{PLAN_ID}")));
+    assert_eq!(r.status, 200);
+    no_script(&r.body);
+    let footer = r
+        .body
+        .split("Last edited by ")
+        .nth(1)
+        .expect("the footer names the last editor");
+    assert!(
+        footer.starts_with("A &amp; B &quot;quoted&quot; R"),
+        "the footer escapes the author it was handed: {footer}"
+    );
+}
 #[test]
 fn the_page_footer_names_the_last_editor_and_links_to_history() {
     let sb = GitSandbox::create(&fixture_dir());
