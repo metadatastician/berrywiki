@@ -1594,7 +1594,12 @@ mod tests {
             ("/search", "q=e&tag=teaching"),
             ("/search", "tag=%22%3E%3Cscript%3Ealert(1)%3C/script%3E"),
         ] {
-            no_script(&route(&s, path, query).body);
+            let r = route(&s, path, query);
+            // Same reason as the synced sweep: an absent route 404s, and a 404
+            // is script-free, so without this the sweep passes vacuously.
+            let expected = if path == "/page/missing" { 404 } else { 200 };
+            assert_eq!(r.status, expected, "{path}?{query}");
+            no_script(&r.body);
         }
     }
 

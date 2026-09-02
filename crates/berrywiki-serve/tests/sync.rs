@@ -473,7 +473,10 @@ fn every_synced_route_is_script_free() {
         "/search?tag=%22%3E%3Cscript%3Ealert(1)%3C/script%3E",
     ] {
         let r = handle(&mut app, &Request::get(target));
-        assert!(r.status < 500, "{target}: {}", r.status);
+        // A 404 body has no `<script` either, so `status < 500` let a route that
+        // had quietly stopped existing pass this sweep whilst proving nothing.
+        // Every target below is a route that must render, so pin it to 200.
+        assert_eq!(r.status, 200, "{target}");
         no_script(&r.body);
     }
 }
