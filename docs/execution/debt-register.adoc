@@ -161,9 +161,32 @@ they will be deleted at the next revision.
   co-architect / co-maintainer**. It is the owning organisation account, not
   a person.
 
+| *CLEARED*
+| `berrywiki-launcher.sh` and `berrywiki.launcher.a2ml` were undocumented,
+  untested, and could not have started the application: a hardcoded
+  absolute config path, a search for a binary named `berrywiki-cli` that no
+  build produces (and a `[ -x name ]` test that never consults `$PATH`), an
+  icon at a nonexistent `assets/` path, and a start command with no
+  `serve <folder>` argument. Fixed 2026-09-02 by hand (the generator,
+  `launch-scaffolder`, is not on the host); README section added;
+  `scripts/check-launcher.sh` runs in CI with a fake binary and asserts the
+  exact argv.
+
 | L
-| `berrywiki-launcher.sh` (440 lines) and `berrywiki.launcher.a2ml` are
-  undocumented in the README and untested by CI.
+| The launcher pair is now hand-maintained. `berrywiki-launcher.sh` still
+  says "GENERATED"; its header lists the four properties a future
+  `launch-scaffolder realign` must preserve, but nothing enforces that
+  beyond `scripts/check-launcher.sh` catching a regression after the fact.
+
+| L
+| The desktop entry `--integ` writes runs through
+  `/var/mnt/eclipse/repos/.desktop-tools/keepopen.sh`, an estate-absolute
+  path from the launcher standard that does not exist on this host, and a
+  menu entry does not see the shell environment that carries
+  `BERRYWIKI_WIKI`. Both are stated in the README; the `--start`/`--stop`/
+  `--status` arms work from a terminal. Clearing it: a launcher-standard
+  ruling on the fallback ladder, and a per-user config file for the wiki
+  folder (not built; the environment variable is the whole mechanism today).
 |===
 
 == Code debt

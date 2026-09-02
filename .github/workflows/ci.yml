@@ -74,3 +74,15 @@ jobs:
         run: |
           cargo test --workspace --locked -- --list > "$RUNNER_TEMP/test-list.txt"
           scripts/check-invariants-ledger.sh "$RUNNER_TEMP/test-list.txt"
+  launcher:
+    name: launcher smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # No Rust here on purpose: the gate drives berrywiki-launcher.sh with
+      # a fake `berrywiki` binary and asserts the exact argv it is started
+      # with, the refusal when BERRYWIKI_WIKI is unset, and shellcheck on
+      # every shell script in the repo. shellcheck ships on ubuntu-latest.
+      - name: shellcheck + launcher smoke
+        run: scripts/check-launcher.sh

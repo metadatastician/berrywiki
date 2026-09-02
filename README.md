@@ -91,6 +91,32 @@ command-line argument, so it stays out of shell history and process listings.
 
 `fixtures/test-wiki/` is a small notebook you can point any of these at.
 
+### Desktop launcher (Linux)
+
+`berrywiki-launcher.sh` starts and stops `berrywiki serve` as a background
+process and can add BerryWiki to the desktop menu. It is optional; the CLI
+above is the product. The folder to serve comes from `BERRYWIKI_WIKI` and has
+no default, because `serve` commits into whatever folder it is given.
+
+```sh
+export BERRYWIKI_WIKI=$HOME/notes.wiki
+./berrywiki-launcher.sh --start     # runs `berrywiki serve $BERRYWIKI_WIKI`, logs to $XDG_STATE_HOME
+./berrywiki-launcher.sh --browser   # opens http://127.0.0.1:23779
+./berrywiki-launcher.sh --status
+./berrywiki-launcher.sh --stop
+./berrywiki-launcher.sh --integ     # menu entry + ~/.local/bin/berrywiki-launcher; --disinteg undoes it
+```
+
+It looks for a built binary under the checkout (`target/release`, then
+`target/debug`), then for `berrywiki` on `PATH`. The copy that `--integ`
+installs has the checkout path stamped into it, so it keeps working from
+outside the repository. Two limits are worth knowing: a menu entry does not
+see your shell's environment, so `BERRYWIKI_WIKI` must be set where the
+desktop session can see it (for example in `~/.config/environment.d/`), and
+the menu entry expects the estate's `keepopen.sh` terminal wrapper, which is
+not part of this repository. `scripts/check-launcher.sh` is the CI gate for
+the launcher: it runs with a fake binary and asserts exactly what is started.
+
 ## How a page looks on disk
 
 Ordinary Markdown, preceded by a comment GitHub does not render:
@@ -140,7 +166,8 @@ docs/compatibility/         GitHub Wiki compatibility findings (unverified)
 docs/decisions/             architecture decision records
 docs/execution/             work packages + debt register
 docs/proofs/                invariants ledger INV-1..6 (tested, proof scheduled)
-scripts/                    CI gates (invariants-ledger check)
+scripts/                    CI gates (invariants-ledger check, launcher smoke)
+berrywiki-launcher.sh       optional desktop launcher (+ berrywiki.launcher.a2ml)
 ```
 
 ## Build & test
