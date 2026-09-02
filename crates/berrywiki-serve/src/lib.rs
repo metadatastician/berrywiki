@@ -25,7 +25,7 @@ use std::net::{TcpListener, TcpStream};
 use berrywiki_draft::DraftStore;
 use berrywiki_render::render_markdown;
 use berrywiki_store::{CreatePageInput, LocalFolderStore, MovePageInput, WikiStore};
-use berrywiki_sync::{DivergedHandoff, Saved, SyncError, SyncOutcome, SyncedStore};
+use berrywiki_sync::{ConflictReport, DivergedHandoff, Saved, SyncError, SyncOutcome, SyncedStore};
 
 mod editor;
 mod ids;
@@ -488,7 +488,7 @@ pub(crate) fn redact_secret(text: &str) -> String {
     }
 }
 
-fn git_text(s: &str) -> String {
+pub(crate) fn git_text(s: &str) -> String {
     escape_html(&redact_secret(s))
 }
 
@@ -520,6 +520,10 @@ fn sync_notice_text(token: &str) -> Option<&'static str> {
         "synced-published" => Some("Synchronised: local commits published."),
         "synced-integrated" => Some("Synchronised: remote commits integrated (fast-forward)."),
         "synced-no-remote" => Some("No remote is configured; commits stay local."),
+        "merge-finished" => Some(
+            "The merge was concluded: the navigation file was regenerated and one merge commit \
+             recorded.",
+        ),
         "synced-raced" => {
             Some("The remote moved while publishing; nothing was forced. Sync again to reclassify.")
         }
@@ -674,8 +678,12 @@ pub(crate) fn changes_page(ctx: Ctx<'_>, notice: &str, error: Option<&str>) -> R
     Response::html(200, layout(ctx, None, "Changes", main))
 }
 
-/// `/conflicts`: the diverged hand-off, rendered for a person to resolve
-/// with git. BerryWiki does not merge (ADR-0010).
+/// `/conflicts` has two states. When a merge someone else started is
+/// unfinished in the wiki folder, this is the conflict view: every unsettled
+/// path, what kind of clash it is, and the three sides side by side. When no
+/// merge is under way it is the diverged hand-off, written for a person to
+/// settle with git, because BerryWiki never begins a merge of its own
+/// (ADR-0010).
 fn conflicts_page(ctx: Ctx<'_>) -> Response {
     let Some(sync) = ctx.sync else {
         let main = "<p class=\"notice\">Commit-on-save is off, so BerryWiki tracks no \
@@ -683,6 +691,20 @@ fn conflicts_page(ctx: Ctx<'_>) -> Response {
             .to_string();
         return Response::html(200, layout(ctx, None, "Conflicts", main));
     };
+    match sync.conflicts() {
+        Ok(Some(report)) => {
+            let main = render_merge(&report);
+            return Response::html(200, layout(ctx, None, "Conflicts", main));
+        }
+        Ok(None) => {}
+        Err(e) => {
+            let main = format!(
+                "<p class=\"error-banner\">Could not read the unfinished merge: {}</p>",
+                git_text(&e.to_string())
+            );
+            return Response::html(200, layout(ctx, None, "Conflicts", main));
+        }
+    }
     let main = match sync.diverged() {
         Ok(None) => "<p>No conflict: the local branch and its remote have not both moved \
                      since they last agreed.</p>\
@@ -695,6 +717,89 @@ fn conflicts_page(ctx: Ctx<'_>) -> Response {
         ),
     };
     Response::html(200, layout(ctx, None, "Conflicts", main))
+}
+
+/// How much of one side of a clash the page shows. A wiki page can be far
+/// longer than anyone will read in a three-way comparison, and the job here is
+/// to recognise the clash, not to settle it in a browser.
+const CONFLICT_EXCERPT: usize = 4000;
+
+/// One side of one conflict, escaped and redacted, shortened if it is long.
+fn conflict_excerpt(text: &str) -> String {
+    let kept: String = text.chars().take(CONFLICT_EXCERPT).collect();
+    let mut html = git_text(&kept);
+    if text.chars().count() > CONFLICT_EXCERPT {
+        html.push_str("\n… shortened here; the whole file is in the wiki folder.");
+    }
+    html
+}
+
+/// The unfinished-merge view: what clashed, what BerryWiki settled by itself,
+/// and either the offer to conclude or the instructions to settle the rest.
+fn render_merge(report: &ConflictReport) -> String {
+    let mut main = String::new();
+    main.push_str(
+        "<p class=\"error-banner\">A merge is unfinished in the wiki folder. BerryWiki did \
+         not start it and will not decide it: nothing below has been changed, and saving a \
+         page is refused until the merge is concluded.</p>",
+    );
+    if report.files.is_empty() {
+        main.push_str("<p>Nothing is unsettled; the merge is ready to conclude.</p>");
+    } else {
+        main.push_str("<table class=\"conflicts\"><tr><th>File</th><th>What happened</th></tr>");
+        for f in &report.files {
+            main.push_str(&format!(
+                "<tr><td><code>{}</code></td><td>{}{}</td></tr>",
+                git_text(&f.path),
+                escape_html(f.kind.describe()),
+                if f.kind.is_auto_resolvable() {
+                    " <span class=\"auto\">settled by regeneration</span>"
+                } else {
+                    ""
+                }
+            ));
+        }
+        main.push_str("</table>");
+    }
+    for f in report.blocking() {
+        main.push_str(&format!(
+            "<h2><code>{}</code></h2><p>{}</p>",
+            git_text(&f.path),
+            escape_html(f.kind.describe())
+        ));
+        for (label, side) in [
+            ("Common ancestor", &f.base),
+            ("Here", &f.ours),
+            ("Remote", &f.theirs),
+        ] {
+            match side {
+                Some(text) => main.push_str(&format!(
+                    "<h3>{label}</h3><pre class=\"side\">{}</pre>",
+                    conflict_excerpt(text)
+                )),
+                None => main.push_str(&format!(
+                    "<h3>{label}</h3><p class=\"absent\">Not present on this side.</p>"
+                )),
+            }
+        }
+    }
+    if report.can_finish() {
+        main.push_str(
+            "<form method=\"post\" action=\"/conflicts/finish\">\
+             <p>Nothing is left for a person to decide. Concluding the merge regenerates the \
+             navigation file from the merged pages and records one merge commit.</p>\
+             <button type=\"submit\">Conclude the merge</button></form>",
+        );
+    } else {
+        main.push_str(
+            "<p>Settle the files above in the wiki folder, then reload this page. BerryWiki \
+             will not choose between two people's words.</p>\
+             <pre>git status\n# edit each file until only the wanted text remains, then\ngit add &lt;file&gt;</pre>\
+             <p>Once nothing is left unsettled, this page offers to conclude the merge.</p>",
+        );
+    }
+    main.push_str("<p><a href=\"/changes\">Back to changes</a></p>");
+    main
 }
 
 fn render_handoff(h: &DivergedHandoff) -> String {
@@ -1323,6 +1428,7 @@ mod tests {
             ("/search", "q=e"),
             ("/changes", ""),
             ("/changes", "notice=synced-published"),
+            ("/changes", "notice=merge-finished"),
             ("/conflicts", ""),
             (&format!("/page/{HOME_ID}"), ""),
             (&format!("/page/{HOME_ID}"), "notice=committed"),

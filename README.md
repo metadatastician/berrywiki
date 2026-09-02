@@ -36,9 +36,12 @@ berrywiki serve ./my-wiki          # three-pane explorer + editor at :23779
   with the sidebar in the same commit. Changes made outside BerryWiki are
   checkpointed as their own commit first, never clobbered. `/changes` lists
   unpublished commits and offers fetch + fast-forward + push; if the branch
-  has diverged, `/conflicts` hands off with the exact `git` steps. Never
-  force-pushes, never merges for you, never discards local work.
-  `serve --no-commit` serves the folder without touching git.
+  has diverged, `/conflicts` hands off with the exact `git` steps. Once you
+  have started the merge yourself, `/conflicts` classifies each clash from the
+  git index, shows base, ours and theirs, and can conclude a merge whose only
+  clash is the generated `_Sidebar.md` by regenerating it. Never force-pushes,
+  never starts a merge, never merges two authored sides, never discards local
+  work. `serve --no-commit` serves the folder without touching git.
 * **Move a page or a whole subtree** from its page (`Move…`): pick a new
   parent and position, **Preview** the exact list of files renamed and links
   rewritten without changing anything, then **Move** to apply it as one
@@ -49,9 +52,10 @@ berrywiki serve ./my-wiki          # three-pane explorer + editor at :23779
 
 Being explicit, because the difference matters:
 
-* **In-app conflict resolution** — divergence is detected and handed off
-  (`/conflicts`), but merging inside BerryWiki (P3-conflict) does not exist;
-  you resolve it with git.
+* **Merging two authored sides.** BerryWiki never starts a merge and never
+  merges page bodies or metadata. It classifies a merge you started, shows all
+  three sides, and can conclude one whose only clash is the generated sidebar;
+  anything else is refused and left for you to settle in git.
 * **GitHub serving is read-only.** `serve --github` mirrors a wiki and renders
   no edit affordances.
 * **Live GitHub behaviour is unverified.** Every GitHub Wiki behaviour BerryWiki

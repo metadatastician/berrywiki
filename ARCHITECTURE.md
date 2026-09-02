@@ -76,6 +76,15 @@ I/O to be wrong about.
   logical commit. Wired into `serve` as the default editor backend
   (commit-on-save, `/changes`, `/conflicts`, `POST /sync`); `--no-commit`
   bypasses it and the editor writes files only.
+  It never starts a merge, and a mutation is refused while one is unfinished.
+  When the operator has started a merge, it classifies each conflicted path
+  from index stages 1, 2 and 3 (ancestor, ours, theirs) rather than from the
+  working tree, which is what makes the body-versus-metadata distinction
+  decidable. Only a clash in the generated `_Sidebar.md` is settled, by
+  regenerating it from the settled page set; a merge whose every clash is that
+  file can be concluded and its merge commit recorded. Page bodies and
+  metadata are never merged: all three sides are shown and the operator
+  settles them in git.
 * **`berrywiki-github`** — clones/updates a `<repo>.wiki.git` working copy and
   exposes it as a store. Read-only by construction: it is a hard-reset mirror,
   fenced off from the editor; the write path is always `berrywiki-sync` over an

@@ -548,3 +548,213 @@ fn nonleaf_move_through_the_form_is_one_commit_with_the_sidebar() {
         .exists());
     assert!(is_clean(&sb, &sb.ours), "nothing left uncommitted");
 }
+
+// --- P3-conflict: an unfinished merge, through the routes -------------------
+
+/// Leave `ours` mid-merge on one file, started with plain git as it would be
+/// by a person: BerryWiki never begins a merge itself.
+fn conflict_on(sb: &GitSandbox, file: &str, ours: &str, theirs: &str) {
+    sb.commit_change(sb.theirs.as_path(), file, theirs, "Their edit");
+    sb.git(sb.theirs.as_path(), &["push", "origin", "main"])
+        .expect_success("push theirs");
+    sb.commit_change(sb.ours.as_path(), file, ours, "Our edit");
+    sb.git(sb.ours.as_path(), &["fetch", "origin"])
+        .expect_success("fetch");
+    let r = sb.git(sb.ours.as_path(), &["merge", "origin/main"]);
+    assert!(!r.success, "this merge was supposed to clash");
+}
+
+const PLAN_FILE: &str = "Teaching--Course-A--Assessment-Plan.md";
+
+fn plan_source(sb: &GitSandbox) -> String {
+    fs::read_to_string(sb.ours.join(PLAN_FILE)).expect("read the plan page")
+}
+
+#[test]
+fn conflicts_page_names_the_clash_and_shows_both_sides() {
+    let sb = GitSandbox::create(&fixture_dir());
+    let base = plan_source(&sb);
+    conflict_on(
+        &sb,
+        PLAN_FILE,
+        &base.replace("# Assessment Plan", "# Assessment Plan (ours)"),
+        &base.replace("# Assessment Plan", "# Assessment Plan (theirs)"),
+    );
+
+    let mut app = synced_app(&sb);
+    let r = handle(&mut app, &Request::get("/conflicts"));
+    assert_eq!(r.status, 200);
+    no_script(&r.body);
+    assert!(
+        r.body.contains("A merge is unfinished"),
+        "the page leads with the state: {}",
+        r.body
+    );
+    assert!(r.body.contains(PLAN_FILE), "the clashing file is named");
+    assert!(r.body.contains("(ours)"), "our side is shown");
+    assert!(r.body.contains("(theirs)"), "their side is shown");
+    assert!(r.body.contains("Common ancestor"), "the base is shown");
+    assert!(
+        !r.body.contains("action=\"/conflicts/finish\""),
+        "no offer to conclude while a page is unsettled"
+    );
+}
+
+#[test]
+fn a_clashing_page_cannot_smuggle_markup_onto_the_conflicts_page() {
+    let sb = GitSandbox::create(&fixture_dir());
+    let base = plan_source(&sb);
+    conflict_on(
+        &sb,
+        PLAN_FILE,
+        &base.replace("# Assessment Plan", "# <script>alert(1)</script> plan"),
+        &base.replace(
+            "# Assessment Plan",
+            "# </pre><script>alert(2)</script> plan",
+        ),
+    );
+
+    let mut app = synced_app(&sb);
+    let r = handle(&mut app, &Request::get("/conflicts"));
+    assert_eq!(r.status, 200);
+    no_script(&r.body);
+    assert!(
+        r.body.contains("&lt;script&gt;"),
+        "the clashing text is shown as text"
+    );
+    assert!(
+        r.body.contains("&lt;/pre&gt;"),
+        "a closing tag cannot break out of the comparison block"
+    );
+}
+
+#[test]
+fn saving_is_refused_while_a_merge_is_unfinished() {
+    let sb = GitSandbox::create(&fixture_dir());
+    let base = plan_source(&sb);
+    conflict_on(
+        &sb,
+        PLAN_FILE,
+        &base.replace("# Assessment Plan", "# Assessment Plan (ours)"),
+        &base.replace("# Assessment Plan", "# Assessment Plan (theirs)"),
+    );
+    let before = sb.head(&sb.ours);
+
+    let mut app = synced_app(&sb);
+    let r = save_plan(&mut app, "Replacement words.");
+    assert_eq!(r.status, 409, "a save mid-merge is a refusal, not an error");
+    assert!(
+        r.body.contains("Replacement words."),
+        "the typed text is kept: {}",
+        r.body
+    );
+    assert_eq!(sb.head(&sb.ours), before, "nothing was committed");
+}
+
+#[test]
+fn concluding_a_sidebar_only_merge_records_one_merge_commit() {
+    let sb = GitSandbox::create(&fixture_dir());
+    // Each side adds a different page and regenerates the navigation file, so
+    // the generated file is the only thing that clashes.
+    for (clone, page_file, title) in [
+        (sb.theirs.clone(), "Zither.md", "Zither"),
+        (sb.ours.clone(), "Yarrow.md", "Yarrow"),
+    ] {
+        fs::write(
+            clone.join(page_file),
+            format!(
+                "<!-- berrywiki\nid: 0195f6d0-0000-7000-8000-0000000000{}\n\
+                 parent: 0195f6d0-0000-7000-8000-000000000001\nposition: 90\nkind: page\n\
+                 tags:\narchived: false\n-->\n\n# {title}\n\nWords.\n",
+                if title == "Zither" { "cc" } else { "dd" }
+            ),
+        )
+        .unwrap();
+        fs::write(
+            clone.join("_Sidebar.md"),
+            format!("# Notebook\n\n- [{title}]({title})\n"),
+        )
+        .unwrap();
+        sb.git(&clone, &["add", "-A"]).expect_success("stage");
+        sb.git(&clone, &["commit", "-m", "Add a page"])
+            .expect_success("commit");
+        if clone == sb.theirs {
+            sb.git(&clone, &["push", "origin", "main"])
+                .expect_success("push");
+        }
+    }
+    sb.git(&sb.ours, &["fetch", "origin"])
+        .expect_success("fetch");
+    assert!(
+        !sb.git(&sb.ours, &["merge", "origin/main"]).success,
+        "the navigation file was supposed to clash"
+    );
+
+    let mut app = synced_app(&sb);
+    let page = handle(&mut app, &Request::get("/conflicts"));
+    assert_eq!(page.status, 200);
+    no_script(&page.body);
+    assert!(
+        page.body.contains("action=\"/conflicts/finish\""),
+        "the offer to conclude is shown: {}",
+        page.body
+    );
+    assert!(
+        page.body.contains("settled by regeneration"),
+        "the page says why it can settle this one"
+    );
+
+    let before = sb.head(&sb.ours);
+    let r = handle(&mut app, &Request::post("/conflicts/finish", ""));
+    assert_eq!(r.status, 303, "concluding answers PRG: {}", r.body);
+    assert_eq!(
+        r.location.as_deref(),
+        Some("/changes?notice=merge-finished")
+    );
+    assert_ne!(sb.head(&sb.ours), before, "a commit was recorded");
+    assert!(is_clean(&sb, &sb.ours), "the working tree is clean");
+    assert_eq!(
+        sb.git(&sb.ours, &["log", "-1", "--format=%P"])
+            .expect_success("log")
+            .stdout
+            .split_whitespace()
+            .count(),
+        2,
+        "a merge commit has two parents"
+    );
+    let sidebar = sb
+        .git(&sb.ours, &["show", "HEAD:_Sidebar.md"])
+        .expect_success("show")
+        .stdout;
+    assert!(!sidebar.contains("<<<<<<<"), "no markers survived");
+    assert!(sidebar.contains("Yarrow") && sidebar.contains("Zither"));
+}
+
+#[test]
+fn concluding_is_refused_while_a_page_is_unsettled() {
+    let sb = GitSandbox::create(&fixture_dir());
+    let base = plan_source(&sb);
+    conflict_on(
+        &sb,
+        PLAN_FILE,
+        &base.replace("# Assessment Plan", "# Assessment Plan (ours)"),
+        &base.replace("# Assessment Plan", "# Assessment Plan (theirs)"),
+    );
+    let before = sb.head(&sb.ours);
+
+    let mut app = synced_app(&sb);
+    let r = handle(&mut app, &Request::post("/conflicts/finish", ""));
+    assert_eq!(r.status, 409);
+    no_script(&r.body);
+    assert!(r.body.contains(PLAN_FILE), "the refusal names the page");
+    assert_eq!(sb.head(&sb.ours), before, "nothing was committed");
+}
+
+#[test]
+fn plain_mode_has_no_merge_to_conclude() {
+    let sb = GitSandbox::create(&fixture_dir());
+    let mut app = plain_app(&sb);
+    let r = handle(&mut app, &Request::post("/conflicts/finish", ""));
+    assert_eq!(r.status, 400);
+    assert!(r.body.contains("Commit-on-save is off"));
+}

@@ -109,12 +109,40 @@ literal-argument list; the source audit still passes. No change to the store.
 * One save is one reviewable commit; the sidebar is never in a separate commit.
 * No mutation can lose content or discard unrelated local work; a diverged history
   is never auto-merged and the remote is never force-updated.
-* Conflict *resolution* is out of scope — sync only detects and hands off. The
-  conflict taxonomy lives entirely behind the opaque `Diverged` variant, so
-  P3-conflict can grow without ever changing this enum.
+* Conflict *resolution* is out of scope — sync never starts a merge and never
+  merges two authored sides. Amended 2026-09-02 (P3-conflict): sync now
+  *classifies* a merge the operator started, and concludes one whose only
+  clash is the derived sidebar. See the amendment note below.
 * Behaviour is validated against a local bare remote only (ADR-0002); the live
   write path (auth, real rejection shapes) remains the credential-gated
   P3-spike-write.
+
+[NOTE]
+.Amendment (2026-09-02): conflict classification (P3-conflict)
+====
+The bullet above predicted that the conflict taxonomy would live "entirely
+behind the opaque `Diverged` variant, so P3-conflict can grow without ever
+changing this enum". That prediction did not hold in one respect, so the
+honest record is:
+
+* *What held.* `Diverged` is still opaque, and sync still initiates no merge:
+  no merge command was added to the closed literal set. The classifier reads
+  the index of a merge the *operator* started, via `merge_in_progress()`,
+  `unmerged()` and `show_stage()`. Classification therefore lives *beside* the
+  handoff, not behind it.
+* *What changed.* `SyncError` gained two variants. `MergeInProgress` refuses a
+  mutation while an operator's merge is unfinished; `NoMergeInProgress` refuses
+  a conclusion when there is nothing to conclude. `MergeInProgress` is strictly
+  more precise than the `UnmergedPaths` it displaces whenever `MERGE_HEAD` is
+  present. `UnmergedPaths` stays reachable for an unmerged index with no merge
+  under way, a halted cherry-pick being the plainest case.
+* *The one resolution performed.* When every clash is `_Sidebar.md`, sync
+  reloads the store, regenerates the sidebar from the page set, and records the
+  merge commit. That is not a merge of two authored sides: `_Sidebar.md` is
+  derived output neither side wrote, so regenerating it from the settled pages
+  is the only correct answer. Page bodies and metadata are never merged. All
+  three index stages are shown and the operator settles them in git.
+====
 
 == Revisit triggers
 
