@@ -635,7 +635,7 @@ fn create_rejects_hostile_tags() {
     input.tags = vec!["fine".to_string(), "evil\n-->".to_string()];
     assert!(matches!(
         store.create_page(input).unwrap_err(),
-        StoreError::InvalidName { .. }
+        StoreError::InvalidTag { .. }
     ));
 }
 
@@ -924,4 +924,153 @@ fn plan_move_is_a_pure_dry_run_of_the_cascade() {
         store.plan_move(&cyclic),
         Err(StoreError::CycleDetected { .. })
     ));
+}
+
+#[test]
+fn update_with_tags_round_trips_the_list_and_the_body() {
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    let tags = vec![
+        "assessment".to_string(),
+        "course-a".to_string(),
+        "unicode-\u{e9}\u{4e2d}\u{6587}".to_string(),
+        "with space".to_string(),
+    ];
+    store
+        .update_page_with_tags(PLAN_ID, "# Assessment Plan\n\nnew body\n", &tags)
+        .unwrap();
+    // Re-open from disk rather than trusting the in-memory graph: the claim is
+    // that the list survives serialisation, not that it survives assignment.
+    let store = LocalFolderStore::open(&dir).unwrap();
+    let page = store.read_page(PLAN_ID).unwrap();
+    assert_eq!(page.metadata.as_ref().unwrap().tags, tags);
+    assert!(page.body.contains("new body"));
+}
+
+#[test]
+fn update_with_tags_preserves_every_other_metadata_field() {
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    let before = store.read_page(PLAN_ID).unwrap().metadata.clone().unwrap();
+    store
+        .update_page_with_tags(PLAN_ID, "# Assessment Plan\n\nb\n", &["one".to_string()])
+        .unwrap();
+    let after = store.read_page(PLAN_ID).unwrap().metadata.clone().unwrap();
+    assert_eq!(after.tags, vec!["one".to_string()]);
+    // Everything the caller had no opinion about is byte-stable.
+    assert_eq!(after.id, before.id);
+    assert_eq!(after.parent_id, before.parent_id);
+    assert_eq!(after.position, before.position);
+    assert_eq!(after.kind, before.kind);
+    assert_eq!(after.archived, before.archived);
+}
+
+#[test]
+fn update_with_tags_can_clear_the_list() {
+    // Clearing is a deliberate empty list, never omission: that asymmetry is
+    // the whole reason this is a separate method from `update_page`.
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    store
+        .update_page_with_tags(PLAN_ID, "# Assessment Plan\n\nb\n", &[])
+        .unwrap();
+    let store = LocalFolderStore::open(&dir).unwrap();
+    assert!(store
+        .read_page(PLAN_ID)
+        .unwrap()
+        .metadata
+        .as_ref()
+        .unwrap()
+        .tags
+        .is_empty());
+}
+
+#[test]
+fn plain_update_page_never_touches_the_tag_list() {
+    // A body save must not be able to clear a hand-authored tag list by
+    // omission. This is the invariant that forbids folding the two methods.
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    let before = store.read_page(PLAN_ID).unwrap().metadata.clone().unwrap();
+    assert!(
+        !before.tags.is_empty(),
+        "fixture must carry tags to test this"
+    );
+    store
+        .update_page(PLAN_ID, "# Assessment Plan\n\nbody only\n")
+        .unwrap();
+    let store = LocalFolderStore::open(&dir).unwrap();
+    let after = store.read_page(PLAN_ID).unwrap();
+    assert_eq!(after.metadata.as_ref().unwrap().tags, before.tags);
+    assert!(after.body.contains("body only"));
+}
+
+#[test]
+fn update_with_tags_refuses_a_tag_that_would_not_round_trip_and_writes_nothing() {
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    let before = store.read_page(PLAN_ID).unwrap().clone();
+    for bad in [
+        "",              // empty: serialises to a blank list item
+        " leading",      // untrimmed: the parser would trim it back
+        "trailing ",     //
+        "has\nnewline",  // breaks the metadata block
+        "arrow-->here",  // closes the HTML comment
+        "ctrl\u{7}char", // control character
+    ] {
+        let err = store
+            .update_page_with_tags(
+                PLAN_ID,
+                "# Assessment Plan\n\nmutated\n",
+                &[bad.to_string()],
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, StoreError::InvalidTag { .. }),
+            "tag {bad:?} gave {err}"
+        );
+    }
+    // Nothing was written on any refusal: not the tags, and not the body that
+    // rode along with them.
+    let store = LocalFolderStore::open(&dir).unwrap();
+    let after = store.read_page(PLAN_ID).unwrap();
+    assert_eq!(after.body, before.body, "body survived a refused save");
+    assert_eq!(after.metadata, before.metadata);
+}
+
+#[test]
+fn update_with_tags_rejects_the_whole_list_when_one_tag_is_bad() {
+    // Partial application would be worse than refusal: the user would see some
+    // of their edit land and have no way to tell which part.
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    let err = store
+        .update_page_with_tags(
+            PLAN_ID,
+            "# Assessment Plan\n\nb\n",
+            &["fine".to_string(), "bad\n".to_string()],
+        )
+        .unwrap_err();
+    assert!(matches!(err, StoreError::InvalidTag { .. }), "got {err}");
+    let store = LocalFolderStore::open(&dir).unwrap();
+    let tags = &store
+        .read_page(PLAN_ID)
+        .unwrap()
+        .metadata
+        .as_ref()
+        .unwrap()
+        .tags;
+    assert!(
+        !tags.contains(&"fine".to_string()),
+        "good tag leaked through"
+    );
+}
+
+#[test]
+fn update_with_tags_on_an_unmanaged_page_is_refused() {
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    assert!(store
+        .update_page_with_tags("no-such-page", "body", &["x".to_string()])
+        .is_err());
 }

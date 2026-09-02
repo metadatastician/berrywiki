@@ -37,6 +37,12 @@ pub enum StoreError {
     /// A filename or title failed validation (traversal, reserved or
     /// filesystem-hostile characters, emptiness).
     InvalidName { name: String, reason: String },
+    /// A tag failed validation: it is empty, carries leading or trailing
+    /// whitespace, or contains something the metadata block cannot round-trip
+    /// (a newline, a control character, or the `-->` close marker). Tags are
+    /// rejected rather than rewritten, so what is stored is always what was
+    /// asked for.
+    InvalidTag { tag: String, reason: String },
     /// An attachment with this filename already exists for the page.
     DuplicateAttachment { page: String, filename: String },
     /// A file changed on disk since it was loaded (external editor, concurrent
@@ -106,6 +112,10 @@ impl fmt::Display for StoreError {
             StoreError::InvalidName { name, reason } => write!(
                 f,
                 "Name {name:?} was rejected: {reason}. Nothing was changed."
+            ),
+            StoreError::InvalidTag { tag, reason } => write!(
+                f,
+                "Tag {tag:?} was rejected: {reason}. Nothing was changed."
             ),
             StoreError::DuplicateAttachment { page, filename } => write!(
                 f,

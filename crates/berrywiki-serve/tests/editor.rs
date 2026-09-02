@@ -955,3 +955,217 @@ fn a_disk_change_after_the_move_form_opened_is_a_409() {
     );
     no_script(&r.body);
 }
+
+#[test]
+fn edit_form_prefills_the_existing_tag_list() {
+    let wiki = scratch_wiki();
+    let mut app = app(&wiki, &scratch_dir("drafts"));
+    let r = handle(&mut app, &Request::get(&format!("/page/{PLAN_ID}/edit")));
+    assert_eq!(r.status, 200);
+    assert!(
+        r.body.contains("name=\"tags\""),
+        "editor offers a tags field"
+    );
+    // Rendered as the stored list joined with ", " so what the user sees is
+    // what the store holds, in the order it holds it.
+    assert!(
+        r.body.contains("value=\"assessment, teaching\""),
+        "tags prefilled: {}",
+        r.body
+    );
+    no_script(&r.body);
+}
+
+#[test]
+fn save_round_trips_a_typed_tag_field_to_disk() {
+    let wiki = scratch_wiki();
+    let mut app = app(&wiki, &scratch_dir("drafts"));
+    let page_file = file_of(&wiki, PLAN_ID);
+
+    let edit = handle(&mut app, &Request::get(&format!("/page/{PLAN_ID}/edit")));
+    let base = base_of(&edit.body);
+    let form = format!(
+        "body={}&tags={}&action=save&base={base}",
+        enc("# Assessment Plan\n\nbody\n"),
+        enc("alpha, beta-two, gamma")
+    );
+    let r = handle(
+        &mut app,
+        &Request::post(&format!("/page/{PLAN_ID}/edit"), &form),
+    );
+    assert_eq!(r.status, 303, "save redirects: {}", r.body);
+
+    let after = fs::read_to_string(&page_file).unwrap();
+    for tag in ["alpha", "beta-two", "gamma"] {
+        assert!(after.contains(tag), "tag {tag} written: {after}");
+    }
+    assert!(
+        !after.contains("assessment"),
+        "the typed list replaces the old one, it does not merge"
+    );
+    // And it comes back through the form on the next edit.
+    let again = handle(&mut app, &Request::get(&format!("/page/{PLAN_ID}/edit")));
+    assert!(again.body.contains("value=\"alpha, beta-two, gamma\""));
+}
+
+#[test]
+fn the_form_parser_trims_and_drops_empties_and_duplicates() {
+    // Normalisation happens here, in the form parser, and never in the store:
+    // a store that rewrote its input would be the very thing byte-stability
+    // exists to prevent.
+    let wiki = scratch_wiki();
+    let mut app = app(&wiki, &scratch_dir("drafts"));
+    let edit = handle(&mut app, &Request::get(&format!("/page/{PLAN_ID}/edit")));
+    let base = base_of(&edit.body);
+    let form = format!(
+        "body={}&tags={}&action=save&base={base}",
+        enc("# Assessment Plan\n\nb\n"),
+        enc("  one ,, two,one,  , two ")
+    );
+    let r = handle(
+        &mut app,
+        &Request::post(&format!("/page/{PLAN_ID}/edit"), &form),
+    );
+    assert_eq!(r.status, 303, "{}", r.body);
+    // First-occurrence order kept, so the saved list is the one the user can
+    // see they typed.
+    let again = handle(&mut app, &Request::get(&format!("/page/{PLAN_ID}/edit")));
+    assert!(
+        again.body.contains("value=\"one, two\""),
+        "got: {}",
+        again.body
+    );
+}
+
+#[test]
+fn an_empty_tags_field_clears_the_list() {
+    // A text input that is empty means "no tags". This is deliberate rather
+    // than incidental: the store's separate `update_page` is what a caller
+    // uses when it has no opinion about tags at all.
+    let wiki = scratch_wiki();
+    let mut app = app(&wiki, &scratch_dir("drafts"));
+    let page_file = file_of(&wiki, PLAN_ID);
+    let edit = handle(&mut app, &Request::get(&format!("/page/{PLAN_ID}/edit")));
+    let base = base_of(&edit.body);
+    let form = format!(
+        "body={}&tags=&action=save&base={base}",
+        enc("# Assessment Plan\n\nb\n")
+    );
+    assert_eq!(
+        handle(
+            &mut app,
+            &Request::post(&format!("/page/{PLAN_ID}/edit"), &form)
+        )
+        .status,
+        303
+    );
+    let after = fs::read_to_string(&page_file).unwrap();
+    assert!(!after.contains("assessment"), "list cleared: {after}");
+    assert!(after.contains(PLAN_ID), "metadata block otherwise intact");
+}
+
+#[test]
+fn a_tag_the_store_refuses_keeps_the_typed_text_on_the_page() {
+    // The stale-write UX rule applied to tags: a refusal must never cost the
+    // user the words they typed, in either field.
+    let wiki = scratch_wiki();
+    let mut app = app(&wiki, &scratch_dir("drafts"));
+    let page_file = file_of(&wiki, PLAN_ID);
+    let before = fs::read_to_string(&page_file).unwrap();
+
+    let edit = handle(&mut app, &Request::get(&format!("/page/{PLAN_ID}/edit")));
+    let base = base_of(&edit.body);
+    let typed_body = "# Assessment Plan\n\nwork I do not want to lose\n";
+    let form = format!(
+        "body={}&tags={}&action=save&base={base}",
+        enc(typed_body),
+        enc("fine, evil-->here")
+    );
+    let r = handle(
+        &mut app,
+        &Request::post(&format!("/page/{PLAN_ID}/edit"), &form),
+    );
+
+    assert_ne!(r.status, 303, "a refused save must not redirect");
+    assert!(
+        r.body.contains("work I do not want to lose"),
+        "typed body echoed back: {}",
+        r.body
+    );
+    assert!(
+        r.body.contains("value=\"fine, evil--&gt;here\"")
+            || r.body.contains("fine, evil--&gt;here"),
+        "typed tags echoed back escaped: {}",
+        r.body
+    );
+    no_script(&r.body);
+    assert_eq!(
+        fs::read_to_string(&page_file).unwrap(),
+        before,
+        "nothing written on refusal"
+    );
+}
+
+#[test]
+fn the_new_page_form_offers_and_stores_tags() {
+    let wiki = scratch_wiki();
+    let mut app = app(&wiki, &scratch_dir("drafts"));
+    let form_page = handle(&mut app, &Request::get("/new"));
+    assert!(
+        form_page.body.contains("name=\"tags\""),
+        "create and edit must not disagree about what a page can carry"
+    );
+    no_script(&form_page.body);
+
+    let form = format!(
+        "title={}&body={}&tags={}&parent=&action=create",
+        enc("Tagged Newcomer"),
+        enc("Fresh page.\n"),
+        enc("alpha, beta")
+    );
+    let r = handle(&mut app, &Request::post("/new", &form));
+    assert_eq!(r.status, 303, "create redirects: {}", r.body);
+
+    let created = fs::read_to_string(wiki.join("Tagged-Newcomer.md")).unwrap();
+    assert!(created.contains("alpha"), "tag written: {created}");
+    assert!(created.contains("beta"));
+}
+
+#[test]
+fn the_new_page_form_refuses_a_hostile_tag_without_losing_the_draft() {
+    let wiki = scratch_wiki();
+    let mut app = app(&wiki, &scratch_dir("drafts"));
+    let form = format!(
+        "title={}&body={}&tags={}&parent=&action=create",
+        enc("Doomed"),
+        enc("text the user typed"),
+        enc("evil-->here")
+    );
+    let r = handle(&mut app, &Request::post("/new", &form));
+    assert_ne!(r.status, 303, "refused, not created");
+    assert!(r.body.contains("text the user typed"), "{}", r.body);
+    assert!(!wiki.join("Doomed.md").exists(), "no page left behind");
+    no_script(&r.body);
+}
+
+#[test]
+fn preview_echoes_the_typed_tags_rather_than_the_stored_ones() {
+    // Preview is not a save, so it must show what is in the form, not what is
+    // on disk; otherwise a user previewing a tag change sees the old list.
+    let wiki = scratch_wiki();
+    let mut app = app(&wiki, &scratch_dir("drafts"));
+    let edit = handle(&mut app, &Request::get(&format!("/page/{PLAN_ID}/edit")));
+    let base = base_of(&edit.body);
+    let form = format!(
+        "body={}&tags={}&action=preview&base={base}",
+        enc("# Assessment Plan\n\npreviewing\n"),
+        enc("draft-tag")
+    );
+    let r = handle(
+        &mut app,
+        &Request::post(&format!("/page/{PLAN_ID}/edit"), &form),
+    );
+    assert_eq!(r.status, 200);
+    assert!(r.body.contains("value=\"draft-tag\""), "{}", r.body);
+    no_script(&r.body);
+}

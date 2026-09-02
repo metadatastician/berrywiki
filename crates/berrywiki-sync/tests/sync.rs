@@ -530,3 +530,67 @@ fn a_push_race_maps_to_pushraced_then_diverged_on_resync() {
         SyncOutcome::Diverged(_)
     ));
 }
+
+#[test]
+fn update_with_tags_is_exactly_one_commit_for_body_and_tags_together() {
+    // The reason `update_page_with_tags` exists as one trait method rather than
+    // a body save followed by a tag save: two store calls would be two
+    // `commit_all` calls and therefore two commits, breaking the
+    // one-logical-commit-per-mutation rule the whole engine rests on.
+    let sb = GitSandbox::create(&fixture_dir());
+    let mut w = synced(&sb.ours);
+    w.create_page(page("Tagged", "tagged-1", None)).unwrap();
+    let before = commit_count(&sb, &sb.ours);
+
+    let saved = w
+        .update_page_with_tags(
+            "tagged-1",
+            "# Tagged\n\nrewritten body\n",
+            &["alpha".to_string(), "beta".to_string()],
+        )
+        .unwrap();
+
+    assert!(saved.commit.is_some(), "a real change commits");
+    assert_eq!(
+        commit_count(&sb, &sb.ours),
+        before + 1,
+        "one commit, not one per field"
+    );
+    let files = files_in(&sb, &sb.ours, "HEAD");
+    assert!(
+        files.iter().any(|f| f == "Tagged.md"),
+        "page file in the commit: {files:?}"
+    );
+    assert!(w.status().unwrap().is_clean(), "nothing left uncommitted");
+
+    let tags = &w
+        .read_page("tagged-1")
+        .unwrap()
+        .metadata
+        .as_ref()
+        .unwrap()
+        .tags;
+    assert_eq!(tags, &["alpha".to_string(), "beta".to_string()]);
+}
+
+#[test]
+fn a_refused_tag_leaves_no_commit_behind() {
+    // The store refuses before writing, so sync must not have committed an
+    // empty or partial change on the way past.
+    let sb = GitSandbox::create(&fixture_dir());
+    let mut w = synced(&sb.ours);
+    w.create_page(page("Untouched", "untouched-1", None))
+        .unwrap();
+    let before = commit_count(&sb, &sb.ours);
+
+    assert!(w
+        .update_page_with_tags(
+            "untouched-1",
+            "# Untouched\n\nnope\n",
+            &["bad\n".to_string()]
+        )
+        .is_err());
+
+    assert_eq!(commit_count(&sb, &sb.ours), before, "HEAD unchanged");
+    assert!(w.status().unwrap().is_clean(), "no dirty residue");
+}

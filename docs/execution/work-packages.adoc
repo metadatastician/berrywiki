@@ -193,7 +193,14 @@ rejection, conflict shape, default branch. | Credential-gated; never fake.
 [cols="1,1,4,3", options="header"]
 |===
 | ID | Tier | Contract | Escalation triggers
-| P4-tags | sonnet | Tag index + filter UI. | git contact → opus.
+| P4-tags | sonnet | *DONE* — **Done 2026-09-02.** `tags:` is a list key in the
+metadata block, so the native GitHub reader ignores it and an older build
+preserves it. One combined store method `update_page_with_tags` keeps a body+tag
+save to a single commit on the synced backend. `/tags` counts pages per tag;
+`/tags/<tag>` lists them; `/search?tag=` filters, alone or beside `q=`; the
+editor and the new-page form carry a tag field whose parser trims, drops empties
+and drops duplicates. The store validates and never normalises: a tag that would
+not round-trip is refused and nothing is written. | git contact → opus.
 | P4-history | sonnet | Per-page revision list via git log (read-only). | —
 | P4-attach | sonnet | Attachment upload UI over the store's id-keyed dirs;
 schedule the missing attachment-conflict integration test. | conflict-flow

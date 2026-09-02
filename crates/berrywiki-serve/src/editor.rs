@@ -71,6 +71,10 @@ struct EditorView<'a> {
     body: &'a str,
     /// The hidden base hash the form carries forward.
     base: &'a str,
+    /// Tags exactly as typed into the form, comma-separated. The *typed* text
+    /// rather than the stored list, so every refusal echoes back what the user
+    /// wrote instead of quietly substituting a re-serialised version.
+    tags: &'a str,
     status: u16,
     notice: Option<String>,
     error: Option<String>,
@@ -107,6 +111,7 @@ pub(crate) fn edit_form(ctx: Ctx<'_>, id: &str, query: &str) -> Response {
             title: &page.title,
             body: &body,
             base: &source_hash(&page.source),
+            tags: &tags_field(page),
             status: 200,
             notice: notice_text(&query_value(query, "notice")),
             error: None,
@@ -115,6 +120,40 @@ pub(crate) fn edit_form(ctx: Ctx<'_>, id: &str, query: &str) -> Response {
             preview: None,
         },
     )
+}
+
+/// The stored tag list as one comma-separated field value.
+///
+/// A page with no metadata block has no tag list to show, which is the same
+/// page the store refuses to add tags to, so an empty field is the honest
+/// rendering rather than a missing one.
+fn tags_field(page: &berrywiki_core::WikiPage) -> String {
+    page.metadata
+        .as_ref()
+        .map(|m| m.tags.join(", "))
+        .unwrap_or_default()
+}
+
+/// Split a typed tag field into a tag list.
+///
+/// Trimming and dropping empties happens *here*, in the form parser, and never
+/// in the store: the store's job is to refuse what it cannot round-trip, and a
+/// store that silently rewrote its input would be the very thing byte-stability
+/// exists to prevent. Duplicates are dropped keeping first-occurrence order so
+/// the saved list is the one the user can see they typed.
+///
+/// A comma is the separator, so a tag cannot contain one through this form.
+/// That is a limit of the field, not of the store.
+fn parse_tags(field: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for t in field.split(',') {
+        let t = t.trim();
+        if t.is_empty() || out.iter().any(|s| s == t) {
+            continue;
+        }
+        out.push(t.to_string());
+    }
+    out
 }
 
 fn notice_text(token: &str) -> Option<String> {
@@ -165,12 +204,17 @@ fn render_editor(ctx: Ctx<'_>, v: &EditorView<'_>) -> Response {
          <input type=\"hidden\" name=\"base\" value=\"{}\">\
          <div class=\"editor-field\"><label for=\"body\">Markdown source</label>\
          <textarea id=\"body\" name=\"body\" rows=\"24\">\n{}</textarea></div>\
+         <div class=\"editor-field\"><label for=\"tags\">Tags</label>\
+         <input id=\"tags\" name=\"tags\" value=\"{}\" aria-describedby=\"tags-hint\">\
+         <p id=\"tags-hint\" class=\"field-hint\">Comma-separated. A tag cannot \
+         contain a comma.</p></div>\
          <div class=\"editor-buttons\">\
          <button type=\"submit\" name=\"action\" value=\"save\">Save</button>{}\
          <button type=\"submit\" name=\"action\" value=\"preview\" class=\"secondary\">Preview</button>{}\
          </div></form>",
         escape_attr(v.base),
         escape_html(v.body),
+        escape_attr(v.tags),
         if ctx.drafts.is_some() {
             "<button type=\"submit\" name=\"action\" value=\"save-draft\" class=\"secondary\">Save draft</button>"
         } else {
@@ -211,6 +255,9 @@ fn post_edit(app: &mut App, id: &str, form: &str) -> Response {
     let submitted = normalize_newlines(&form_value(form, "body"));
     let action = form_value(form, "action");
     let base = form_value(form, "base");
+    // Held verbatim for redisplay and parsed only on the save path, so a
+    // refusal on any other path cannot rewrite what the user typed.
+    let tags_raw = form_value(form, "tags");
 
     // Snapshot what rendering needs before any mutable borrow of the store.
     let (title, current_hash) = match app.store().read_page(id) {
@@ -228,6 +275,7 @@ fn post_edit(app: &mut App, id: &str, form: &str) -> Response {
                 // Carry the ORIGINAL base forward: previewing must not widen
                 // the window for a silent clobber.
                 base: &base,
+                tags: &tags_raw,
                 status: 200,
                 notice: None,
                 error: None,
@@ -239,13 +287,22 @@ fn post_edit(app: &mut App, id: &str, form: &str) -> Response {
         "save-draft" => match &app.drafts {
             Some(drafts) => match drafts.save(id, &submitted) {
                 Ok(()) => Response::see_other(format!("/page/{id}/edit?notice=draft-saved")),
-                Err(e) => editor_error(app.ctx(), id, &title, &submitted, &base, e.to_string()),
+                Err(e) => editor_error(
+                    app.ctx(),
+                    id,
+                    &title,
+                    &submitted,
+                    &tags_raw,
+                    &base,
+                    e.to_string(),
+                ),
             },
             None => editor_error(
                 app.ctx(),
                 id,
                 &title,
                 &submitted,
+                &tags_raw,
                 &base,
                 "Drafts are unavailable in this session.".to_string(),
             ),
@@ -254,7 +311,15 @@ fn post_edit(app: &mut App, id: &str, form: &str) -> Response {
             if let Some(drafts) = &app.drafts {
                 // Discard is idempotent; an I/O failure degrades to a banner.
                 if let Err(e) = drafts.discard(id) {
-                    return editor_error(app.ctx(), id, &title, &submitted, &base, e.to_string());
+                    return editor_error(
+                        app.ctx(),
+                        id,
+                        &title,
+                        &submitted,
+                        &tags_raw,
+                        &base,
+                        e.to_string(),
+                    );
                 }
             }
             Response::see_other(format!("/page/{id}/edit?notice=draft-discarded"))
@@ -266,11 +331,15 @@ fn post_edit(app: &mut App, id: &str, form: &str) -> Response {
                     id,
                     &title,
                     &submitted,
+                    &tags_raw,
                     &current_hash,
                     "The page changed after this editor was opened.".to_string(),
                 );
             }
-            match app.update_page(id, &submitted) {
+            // One combined call, never a body save followed by a tag save:
+            // on the synced backend two store calls would be two commits and
+            // would break the one-logical-commit-per-mutation rule.
+            match app.update_page_with_tags(id, &submitted, &parse_tags(&tags_raw)) {
                 Ok(rec) => {
                     if let Some(drafts) = &app.drafts {
                         // The draft is superseded by the save; failure to
@@ -281,10 +350,24 @@ fn post_edit(app: &mut App, id: &str, form: &str) -> Response {
                 }
                 // A refusal that keeps the text: stale write, or a clone that
                 // must not be committed to (merge in progress, detached HEAD).
-                Err(e) if is_refusal(&e) => {
-                    stale_conflict(app, id, &title, &submitted, &current_hash, e.to_string())
-                }
-                Err(e) => editor_error(app.ctx(), id, &title, &submitted, &base, e.to_string()),
+                Err(e) if is_refusal(&e) => stale_conflict(
+                    app,
+                    id,
+                    &title,
+                    &submitted,
+                    &tags_raw,
+                    &current_hash,
+                    e.to_string(),
+                ),
+                Err(e) => editor_error(
+                    app.ctx(),
+                    id,
+                    &title,
+                    &submitted,
+                    &tags_raw,
+                    &base,
+                    e.to_string(),
+                ),
             }
         }
         _ => editor_error(
@@ -292,6 +375,7 @@ fn post_edit(app: &mut App, id: &str, form: &str) -> Response {
             id,
             &title,
             &submitted,
+            &tags_raw,
             &base,
             "Unknown editor action.".to_string(),
         ),
@@ -326,6 +410,7 @@ fn stale_conflict(
     id: &str,
     title: &str,
     submitted: &str,
+    tags: &str,
     base: &str,
     detail: String,
 ) -> Response {
@@ -340,6 +425,7 @@ fn stale_conflict(
             id,
             title,
             body: submitted,
+            tags,
             base,
             status: 409,
             notice: None,
@@ -357,6 +443,7 @@ fn editor_error(
     id: &str,
     title: &str,
     submitted: &str,
+    tags: &str,
     base: &str,
     detail: String,
 ) -> Response {
@@ -366,6 +453,7 @@ fn editor_error(
             id,
             title,
             body: submitted,
+            tags,
             base,
             status: 400,
             notice: None,
@@ -383,6 +471,8 @@ struct NewView<'a> {
     title_value: &'a str,
     parent_value: &'a str,
     body: &'a str,
+    /// Tags as typed, comma-separated; same contract as `EditorView::tags`.
+    tags: &'a str,
     status: u16,
     error: Option<String>,
     preview: Option<String>,
@@ -395,6 +485,7 @@ pub(crate) fn new_form(ctx: Ctx<'_>, query: &str) -> Response {
             title_value: "",
             parent_value: &query_value(query, "parent"),
             body: "",
+            tags: "",
             status: 200,
             error: None,
             preview: None,
@@ -437,12 +528,17 @@ fn render_new(ctx: Ctx<'_>, v: &NewView<'_>) -> Response {
          <div class=\"editor-field\"><label for=\"body\">Markdown source (optional; \
          a title heading is added when absent)</label>\
          <textarea id=\"body\" name=\"body\" rows=\"16\">\n{}</textarea></div>\
+         <div class=\"editor-field\"><label for=\"tags\">Tags</label>\
+         <input id=\"tags\" name=\"tags\" value=\"{}\" aria-describedby=\"new-tags-hint\">\
+         <p id=\"new-tags-hint\" class=\"field-hint\">Comma-separated, optional. \
+         A tag cannot contain a comma.</p></div>\
          <div class=\"editor-buttons\">\
          <button type=\"submit\" name=\"action\" value=\"create\">Create</button>\
          <button type=\"submit\" name=\"action\" value=\"preview\" class=\"secondary\">Preview</button>\
          </div></form>",
         escape_attr(v.title_value),
         escape_html(v.body),
+        escape_attr(v.tags),
     ));
 
     if let Some(p) = &v.preview {
@@ -460,6 +556,7 @@ fn post_new(app: &mut App, form: &str) -> Response {
     let title = form_value(form, "title").trim().to_string();
     let parent = form_value(form, "parent");
     let body_text = normalize_newlines(&form_value(form, "body"));
+    let tags_raw = form_value(form, "tags");
     let action = form_value(form, "action");
 
     if action == "preview" {
@@ -469,6 +566,7 @@ fn post_new(app: &mut App, form: &str) -> Response {
                 title_value: &title,
                 parent_value: &parent,
                 body: &body_text,
+                tags: &tags_raw,
                 status: 200,
                 error: None,
                 preview: Some(render_markdown(&body_text)),
@@ -483,6 +581,7 @@ fn post_new(app: &mut App, form: &str) -> Response {
                 title_value: &title,
                 parent_value: &parent,
                 body: &body_text,
+                tags: &tags_raw,
                 status: 400,
                 error: Some("A page needs a title.".to_string()),
                 preview: None,
@@ -502,7 +601,9 @@ fn post_new(app: &mut App, form: &str) -> Response {
         parent_id,
         position,
         kind: PageKind::Page,
-        tags: Vec::new(),
+        // Same parser as the edit form, so create and edit cannot disagree
+        // about what a typed tag field means.
+        tags: parse_tags(&tags_raw),
         body: body_text.clone(),
     };
     match app.create_page(input) {
@@ -513,6 +614,7 @@ fn post_new(app: &mut App, form: &str) -> Response {
                 title_value: &title,
                 parent_value: &parent,
                 body: &body_text,
+                tags: &tags_raw,
                 status: 400,
                 error: Some(e.to_string()),
                 preview: None,

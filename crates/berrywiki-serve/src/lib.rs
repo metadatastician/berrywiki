@@ -272,13 +272,26 @@ impl App {
         }
     }
 
-    pub(crate) fn update_page(&mut self, id: &str, body: &str) -> Result<Recorded, SyncError> {
+    /// Save a body and a tag list together.
+    ///
+    /// Separate from [`WikiStore::update_page`] rather than a superset of it:
+    /// a plain body save must never touch a hand-authored tag list, and on the
+    /// synced backend this is one store call and therefore one commit. The
+    /// editor is the only caller, so `App` carries no body-only counterpart.
+    pub(crate) fn update_page_with_tags(
+        &mut self,
+        id: &str,
+        body: &str,
+        tags: &[String],
+    ) -> Result<Recorded, SyncError> {
         match &mut self.backend {
             Backend::Plain(s) => {
-                s.update_page(id, body)?;
+                s.update_page_with_tags(id, body, tags)?;
                 Ok(Recorded::plain())
             }
-            Backend::Synced(s) => Ok(Recorded::from_saved(&s.update_page(id, body)?)),
+            Backend::Synced(s) => Ok(Recorded::from_saved(
+                &s.update_page_with_tags(id, body, tags)?,
+            )),
         }
     }
 
@@ -379,13 +392,19 @@ fn dispatch(ctx: Ctx<'_>, path: &str, query: &str) -> Response {
         return diagnostics_page(ctx);
     }
     if path == "/search" {
-        return search_page(ctx, &query_value(query, "q"));
+        return search_page(ctx, &query_value(query, "q"), &query_value(query, "tag"));
     }
     if path == "/changes" {
         return changes_page(ctx, &query_value(query, "notice"), None);
     }
     if path == "/conflicts" {
         return conflicts_page(ctx);
+    }
+    if path == "/tags" {
+        return tags_index_page(ctx);
+    }
+    if let Some(rest) = path.strip_prefix("/tags/") {
+        return tag_page(ctx, &percent_decode(rest));
     }
     if let Some(rest) = path.strip_prefix("/page/") {
         let notice = query_value(query, "notice");
@@ -848,21 +867,29 @@ fn diagnostics_page(ctx: Ctx<'_>) -> Response {
     Response::html(200, layout(ctx, None, "Diagnostics", main))
 }
 
-fn search_page(ctx: Ctx<'_>, q: &str) -> Response {
+fn search_page(ctx: Ctx<'_>, q: &str, tag: &str) -> Response {
     let needle = q.trim().to_lowercase();
-    let main = if needle.is_empty() {
+    let tag = tag.trim();
+    let main = if needle.is_empty() && tag.is_empty() {
         "<p>Type a query above.</p>".to_string()
     } else {
         let mut hits = Vec::new();
         for page in ctx.store.graph().pages() {
+            // The tag is a filter, not a ranking signal: a page without it is
+            // not a weaker result, it is not a result.
+            if !tag.is_empty() && !has_tag(page, tag) {
+                continue;
+            }
             let in_title = page.title.to_lowercase().contains(&needle);
             let in_body = page.body.to_lowercase().contains(&needle);
-            if in_title || in_body {
+            // An empty query with a tag filter lists everything carrying it,
+            // which is what makes `/search?tag=x` a usable link on its own.
+            if needle.is_empty() || in_title || in_body {
                 hits.push(format!(
                     "<li><a href=\"/page/{}\">{}</a>{}</li>",
                     escape_attr(&page.id),
                     escape_html(&page.title),
-                    if in_title {
+                    if in_title || needle.is_empty() {
                         ""
                     } else {
                         " <small>(body)</small>"
@@ -870,18 +897,91 @@ fn search_page(ctx: Ctx<'_>, q: &str) -> Response {
                 ));
             }
         }
+        let what = match (needle.is_empty(), tag.is_empty()) {
+            (false, false) => format!("“{}” tagged “{}”", escape_html(q.trim()), escape_html(tag)),
+            (false, true) => format!("“{}”", escape_html(q.trim())),
+            (true, _) => format!("tag “{}”", escape_html(tag)),
+        };
         if hits.is_empty() {
-            format!("<p>No pages match “{}”.</p>", escape_html(q))
+            format!("<p>No pages match {what}.</p>")
         } else {
             format!(
-                "<p>{} result(s) for “{}”:</p><ul class=\"results\">{}</ul>",
+                "<p>{} result(s) for {what}:</p><ul class=\"results\">{}</ul>",
                 hits.len(),
-                escape_html(q),
                 hits.join("")
             )
         }
     };
     Response::html(200, layout(ctx, None, "Search", main))
+}
+
+/// Exact, case-sensitive tag membership.
+///
+/// Case-folding here would make `/tags/Rust` and `/tags/rust` disagree with
+/// the tag list rendered on the page itself, which is stored verbatim.
+fn has_tag(page: &berrywiki_core::WikiPage, tag: &str) -> bool {
+    page.metadata
+        .as_ref()
+        .is_some_and(|m| m.tags.iter().any(|t| t == tag))
+}
+
+/// `/tags` — every tag in the wiki with the number of pages carrying it.
+///
+/// A `BTreeMap` rather than a `HashMap` so the listing is byte-deterministic,
+/// the same rule the sidebar generator follows.
+fn tags_index_page(ctx: Ctx<'_>) -> Response {
+    let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for page in ctx.store.graph().pages() {
+        if let Some(meta) = &page.metadata {
+            for tag in &meta.tags {
+                *counts.entry(tag.as_str()).or_insert(0) += 1;
+            }
+        }
+    }
+    let main = if counts.is_empty() {
+        "<p>No page carries a tag yet.</p>".to_string()
+    } else {
+        let items: String = counts
+            .iter()
+            .map(|(tag, n)| {
+                format!(
+                    "<li><a class=\"tag\" href=\"/tags/{}\">{}</a> <small>({n})</small></li>",
+                    escape_attr(&percent_encode(tag)),
+                    escape_html(tag)
+                )
+            })
+            .collect();
+        format!("<ul class=\"tag-index\">{items}</ul>")
+    };
+    Response::html(200, layout(ctx, None, "Tags", main))
+}
+
+/// `/tags/<tag>` — the pages carrying one tag, in graph order.
+fn tag_page(ctx: Ctx<'_>, tag: &str) -> Response {
+    let hits: String = ctx
+        .store
+        .graph()
+        .pages()
+        .iter()
+        .filter(|p| has_tag(p, tag))
+        .map(|p| {
+            format!(
+                "<li><a href=\"/page/{}\">{}</a></li>",
+                escape_attr(&p.id),
+                escape_html(&p.title)
+            )
+        })
+        .collect();
+    let shown = escape_html(tag);
+    let main = if hits.is_empty() {
+        format!("<p>No page is tagged “{shown}”. <a href=\"/tags\">All tags</a></p>")
+    } else {
+        format!(
+            "<p>Pages tagged “{shown}”:</p><ul class=\"results\">{hits}</ul>\
+             <p><a href=\"/tags\">All tags</a></p>"
+        )
+    };
+    Response::html(200, layout(ctx, None, &format!("Tag — {tag}"), main))
 }
 
 /// The right-hand context pane: outline, tags, backlinks.
@@ -910,7 +1010,15 @@ fn context_pane(ctx: Ctx<'_>, id: &str) -> String {
         if !meta.tags.is_empty() {
             out.push_str("<h2>Tags</h2><p class=\"tags\">");
             for tag in &meta.tags {
-                out.push_str(&format!("<span class=\"tag\">{}</span> ", escape_html(tag)));
+                // Three distinct contexts, three distinct encoders: the path
+                // segment is percent-encoded, the attribute is attribute-
+                // escaped, the visible text is HTML-escaped. A tag containing
+                // `/`, `?` or `"` is safe only because each slot gets its own.
+                out.push_str(&format!(
+                    "<a class=\"tag\" href=\"/tags/{}\">{}</a> ",
+                    escape_attr(&percent_encode(tag)),
+                    escape_html(tag)
+                ));
             }
             out.push_str("</p>");
         }
@@ -1039,6 +1147,11 @@ body{margin:0;font:15px/1.5 system-ui,sans-serif;color:#1a1a1a;background:#fff}\
 .outline{list-style:none;padding:0;margin:0}\
 .outline .h2{padding-left:.6rem}.outline .h3{padding-left:1.2rem}.outline .h4{padding-left:1.8rem}\
 .tag{background:#f0e0e2;color:#7a1f2b;padding:.05rem .4rem;border-radius:3px;font-size:.8rem}\
+a.tag{text-decoration:none}\
+a.tag:hover,a.tag:focus{background:#e2c8cc;text-decoration:underline}\
+.tag-index{list-style:none;padding:0}\
+.tag-index li{padding:.15rem 0}\
+.field-hint{margin:.25rem 0 0;font-size:.8rem;color:#666}\
 .diags{list-style:none;padding:0}.diag{padding:.3rem .5rem;border-left:3px solid #ccc;margin:.3rem 0}\
 .diag.warning{border-color:#c9a227}.diag.error{border-color:#c0392b}\
 .page-actions{margin:.2rem 0 .8rem;font-size:.9rem}\
@@ -1130,6 +1243,31 @@ pub(crate) fn percent_decode(s: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Percent-encode a string for use as a single URL path segment.
+///
+/// The RFC 3986 unreserved set (`A-Z a-z 0-9 - . _ ~`) passes through; every
+/// other byte becomes `%XX`. Hand-rolled rather than pulled from a crate
+/// because the dependency budget is one third-party crate (comrak) and this is
+/// twenty lines. It is the exact inverse of [`percent_decode`], pinned by
+/// `percent_encode_round_trips_through_percent_decode`.
+pub(crate) fn percent_encode(s: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut out = String::with_capacity(s.len());
+    for &b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(b as char);
+            }
+            _ => {
+                out.push('%');
+                out.push(HEX[(b >> 4) as usize] as char);
+                out.push(HEX[(b & 0x0f) as usize] as char);
+            }
+        }
+    }
+    out
 }
 
 /// Normalise CRLF (and stray CR) to LF. Browsers submit textarea content with
@@ -1312,6 +1450,18 @@ mod tests {
         LocalFolderStore::open(dir).unwrap()
     }
 
+    /// The `<ul class="results">` fragment alone.
+    ///
+    /// Every page renders the whole tree in its sidebar, so an absence
+    /// assertion against the full body would be about the layout rather than
+    /// about the filter under test, and would pass for the wrong reason.
+    fn results_only(html: &str) -> &str {
+        match html.split_once("<ul class=\"results\">") {
+            Some((_, rest)) => rest.split_once("</ul>").map_or(rest, |(a, _)| a),
+            None => "",
+        }
+    }
+
     fn no_script(html: &str) {
         let lower = html.to_lowercase();
         assert!(!lower.contains("<script"), "no script element");
@@ -1433,6 +1583,16 @@ mod tests {
             (&format!("/page/{HOME_ID}"), ""),
             (&format!("/page/{HOME_ID}"), "notice=committed"),
             ("/page/missing", ""),
+            // P4-tags. A new route that is not listed here is not swept, and
+            // the sweep still calls itself "every route", so the list grows
+            // with the router or the guarantee quietly stops covering it.
+            ("/tags", ""),
+            ("/tags/teaching", ""),
+            ("/tags/nobody-uses-this", ""),
+            ("/tags/%22%3E%3Cscript%3E", ""),
+            ("/search", "tag=teaching"),
+            ("/search", "q=e&tag=teaching"),
+            ("/search", "tag=%22%3E%3Cscript%3Ealert(1)%3C/script%3E"),
         ] {
             no_script(&route(&s, path, query).body);
         }
@@ -1464,5 +1624,144 @@ mod tests {
         if std::env::var("BERRYWIKI_GITHUB_TOKEN").is_err() {
             assert_eq!(redact_secret("ghp_abc"), "ghp_abc");
         }
+    }
+
+    #[test]
+    fn percent_encode_round_trips_through_percent_decode() {
+        // `percent_encode`'s doc comment claims to be the exact inverse of
+        // `percent_decode`. This is the test that makes that claim true rather
+        // than decorative; the tag routes rely on it for every non-ASCII or
+        // punctuated tag.
+        for s in [
+            "",
+            "teaching",
+            "course-a",
+            "with space",
+            "slash/and?query",
+            "quote\"and<angle>",
+            "percent%25already",
+            "unicode-\u{e9}\u{4e2d}\u{6587}",
+            "plus+and&amp",
+            "-._~",
+        ] {
+            assert_eq!(percent_decode(&percent_encode(s)), s, "round trip {s:?}");
+        }
+    }
+
+    #[test]
+    fn percent_encode_passes_the_unreserved_set_through_untouched() {
+        // RFC 3986 unreserved. If this set ever shrinks, every existing tag
+        // link changes shape silently, so it is pinned rather than inferred.
+        let unreserved = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+        assert_eq!(percent_encode(unreserved), unreserved);
+        assert_eq!(percent_encode("/"), "%2F");
+        assert_eq!(percent_encode(" "), "%20");
+    }
+
+    #[test]
+    fn tags_index_counts_pages_per_tag_and_links_each_one() {
+        let s = store();
+        let r = route(&s, "/tags", "");
+        assert_eq!(r.status, 200);
+        // `teaching` is on three fixture pages; the singletons prove the count
+        // is per-tag rather than a total.
+        assert!(
+            r.body.contains("href=\"/tags/teaching\""),
+            "tag is a link: {}",
+            r.body
+        );
+        assert!(r.body.contains("(3)"), "teaching counted three times");
+        assert!(r.body.contains("href=\"/tags/course-a\""));
+        assert!(r.body.contains("href=\"/tags/assessment\""));
+        no_script(&r.body);
+    }
+
+    #[test]
+    fn tag_page_lists_exactly_the_pages_carrying_that_tag() {
+        let s = store();
+        let r = route(&s, "/tags/teaching", "");
+        assert_eq!(r.status, 200);
+        // Positive control first: if the extraction returned an empty fragment
+        // the absence assertion below would pass for the wrong reason.
+        let hits = results_only(&r.body);
+        assert!(hits.contains("Assessment Plan"), "results: {hits}");
+        assert!(hits.contains("Course A"));
+        // A page tagged `research` is not tagged `teaching`, so it must be
+        // absent: the tag is a filter, not a ranking signal.
+        assert!(
+            !results_only(&r.body).contains(">Research<"),
+            "untagged page leaked into the results"
+        );
+        no_script(&r.body);
+    }
+
+    #[test]
+    fn tag_page_is_case_sensitive() {
+        // Case-folding here would disagree with the verbatim tag list rendered
+        // on the page itself, so `Teaching` is a different tag from `teaching`.
+        let s = store();
+        assert!(route(&s, "/tags/Teaching", "")
+            .body
+            .contains("No page is tagged"));
+    }
+
+    #[test]
+    fn tag_page_for_an_unknown_tag_is_an_empty_result_not_an_error() {
+        let s = store();
+        let r = route(&s, "/tags/nobody-uses-this", "");
+        assert_eq!(r.status, 200, "an absent tag is not a missing page");
+        assert!(r.body.contains("No page is tagged"));
+        assert!(r.body.contains("href=\"/tags\""), "offers a way back");
+    }
+
+    #[test]
+    fn tag_page_escapes_a_hostile_tag_in_every_context() {
+        let s = store();
+        let hostile = "\"><script>alert(1)</script>";
+        let r = route(&s, &format!("/tags/{}", percent_encode(hostile)), "");
+        assert_eq!(r.status, 200);
+        no_script(&r.body);
+        // The visible text is HTML-escaped, so the angle brackets survive as
+        // entities rather than as markup.
+        assert!(r.body.contains("&lt;script&gt;"), "escaped, not stripped");
+    }
+
+    #[test]
+    fn search_filters_by_tag_alone_and_alongside_a_query() {
+        let s = store();
+        // A tag with no query lists everything carrying it, which is what makes
+        // `/search?tag=x` a usable link on its own.
+        let only_tag = route(&s, "/search", "tag=teaching");
+        assert_eq!(only_tag.status, 200);
+        assert!(results_only(&only_tag.body).contains("Assessment Plan"));
+        assert!(!results_only(&only_tag.body).contains(">Research<"));
+        // Adding a query narrows further; it never widens.
+        let both = route(&s, "/search", "q=assessment&tag=teaching");
+        assert!(both.body.contains("Assessment Plan"));
+        // A tag nothing carries yields no results even when the query matches.
+        let impossible = route(&s, "/search", "q=e&tag=nobody-uses-this");
+        assert!(
+            impossible.body.contains("No pages match"),
+            "tag filter is not advisory"
+        );
+    }
+
+    #[test]
+    fn search_with_neither_query_nor_tag_still_prompts() {
+        let s = store();
+        assert!(route(&s, "/search", "")
+            .body
+            .contains("Type a query above."));
+    }
+
+    #[test]
+    fn page_view_renders_its_tags_as_links() {
+        let s = store();
+        let r = route(&s, &format!("/page/{PLAN_ID}"), "");
+        assert!(
+            r.body.contains("href=\"/tags/assessment\""),
+            "tags in the context pane are navigable, not inert spans"
+        );
+        no_script(&r.body);
     }
 }
