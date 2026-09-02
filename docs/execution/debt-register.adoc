@@ -160,13 +160,6 @@ they will be deleted at the next revision.
   co-architect / co-maintainer**. It is the owning organisation account, not
   a person.
 
-| M
-| `mise.toml` installs Node, Python, Go, Java, Bun, Deno, npm, yarn, pnpm,
-  black, ruff, prettier, stylua, cmake and ninja — for a repository whose
-  only toolchain is Rust. It is estate boilerplate. Cost: a slow, confusing
-  first-run for any contributor who uses mise. Clearing it: reduce to `rust`
-  and `just`, or delete the file.
-
 | L
 | `berrywiki-launcher.sh` (440 lines) and `berrywiki.launcher.a2ml` are
   undocumented in the README and untested by CI.

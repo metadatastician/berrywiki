@@ -102,7 +102,7 @@ body:
     attributes:
       label: Runtime / toolchain
       description: Relevant runtime or toolchain version, if applicable.
-      placeholder: "e.g. Deno 2.1, Rust nightly 2026-02-10, Gleam 1.8"
+      placeholder: "e.g. Rust 1.89.0, git 2.47"
     validations:
       required: false
 
