@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: MPL-2.0
+name: Scorecard
+
+on:
+  schedule:
+    - cron: "0 0 * * 0"
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# The reusable workflow declares contents: read, security-events: write and
+# id-token: write at its top level; a caller must grant at least those.
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+  id-token: write
+
+jobs:
+  scorecard:
+    # Pinned to standards a63b2761 (2026-08-26, "fix(ci): restore the Scorecard
+    # SARIF upload deleted in June", #642). Earlier pins run Scorecard but never
+    # upload results, so a green run there proves nothing. Bump only after
+    # checking scorecard-reusable.yml still uploads to code scanning.
+    uses: hyperpolymath/standards/.github/workflows/scorecard-reusable.yml@a63b2761ba0b97575c4f964ffc0833afb4d39986
