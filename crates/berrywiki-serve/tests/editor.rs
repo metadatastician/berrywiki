@@ -18,6 +18,8 @@ use berrywiki_store::LocalFolderStore;
 const HOME_ID: &str = "0195f6d0-0000-7000-8000-000000000001";
 const TEACHING_ID: &str = "0195f6d0-0000-7000-8000-000000000002";
 const PLAN_ID: &str = "0195f6ec-36a2-7a42-b519-5f558842e256";
+const COURSE_A_ID: &str = "0195f6d0-0000-7000-8000-000000000003";
+const RESEARCH_ID: &str = "0195f6d0-0000-7000-8000-000000000004";
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -601,6 +603,33 @@ fn hostile_input_stays_inert_across_all_editor_surfaces() {
         enc(hostile)
     );
     inert_echo(&handle(&mut app, &Request::post("/new", &form)).body);
+
+    // Move form with a hostile parent id (reaches the store, whose error names
+    // it) and a hostile position (rejected before the store).
+    let (fp, fpos) = open_move_form(&mut app, TEACHING_ID);
+    for form in [
+        format!(
+            "from_parent={fp}&from_position={fpos}&parent={}&position=1&action=preview",
+            enc(hostile)
+        ),
+        format!(
+            "from_parent={fp}&from_position={fpos}&parent={RESEARCH_ID}&position={}&action=move",
+            enc(hostile)
+        ),
+    ] {
+        let r = handle(
+            &mut app,
+            &Request::post(&format!("/page/{TEACHING_ID}/move"), &form),
+        );
+        assert_eq!(r.status, 400, "{}", r.body);
+        // The payload is echoed as escaped text (in the error banner or the
+        // position field), never as markup or a link target.
+        let lower = r.body.to_lowercase();
+        assert!(!lower.contains("<script"), "no script element");
+        assert!(!lower.contains("<img"), "no live image element");
+        assert!(!lower.contains("href=\"javascript:"), "no javascript: link");
+        assert!(wiki.join("Teaching.md").exists(), "nothing moved");
+    }
 }
 
 #[test]
@@ -670,4 +699,259 @@ fn unknown_methods_are_405() {
         body: String::new(),
     };
     assert_eq!(handle(&mut app, &req).status, 405);
+}
+
+// ---------- P2-move: /page/<id>/move ----------
+
+/// Pull a hidden field's value out of a rendered form.
+fn hidden_of(html: &str, name: &str) -> String {
+    let marker = format!("name=\"{name}\" value=\"");
+    let i = html.find(&marker).expect("form carries the hidden field") + marker.len();
+    html[i..].split('"').next().unwrap().to_string()
+}
+
+/// The move form for Teaching plus its current placement, as the form's base.
+fn open_move_form(app: &mut App, id: &str) -> (String, String) {
+    let r = handle(app, &Request::get(&format!("/page/{id}/move")));
+    assert_eq!(r.status, 200, "{}", r.body);
+    (
+        hidden_of(&r.body, "from_parent"),
+        hidden_of(&r.body, "from_position"),
+    )
+}
+
+const SUBTREE: [(&str, &str); 3] = [
+    ("Teaching.md", "Research--Teaching.md"),
+    ("Teaching--Course-A.md", "Research--Teaching--Course-A.md"),
+    (
+        "Teaching--Course-A--Assessment-Plan.md",
+        "Research--Teaching--Course-A--Assessment-Plan.md",
+    ),
+];
+
+#[test]
+fn move_form_offers_every_parent_except_the_page_and_its_subtree() {
+    let wiki = scratch_wiki();
+    let mut app = app(&wiki, &scratch_dir("drafts"));
+    let r = handle(
+        &mut app,
+        &Request::get(&format!("/page/{TEACHING_ID}/move")),
+    );
+    assert_eq!(r.status, 200);
+    assert!(
+        r.body.contains(&format!("<option value=\"{RESEARCH_ID}\"")),
+        "Research is offered"
+    );
+    assert!(
+        r.body
+            .contains(&format!("<option value=\"{HOME_ID}\" selected")),
+        "current parent preselected"
+    );
+    assert!(
+        r.body.contains("<option value=\"\">(top level)"),
+        "top level offered"
+    );
+    for id in [TEACHING_ID, COURSE_A_ID, PLAN_ID] {
+        assert!(
+            !r.body.contains(&format!("<option value=\"{id}\"")),
+            "the page and its subtree are never offered as a parent: {id}"
+        );
+    }
+    assert_eq!(hidden_of(&r.body, "from_parent"), HOME_ID);
+    assert_eq!(hidden_of(&r.body, "from_position"), "10");
+    assert!(
+        !r.body.contains("class=\"plan\""),
+        "no plan until previewed"
+    );
+    no_script(&r.body);
+}
+
+#[test]
+fn move_preview_lists_the_exact_cascade_and_changes_nothing() {
+    let wiki = scratch_wiki();
+    let mut app = app(&wiki, &scratch_dir("drafts"));
+    let (fp, fpos) = open_move_form(&mut app, TEACHING_ID);
+    let home_before = fs::read_to_string(wiki.join("Home.md")).unwrap();
+
+    let form = format!(
+        "from_parent={fp}&from_position={fpos}&parent={RESEARCH_ID}&position=5&action=preview"
+    );
+    let r = handle(
+        &mut app,
+        &Request::post(&format!("/page/{TEACHING_ID}/move"), &form),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    for (old, new) in SUBTREE {
+        assert!(
+            r.body.contains(&format!("<code>{old}</code>")),
+            "{old} listed"
+        );
+        assert!(
+            r.body.contains(&format!("<code>{new}</code>")),
+            "{new} listed"
+        );
+        assert!(wiki.join(old).exists(), "{old} untouched by a preview");
+        assert!(!wiki.join(new).exists(), "{new} not created by a preview");
+    }
+    assert!(
+        r.body.contains("<code>Home.md</code>"),
+        "Home's inbound links would be rewritten"
+    );
+    assert_eq!(
+        fs::read_to_string(wiki.join("Home.md")).unwrap(),
+        home_before,
+        "preview wrote nothing"
+    );
+    assert!(r.body.contains("Nothing has been changed"));
+    // The chosen destination survives into the re-rendered form.
+    assert!(r
+        .body
+        .contains(&format!("<option value=\"{RESEARCH_ID}\" selected")));
+    assert!(r
+        .body
+        .contains("name=\"position\" type=\"number\" value=\"5\""));
+    no_script(&r.body);
+}
+
+#[test]
+fn move_applies_the_cascade_and_redirects_to_the_page() {
+    let wiki = scratch_wiki();
+    let mut app = app(&wiki, &scratch_dir("drafts"));
+    let (fp, fpos) = open_move_form(&mut app, TEACHING_ID);
+
+    let form = format!(
+        "from_parent={fp}&from_position={fpos}&parent={RESEARCH_ID}&position=5&action=move"
+    );
+    let r = handle(
+        &mut app,
+        &Request::post(&format!("/page/{TEACHING_ID}/move"), &form),
+    );
+    assert_eq!(r.status, 303, "{}", r.body);
+    assert_eq!(
+        r.location.as_deref(),
+        Some(format!("/page/{TEACHING_ID}").as_str())
+    );
+    for (old, new) in SUBTREE {
+        assert!(!wiki.join(old).exists(), "{old} gone");
+        assert!(wiki.join(new).exists(), "{new} written");
+    }
+    let home = fs::read_to_string(wiki.join("Home.md")).unwrap();
+    assert!(
+        home.contains("[[Research--Teaching--Course-A--Assessment-Plan#Weighting]]"),
+        "inbound link rewritten: {home}"
+    );
+    let sidebar = fs::read_to_string(wiki.join("_Sidebar.md")).unwrap();
+    assert!(
+        sidebar.contains("(Research--Teaching)"),
+        "sidebar regenerated: {sidebar}"
+    );
+    let view = handle(&mut app, &Request::get(&format!("/page/{TEACHING_ID}")));
+    assert_eq!(view.status, 200, "moved page still served by id");
+    assert!(view.body.contains("Research"), "shown under its new parent");
+}
+
+#[test]
+fn forged_move_into_own_subtree_is_refused_and_changes_nothing() {
+    let wiki = scratch_wiki();
+    let mut app = app(&wiki, &scratch_dir("drafts"));
+    let (fp, fpos) = open_move_form(&mut app, TEACHING_ID);
+
+    // The form never offers Course A as Teaching's parent; a forged POST
+    // reaches the store's own cycle check.
+    let form = format!(
+        "from_parent={fp}&from_position={fpos}&parent={COURSE_A_ID}&position=1&action=move"
+    );
+    let r = handle(
+        &mut app,
+        &Request::post(&format!("/page/{TEACHING_ID}/move"), &form),
+    );
+    assert_eq!(r.status, 400, "{}", r.body);
+    assert!(r.body.contains("own ancestor"), "{}", r.body);
+    for (old, new) in SUBTREE {
+        assert!(wiki.join(old).exists());
+        assert!(!wiki.join(new).exists());
+    }
+
+    // A position that is not a whole number never reaches the store.
+    let form = format!(
+        "from_parent={fp}&from_position={fpos}&parent={RESEARCH_ID}&position=five&action=move"
+    );
+    let r = handle(
+        &mut app,
+        &Request::post(&format!("/page/{TEACHING_ID}/move"), &form),
+    );
+    assert_eq!(r.status, 400);
+    assert!(r.body.contains("whole number"));
+    assert!(wiki.join("Teaching.md").exists());
+    no_script(&r.body);
+}
+
+#[test]
+fn a_move_form_opened_before_another_move_is_refused_with_a_fresh_base() {
+    let wiki = scratch_wiki();
+    let mut app = app(&wiki, &scratch_dir("drafts"));
+    // A form opened when Teaching still sat under Home at position 10 ...
+    let form_a = format!(
+        "from_parent={HOME_ID}&from_position=10&parent={RESEARCH_ID}&position=5&action=move"
+    );
+    // ... after another editor already moved it to position 20.
+    let r = handle(
+        &mut app,
+        &Request::post(
+            &format!("/page/{TEACHING_ID}/move"),
+            &format!(
+                "from_parent={HOME_ID}&from_position=10&parent={HOME_ID}&position=20&action=move"
+            ),
+        ),
+    );
+    assert_eq!(r.status, 303, "{}", r.body);
+
+    let r = handle(
+        &mut app,
+        &Request::post(&format!("/page/{TEACHING_ID}/move"), &form_a),
+    );
+    assert_eq!(r.status, 409, "{}", r.body);
+    assert!(r.body.contains("moved after this form was opened"));
+    assert_eq!(hidden_of(&r.body, "from_position"), "20", "base refreshed");
+    assert!(
+        r.body
+            .contains(&format!("<option value=\"{RESEARCH_ID}\" selected")),
+        "the submitted destination is kept"
+    );
+    assert!(
+        wiki.join("Teaching.md").exists(),
+        "the stale move was not applied"
+    );
+    assert!(!wiki.join("Research--Teaching.md").exists());
+    no_script(&r.body);
+}
+
+#[test]
+fn a_disk_change_after_the_move_form_opened_is_a_409() {
+    let wiki = scratch_wiki();
+    let mut app = app(&wiki, &scratch_dir("drafts"));
+    let (fp, fpos) = open_move_form(&mut app, TEACHING_ID);
+
+    // Home.md is one of the files the move rewrites; change it behind the
+    // store's back (length changes, so the fingerprint guard fires).
+    let home = wiki.join("Home.md");
+    let mut text = fs::read_to_string(&home).unwrap();
+    text.push_str("\nEdited outside BerryWiki.\n");
+    fs::write(&home, &text).unwrap();
+
+    let form = format!(
+        "from_parent={fp}&from_position={fpos}&parent={RESEARCH_ID}&position=5&action=move"
+    );
+    let r = handle(
+        &mut app,
+        &Request::post(&format!("/page/{TEACHING_ID}/move"), &form),
+    );
+    assert_eq!(r.status, 409, "{}", r.body);
+    assert!(wiki.join("Teaching.md").exists(), "nothing moved");
+    assert_eq!(
+        fs::read_to_string(&home).unwrap(),
+        text,
+        "outside edit kept"
+    );
+    no_script(&r.body);
 }

@@ -39,6 +39,11 @@ berrywiki serve ./my-wiki          # three-pane explorer + editor at :23779
   has diverged, `/conflicts` hands off with the exact `git` steps. Never
   force-pushes, never merges for you, never discards local work.
   `serve --no-commit` serves the folder without touching git.
+* **Move a page or a whole subtree** from its page (`Move…`): pick a new
+  parent and position, **Preview** the exact list of files renamed and links
+  rewritten without changing anything, then **Move** to apply it as one
+  commit. Retitling is done in the editor; the filename follows on the next
+  move.
 
 ## What does not work yet
 
@@ -47,10 +52,6 @@ Being explicit, because the difference matters:
 * **In-app conflict resolution** — divergence is detected and handed off
   (`/conflicts`), but merging inside BerryWiki (P3-conflict) does not exist;
   you resolve it with git.
-* **Subtree move/rename has no UI yet.** The engine is done: a non-leaf move
-  cascades descendant filenames, rewrites inbound links, regenerates the
-  sidebar and lands as one commit, and a crashed move is recovered on open,
-  all under test. The editor route with a dry-run preview is P2-move.
 * **GitHub serving is read-only.** `serve --github` mirrors a wiki and renders
   no edit affordances.
 * **Live GitHub behaviour is unverified.** Every GitHub Wiki behaviour BerryWiki

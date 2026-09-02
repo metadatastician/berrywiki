@@ -24,7 +24,7 @@ use std::net::{TcpListener, TcpStream};
 
 use berrywiki_draft::DraftStore;
 use berrywiki_render::render_markdown;
-use berrywiki_store::{CreatePageInput, LocalFolderStore, WikiStore};
+use berrywiki_store::{CreatePageInput, LocalFolderStore, MovePageInput, WikiStore};
 use berrywiki_sync::{DivergedHandoff, Saved, SyncError, SyncOutcome, SyncedStore};
 
 mod editor;
@@ -292,6 +292,19 @@ impl App {
         }
     }
 
+    /// Re-parent/reposition a page: the store's transactional subtree move
+    /// (descendant filenames, inbound links, sidebar) as one operation and,
+    /// with commit-on-save, one commit.
+    pub(crate) fn move_page(&mut self, input: MovePageInput) -> Result<Recorded, SyncError> {
+        match &mut self.backend {
+            Backend::Plain(s) => {
+                s.move_page(input)?;
+                Ok(Recorded::plain())
+            }
+            Backend::Synced(s) => Ok(Recorded::from_saved(&s.move_page(input)?)),
+        }
+    }
+
     pub(crate) fn reload(&mut self) -> Result<(), SyncError> {
         match &mut self.backend {
             Backend::Plain(s) => Ok(s.reload()?),
@@ -331,6 +344,9 @@ fn handle_get(app: &App, path: &str, query: &str) -> Response {
         }
         if let Some(id) = rest.strip_suffix("/delete") {
             return editor::delete_confirm(ctx, &percent_decode(id), None);
+        }
+        if let Some(id) = rest.strip_suffix("/move") {
+            return editor::move_form(ctx, &percent_decode(id));
         }
     }
     if path == "/new" {
@@ -445,6 +461,7 @@ fn page_view(ctx: Ctx<'_>, id: &str, notice: &str) -> Response {
         main.push_str(&format!(
             "<p class=\"page-actions\"><a href=\"/page/{id_a}/edit\">Edit</a> · \
              <a href=\"/new?parent={id_a}\">New subpage</a> · \
+             <a href=\"/page/{id_a}/move\">Move…</a> · \
              <a class=\"danger\" href=\"/page/{id_a}/delete\">Delete…</a>{badge}</p>",
             id_a = escape_attr(id),
             badge = badge,
@@ -943,6 +960,7 @@ body{margin:0;font:15px/1.5 system-ui,sans-serif;color:#1a1a1a;background:#fff}\
 .commits{padding-left:1.4rem}.commits .when{color:#888;font-size:.85rem}\
 .pending{padding-left:1.4rem}.hint{font-size:.85rem;color:#555}\
 .handoff th{text-align:left;padding-right:1rem}\
+.plan{border-collapse:collapse;margin:.5rem 0}.plan th,.plan td{text-align:left;padding:.2rem .8rem .2rem 0;vertical-align:top}\
 @media(prefers-color-scheme:dark){.status-strip{background:#1d1d1d;border-color:#333;color:#cfcfcf}body{background:#161616;color:#e6e6e6}.tree,.context{border-color:#333}.tree-item a{color:#cfcfcf}.tree-item a:hover{background:#222}.page pre{background:#222}\
 .editor textarea{background:#1d1d1d;color:#e6e6e6;border-color:#444}\
 .editor-field input,.editor-field select{background:#1d1d1d;color:#e6e6e6;border-color:#444}\
@@ -1231,6 +1249,10 @@ mod tests {
         assert!(
             !r.body.contains("/new"),
             "read-only view must not offer New"
+        );
+        assert!(
+            !r.body.contains("/move"),
+            "read-only view must not offer Move"
         );
     }
 

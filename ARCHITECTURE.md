@@ -56,7 +56,9 @@ I/O to be wrong about.
   writes and verifies the new file before removing the old, so a crash leaves
   both files (a visible duplicate-id diagnostic), never neither. Every mutation
   regenerates the sidebar in the same operation, so the tree change and its
-  navigation land together.
+  navigation land together. A move is first *planned* as a pure dry run
+  (`plan_move`) and then applied from that plan, so the editor's preview and
+  the real move cannot disagree.
 * **`berrywiki-appstate`** — resolves the out-of-clone home under
   `$XDG_STATE_HOME/berrywiki/<repo-id>/`, keyed by a stable hash of the wiki
   path, holds the roll-forward operation journal, and owns the single-writer

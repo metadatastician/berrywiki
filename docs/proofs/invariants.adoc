@@ -210,6 +210,8 @@ recovery on a real filesystem is test-only for good.
 | `crates/berrywiki-store/tests/local_store.rs` | `recovery_completes_inbound_link_rewrites`
 | `crates/berrywiki-store/tests/local_store.rs` | `recovery_preserves_an_old_file_edited_after_the_crash`
 | `crates/berrywiki-sync/tests/sync.rs` | `nonleaf_move_is_a_single_atomic_commit`
+| `crates/berrywiki-store/tests/local_store.rs` | `plan_move_is_a_pure_dry_run_of_the_cascade`
+| `crates/berrywiki-serve/tests/sync.rs` | `nonleaf_move_through_the_form_is_one_commit_with_the_sidebar`
 |===
 
 == INV-6 — Path safety (root containment)

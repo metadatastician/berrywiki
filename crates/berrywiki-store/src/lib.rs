@@ -69,6 +69,47 @@ pub struct MovePageInput {
     pub new_position: i64,
 }
 
+/// One filename change a move would make (the moved page or a descendant,
+/// since filenames encode ancestry — ADR-0001).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedRename {
+    pub id: String,
+    pub title: String,
+    pub old_path: String,
+    pub new_path: String,
+}
+
+/// One page *outside* the moved subtree whose inbound links a move would
+/// rewrite in place (its own filename is unchanged).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedRewrite {
+    pub id: String,
+    pub title: String,
+    pub path: String,
+}
+
+/// The dry run of a move: everything [`LocalFolderStore::plan_move`] decided
+/// without touching the wiki folder. The public fields are the summary a UI
+/// can show; the crate-private fields are the exact staged writes, deletes
+/// and journal entries that `apply_move` executes, so what a preview lists
+/// and what the move does cannot drift apart.
+///
+/// A plan is advisory: the store re-plans against the live graph on the real
+/// move, so a plan is never serialised, handed back, or applied later.
+#[derive(Debug, Clone)]
+pub struct MovePlan {
+    pub id: String,
+    pub new_parent_id: Option<String>,
+    pub new_position: i64,
+    /// Filename changes, moved page first, then descendants in tree order.
+    pub renames: Vec<PlannedRename>,
+    /// Pages outside the subtree whose links are rewritten in place.
+    pub link_rewrites: Vec<PlannedRewrite>,
+    pub(crate) writes: Vec<(String, Vec<u8>)>,
+    pub(crate) deletes: Vec<String>,
+    pub(crate) journal: Vec<berrywiki_appstate::journal::RenameEntry>,
+}
+
 /// A stored attachment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Attachment {

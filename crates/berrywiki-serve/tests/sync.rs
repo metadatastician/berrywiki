@@ -21,6 +21,8 @@ use berrywiki_store::LocalFolderStore;
 use berrywiki_sync::SyncedStore;
 
 const PLAN_ID: &str = "0195f6ec-36a2-7a42-b519-5f558842e256";
+const TEACHING_ID: &str = "0195f6d0-0000-7000-8000-000000000002";
+const RESEARCH_ID: &str = "0195f6d0-0000-7000-8000-000000000004";
 
 // App-state is keyed by the wiki's canonical path, so one temp XDG_STATE_HOME
 // shared across tests stays isolated per sandbox. Set once, before any store
@@ -456,6 +458,7 @@ fn every_synced_route_is_script_free() {
         &format!("/page/{PLAN_ID}"),
         &format!("/page/{PLAN_ID}?notice=committed-after-checkpoint"),
         &format!("/page/{PLAN_ID}/edit"),
+        &format!("/page/{TEACHING_ID}/move"),
         "/new",
     ] {
         let r = handle(&mut app, &Request::get(target));
@@ -472,4 +475,76 @@ fn sync_on_a_plain_app_is_refused_not_faked() {
     assert_eq!(r.status, 400);
     assert!(r.body.contains("Sync unavailable"));
     no_script(&r.body);
+}
+
+#[test]
+fn nonleaf_move_through_the_form_is_one_commit_with_the_sidebar() {
+    let sb = GitSandbox::create(&fixture_dir());
+    let mut app = synced_app(&sb);
+    let before = commit_count(&sb, &sb.ours);
+
+    let form_page = handle(
+        &mut app,
+        &Request::get(&format!("/page/{TEACHING_ID}/move")),
+    )
+    .body;
+    let hidden = |name: &str| -> String {
+        let marker = format!("name=\"{name}\" value=\"");
+        let i = form_page.find(&marker).expect("hidden field") + marker.len();
+        form_page[i..].split('"').next().unwrap().to_string()
+    };
+    let form = format!(
+        "from_parent={}&from_position={}&parent={RESEARCH_ID}&position=5&action=move",
+        hidden("from_parent"),
+        hidden("from_position")
+    );
+    let r = handle(
+        &mut app,
+        &Request::post(&format!("/page/{TEACHING_ID}/move"), &form),
+    );
+    assert_eq!(r.status, 303, "{}", r.body);
+    assert!(
+        r.location
+            .as_deref()
+            .unwrap_or("")
+            .contains("notice=committed"),
+        "{:?}",
+        r.location
+    );
+    assert_eq!(
+        commit_count(&sb, &sb.ours),
+        before + 1,
+        "exactly one commit"
+    );
+    assert_eq!(subject(&sb, &sb.ours, "HEAD"), "Move page \"Teaching\"");
+
+    // Rename detection would fold old and new names; list both explicitly.
+    let files: Vec<String> = sb
+        .git(
+            &sb.ours,
+            &["show", "--name-only", "--no-renames", "--format=", "HEAD"],
+        )
+        .expect_success("show")
+        .stdout
+        .lines()
+        .map(str::to_string)
+        .collect();
+    for f in [
+        "Teaching.md",
+        "Research--Teaching.md",
+        "Teaching--Course-A.md",
+        "Research--Teaching--Course-A.md",
+        "Teaching--Course-A--Assessment-Plan.md",
+        "Research--Teaching--Course-A--Assessment-Plan.md",
+        "Home.md",
+        "_Sidebar.md",
+    ] {
+        assert!(files.iter().any(|x| x == f), "{f} in the commit: {files:?}");
+    }
+    assert!(!sb.ours.join("Teaching.md").exists());
+    assert!(sb
+        .ours
+        .join("Research--Teaching--Course-A--Assessment-Plan.md")
+        .exists());
+    assert!(is_clean(&sb, &sb.ours), "nothing left uncommitted");
 }
