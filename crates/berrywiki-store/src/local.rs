@@ -16,8 +16,8 @@ use std::time::UNIX_EPOCH;
 use berrywiki_appstate::journal::RenameEntry;
 use berrywiki_appstate::{AppState, MoveJournal};
 use berrywiki_core::{
-    generate_sidebar, serialize_source, Diagnostic, PageGraph, PageMetadata, SidebarOptions,
-    WikiPage,
+    generate_sidebar, sanitises_field, serialize_source, Diagnostic, PageGraph, PageMetadata,
+    SidebarOptions, WikiPage,
 };
 
 /// (mtime-nanos, length) fingerprint used to detect external modification.
@@ -32,6 +32,32 @@ fn fingerprint_of(abs: &Path) -> Option<Fingerprint> {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     Some((mtime, m.len()))
+}
+
+/// Refuse a tag that would not survive a metadata serialise/parse round trip.
+///
+/// The block-list form writes `  - <tag>` and the parser reads it back with
+/// `trim()`, so a tag is storable exactly when it is non-empty, already
+/// trimmed, and needs no sanitising. This is validation, never normalisation:
+/// a bad tag is rejected rather than quietly rewritten into something the
+/// caller did not ask for.
+fn validate_tag(tag: &str) -> Result<()> {
+    let reject = |reason: &str| {
+        Err(StoreError::InvalidTag {
+            tag: tag.to_string(),
+            reason: reason.to_string(),
+        })
+    };
+    if tag.is_empty() {
+        return reject("a tag cannot be empty");
+    }
+    if tag != tag.trim() {
+        return reject("a tag cannot start or end with whitespace");
+    }
+    if sanitises_field(tag) {
+        return reject("a tag cannot contain a newline, a control character or `-->`");
+    }
+    Ok(())
 }
 
 use crate::error::StoreError;
@@ -722,6 +748,36 @@ impl LocalFolderStore {
         self.write_sidebar_if_changed()?;
         Ok(())
     }
+
+    /// The one write path behind both body-updating store methods.
+    ///
+    /// `tags: None` leaves the page's existing tag list untouched, which is
+    /// what makes [`WikiStore::update_page`]'s byte-stable-metadata guarantee
+    /// true; `Some(t)` replaces it. Everything else — the stale guard, the
+    /// atomic write, the reload and the conditional sidebar rewrite — is
+    /// identical either way, so the two entry points cannot drift apart.
+    fn write_body(&mut self, id: &str, new_body: &str, tags: Option<&[String]>) -> Result<()> {
+        self.ensure_unambiguous(id)?;
+        let page = self.page(id)?;
+        let path = page.path.clone();
+        self.check_not_stale(&path)?;
+        let mut meta = page.metadata.clone();
+        if let Some(tags) = tags {
+            match &mut meta {
+                Some(m) => m.tags = tags.to_vec(),
+                // No metadata block, so nowhere to put a tag list. Refusing is
+                // the honest answer: minting a block here would silently take
+                // ownership of a page the user has not asked us to manage.
+                None => return Err(StoreError::UnmanagedPage(id.to_string())),
+            }
+        }
+        let source = serialize_source(meta.as_ref(), new_body);
+        self.safe_write(&path, source.as_bytes())?;
+        self.reload()?;
+        // Title may have changed with the body's H1 → sidebar may change.
+        self.write_sidebar_if_changed()?;
+        Ok(())
+    }
 }
 
 impl WikiStore for LocalFolderStore {
@@ -809,15 +865,12 @@ impl WikiStore for LocalFolderStore {
         // Ids flow into filenames, attachment directories and metadata:
         // reject anything but BerryWiki's own id alphabet up front.
         crate::paths::validate_page_id(&input.id)?;
-        // Tags must not be able to corrupt the metadata block; reject rather
-        // than silently sanitise so the caller sees a clear error.
+        // Tags must not be able to corrupt the metadata block, and must still
+        // mean the same thing after a save and reload. One rule, shared with
+        // `update_page_with_tags`, so create and edit cannot disagree about
+        // what a valid tag is.
         for tag in &input.tags {
-            if berrywiki_core::sanitises_field(tag) {
-                return Err(StoreError::InvalidName {
-                    name: tag.clone(),
-                    reason: "tag contains a newline, control character or '-->'".to_string(),
-                });
-            }
+            validate_tag(tag)?;
         }
         if self.graph.get(&input.id).is_some() {
             return Err(StoreError::DuplicateId(input.id));
@@ -852,17 +905,16 @@ impl WikiStore for LocalFolderStore {
     }
 
     fn update_page(&mut self, id: &str, new_body: &str) -> Result<()> {
-        self.ensure_unambiguous(id)?;
-        let page = self.page(id)?;
-        let path = page.path.clone();
-        self.check_not_stale(&path)?;
-        let meta = page.metadata.clone();
-        let source = serialize_source(meta.as_ref(), new_body);
-        self.safe_write(&path, source.as_bytes())?;
-        self.reload()?;
-        // Title may have changed with the body's H1 → sidebar may change.
-        self.write_sidebar_if_changed()?;
-        Ok(())
+        self.write_body(id, new_body, None)
+    }
+
+    fn update_page_with_tags(&mut self, id: &str, new_body: &str, tags: &[String]) -> Result<()> {
+        // Validate every tag BEFORE touching the file: a rejected tag must
+        // leave the page exactly as it was, body included.
+        for tag in tags {
+            validate_tag(tag)?;
+        }
+        self.write_body(id, new_body, Some(tags))
     }
 
     /// Re-parent/reposition a page. Because filenames encode the ancestry path

@@ -267,6 +267,29 @@ impl<S: WikiStore> SyncedStore<S> {
         })
     }
 
+    /// Save a body and a tag list together as **one** logical commit.
+    ///
+    /// The single store call is the whole point: `update_page` followed by a
+    /// separate tag write would be two commits, which would break the one
+    /// atomic logical commit per mutation rule this type exists to enforce.
+    pub fn update_page_with_tags(
+        &mut self,
+        id: &str,
+        new_body: &str,
+        tags: &[String],
+    ) -> Result<Saved<()>> {
+        let checkpoint = self.ensure_committable()?;
+        self.store.update_page_with_tags(id, new_body, tags)?;
+        // The body's H1 may have changed the title; read it back for the message.
+        let title = self.store.read_page(id)?.title.clone();
+        let commit = self.git.commit_all(&msg_update(&title))?;
+        Ok(Saved {
+            value: (),
+            checkpoint,
+            commit,
+        })
+    }
+
     pub fn move_page(&mut self, input: MovePageInput) -> Result<Saved<()>> {
         let checkpoint = self.ensure_committable()?;
         let id = input.id.clone();

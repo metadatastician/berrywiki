@@ -460,9 +460,23 @@ fn every_synced_route_is_script_free() {
         &format!("/page/{PLAN_ID}/edit"),
         &format!("/page/{TEACHING_ID}/move"),
         "/new",
+        // P4-tags. This list and the one in `every_route_is_script_free`
+        // (serve/src/lib.rs) are the whole of the zero-JS guarantee; a route
+        // added to neither is simply not swept, and both tests go on calling
+        // themselves "every route".
+        "/tags",
+        "/tags/teaching",
+        "/tags/nobody-uses-this",
+        "/tags/%22%3E%3Cscript%3E",
+        "/search?tag=teaching",
+        "/search?q=e&tag=teaching",
+        "/search?tag=%22%3E%3Cscript%3Ealert(1)%3C/script%3E",
     ] {
         let r = handle(&mut app, &Request::get(target));
-        assert!(r.status < 500, "{target}: {}", r.status);
+        // A 404 body has no `<script` either, so `status < 500` let a route that
+        // had quietly stopped existing pass this sweep whilst proving nothing.
+        // Every target below is a route that must render, so pin it to 200.
+        assert_eq!(r.status, 200, "{target}");
         no_script(&r.body);
     }
 }
@@ -757,4 +771,36 @@ fn plain_mode_has_no_merge_to_conclude() {
     let r = handle(&mut app, &Request::post("/conflicts/finish", ""));
     assert_eq!(r.status, 400);
     assert!(r.body.contains("Commit-on-save is off"));
+}
+
+#[test]
+fn a_tag_change_through_the_editor_is_one_commit_on_the_synced_backend() {
+    // The serve layer's own witness for the invariant `berrywiki-sync` tests
+    // at the library level: the route that users actually reach must not
+    // produce a commit per field either.
+    let sb = GitSandbox::create(&fixture_dir());
+    let mut app = synced_app(&sb);
+    let before = commit_count(&sb, &sb.ours);
+
+    let edit = handle(&mut app, &Request::get(&format!("/page/{PLAN_ID}/edit"))).body;
+    let base = base_of(&edit);
+    let form = format!(
+        "body={}&tags={}&action=save&base={base}",
+        enc("# Assessment Plan\n\nretagged\n"),
+        enc("alpha, beta")
+    );
+    let r = handle(
+        &mut app,
+        &Request::post(&format!("/page/{PLAN_ID}/edit"), &form),
+    );
+    assert_eq!(r.status, 303, "save redirects: {}", r.body);
+    assert_eq!(
+        commit_count(&sb, &sb.ours),
+        before + 1,
+        "one commit for body and tags together"
+    );
+
+    let shown = handle(&mut app, &Request::get(&format!("/page/{PLAN_ID}"))).body;
+    assert!(shown.contains("href=\"/tags/alpha\""), "tag link rendered");
+    no_script(&shown);
 }

@@ -29,6 +29,11 @@ berrywiki serve ./my-wiki          # three-pane explorer + editor at :23779
 * **Writes that refuse rather than clobber.** If a page changed on disk, or
   changed since your editor was opened, Save is refused with a 409 — and your
   text is kept, both in the form and as a draft. Nothing you typed is discarded.
+* **Tags with index pages.** A `tags:` list in the metadata block gives
+  `/tags` (every tag with a page count), `/tags/<tag>` (the pages carrying it)
+  and `/search?tag=` (filter alone or beside a query). The tag field is part of
+  the editor and the new-page form. GitHub ignores the key, so a tagged wiki is
+  still an ordinary wiki.
 * **Consistency diagnostics.** Broken links, missing parents, cycles and
   duplicate ids, surfaced in the UI and via `berrywiki check`.
 * **Commit-on-save** (`berrywiki-sync`, wired into `serve`): when the folder

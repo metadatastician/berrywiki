@@ -143,6 +143,21 @@ pub trait WikiStore {
     /// Replace a page's body, preserving its metadata byte-stably.
     fn update_page(&mut self, id: &str, new_body: &str) -> Result<()>;
 
+    /// Replace a page's body *and* its tag list in one write, preserving all
+    /// other metadata byte-stably.
+    ///
+    /// Deliberately separate from [`WikiStore::update_page`] rather than the
+    /// path it delegates to: a plain body save must never rewrite a
+    /// hand-authored tag list (duplicates, ordering and spacing included),
+    /// and a caller that has no opinion about tags must not be able to clear
+    /// them by omission.
+    ///
+    /// Tags are *validated, never normalised*. A tag that would not survive a
+    /// serialise/parse round trip — empty, untrimmed, or carrying a newline,
+    /// a control character or `-->` — is refused with
+    /// [`StoreError::InvalidTag`] and nothing is written.
+    fn update_page_with_tags(&mut self, id: &str, new_body: &str, tags: &[String]) -> Result<()>;
+
     /// Re-parent and re-order a page (metadata + filename + sidebar together).
     fn move_page(&mut self, input: MovePageInput) -> Result<()>;
 
