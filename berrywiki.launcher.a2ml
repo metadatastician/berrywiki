@@ -5,6 +5,13 @@
 # Compliant with launcher-standard.a2ml v0.3.0
 #
 # BerryWiki: Companion authoring layer for GitHub Wikis
+#
+# MAINTENANCE NOTE (2026-09-02): `launch-scaffolder` is not installed on the
+# development host, so berrywiki-launcher.sh was corrected BY HAND to match
+# this file. Keep the two in step: any change to [runtime] or [icon] here
+# must be mirrored in the CONFIGURATION block of berrywiki-launcher.sh, and
+# `scripts/check-launcher.sh` must stay green. A future `launch-scaffolder
+# realign` must preserve the four points listed in the launcher's header.
 
 [project]
 name         = "berrywiki"
@@ -13,20 +20,35 @@ description  = "Companion authoring, navigation, indexing and synchronisation la
 categories   = ["Development", "Documentation", "Utility"]
 version      = "0.0.1"
 license      = "MPL-2.0"
+# `berrywiki serve` listens on loopback only, TCP 23779 (estate port policy;
+# never an 8080-class port). The launcher's --browser and --status use it.
+url          = "http://127.0.0.1:23779"
 
 [repo]
 # NOTE: repo-dir is resolved at runtime from the launcher script location.
 # Do NOT hardcode absolute paths. Leave empty or use relative paths.
+# The launcher additionally honours $BERRYWIKI_REPO_DIR and, in the copy
+# that --integ installs under ~/.local/bin, a repo-dir stamped at install
+# time (the copy is outside the checkout, so its own location is useless).
 path = ""
 
 [runtime]
-# BerryWiki CLI is a process-based application
+# BerryWiki CLI is a process-based application.
 kind = "process"
+# The crate is `berrywiki-cli`; the binary it builds is named `berrywiki`
+# ([[bin]] name in crates/berrywiki-cli/Cargo.toml). The old search list
+# looked for `berrywiki-cli`, which no build produces.
 startup-command-search = [
-    "{repo-dir}/target/release/berrywiki-cli",
-    "{repo-dir}/crates/berrywiki-cli/target/release/berrywiki-cli",
-    "berrywiki-cli",
+    "{repo-dir}/target/release/berrywiki",
+    "{repo-dir}/target/debug/berrywiki",
+    "berrywiki",
 ]
+# The binary does nothing without a subcommand. The launcher runs
+#     <start-command> serve "$BERRYWIKI_WIKI"
+# and refuses to start when BERRYWIKI_WIKI is unset: `serve` commits into
+# the folder it is given, so there is deliberately no default folder.
+# (The launcher standard has no key for arguments; this is recorded here
+# so a realign does not drop it.)
 # Per launcher-standard.a2ml [runtime] section:
 # PID files MUST use XDG_RUNTIME_DIR or TMPDIR, NEVER /tmp directly
 # Log files MUST use XDG_STATE_HOME, NEVER /tmp directly
@@ -41,4 +63,8 @@ example = "berrywiki 0.0.1 (abc1234) [linux-x86_64]"
 exit-code = 0
 
 [icon]
-source = "{repo-dir}/assets/icon-256.png"
+# No icon ships yet: there is no assets/ directory in this repository.
+# Empty means --integ uses the desktop's `package-x-generic` fallback.
+# When a 256x256 PNG exists, set this to "{repo-dir}/assets/icon-256.png"
+# and ICON_SOURCE in berrywiki-launcher.sh to match.
+source = ""
