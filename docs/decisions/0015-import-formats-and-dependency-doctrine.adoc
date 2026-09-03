@@ -1,0 +1,272 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+= ADR-0015: import formats beyond CherryTree, and the dependency doctrine
+:sectnums:
+
+== Status
+
+*Accepted* (2026-09-03). Rules the widened import scope, and supersedes the
+*D-11* row in link:0014-cherrytree-import.adoc[ADR-0014]'s Deferred section. The owner delegated these
+decisions explicitly; the rulings below are the executor's, taken under that
+delegation, and every one of them is reversible except the ones marked as
+building nothing.
+
+== Context
+
+*D-11* asked a narrow question: may the workspace take a SQLite dependency so
+that `.ctb` and `.ctx` notebooks can be read? The answer widened it. The list,
+in substance: plain text; the separated files (tab, semicolon, comma, space);
+Zim; `.ctb`; XML; RTF; HTML; and `.deed`, the attestation format formerly
+called `.a2ml`. PDF and office formats "if no dependencies needed". Every file
+to be saved in its primary format *and* as a `.deed` backup. Plus i18n,
+hunspell or aspell, agrep, and pandoc. Nickel was noted as already present
+across the estate, connecting to the `ncl.k9` self-validation files.
+
+That is not one decision. It is three unrelated things wearing one coat, and
+the first job of this ADR is to take the coat off.
+
+== Decision
+
+=== [[split]] Three concerns, three homes
+
+[cols="2,3,2"]
+|===
+| Concern | What it is | Where it belongs
+
+| Import sources
+| Reading somebody else's notebook once, into pages
+| the import crate, behind `berrywiki import`
+
+| The `.deed` sidecar
+| A second representation of *every* page, written on every save, forever
+| the store and every write path. Deferred: see <<deed>>
+
+| Text tooling
+| Spellcheck, fuzzy search, translation, conversion, run against pages that are already ours
+| serve and the CLI at run time, not import
+|===
+
+They differ in the property that matters. An import runs once, against a file
+BerryWiki did not write, and its failure mode is a bad page. A sidecar runs on
+every save, against files BerryWiki owns, and its failure mode is a wiki that
+no longer looks like a wiki on GitHub. Text tooling runs on demand and its
+failure mode is a feature that is absent.
+
+=== [[nogate]] None of it gates MVP-declare
+
+Phase 5 stays exactly what it was: P5-import-ct (done), P5-import-zim, P5-guix.
+Everything ruled below is a new track beside Phase 6, and no release note may
+claim a format before its tier's fixtures are green.
+
+Zim is still next, and not for scheduling reasons. link:0014-cherrytree-import.adoc[ADR-0014] opens by
+asserting that its neutral model and Markdown writer are "a contract between
+two importers, not one command's internals". Exactly one importer currently
+makes that claim true. Zim is the second, and it is the one that tests it: it
+has a tree, assets and internal links, so it exercises every part of the model
+that CherryTree does. A plain-text reader would not: it would produce a flat
+list of pages and prove nothing about the contract at all.
+
+=== [[doctrine]] The dependency doctrine
+
+The workspace has one third-party crate (`comrak`) and that is a property
+worth more than any format on the list. So:
+
+*Rule 1: hand-roll the formats that are plain text.* Delimited files, HTML,
+XML, RTF and Zim's markup are all text with a grammar. `berrywiki-import`
+already contains a hand-rolled XML reader and a hand-rolled SHA-256; it needs
+no help to read another text format, and a reader written here is a reader
+whose losses can be stated in a table.
+
+*Rule 2: shell out to what the user already has; never depend on it.* Pandoc
+and `sqlite3` are *binaries*, not dependencies. Taking them costs the
+dependency tree nothing. But a shell-out is a hole in every guarantee this
+project makes about determinism and about what touches the network, so it
+carries three sub-rules and none of them is optional:
+
+. *Always optional, never silent.* The conversion is requested by an explicit
+  flag (`--via pandoc`). If the binary is absent the command says so by name
+  and names what it can do instead. It is never a hard dependency, and a
+  format never quietly changes how it is read depending on what is installed.
+. *A closed set with fixed argv.* `berrywiki-git` already establishes the
+  pattern: a fixed literal set of invocations, audited by a source scan. Every
+  shell-out here is written the same way. The file path is the only variable,
+  and the binary is resolved from `PATH` and never from a path the user supplies,
+  because "point BerryWiki at your own `pandoc`" is a way to run anything.
+. *The environment is scrubbed.* A child process inherits the environment, and
+  `BERRYWIKI_GITHUB_TOKEN` must reach nothing but git. Every invocation calls
+  `Command::env_remove` on it. This is the rule most easily forgotten and the
+  one with the worst consequence.
+
+*Rule 3: no heavy Rust crate, for any format on the list.* A PDF or `.docx`
+reader in Rust is a large dependency subtree for a format nobody has asked to
+round-trip. Rule 2 covers those cases at a cost of zero crates.
+
+*What a shell-out must say in the report.* A converted document's losses
+happened inside a program BerryWiki does not control, so the loss table
+link:0014-cherrytree-import.adoc[ADR-0014] established cannot cover them. The report says so in those terms:
+"converted by pandoc <version>; losses inside that step are unknown to
+BerryWiki". Silence there would be the dishonest option.
+
+The binaries were surveyed on the development machine on 2026-09-03 and
+`pandoc`, `sqlite3`, `nickel`, `hunspell`, `aspell`, `agrep` and `7z` are all
+present. That is evidence the shell-out route is usable, and it is *not* a
+statement that any of them may be assumed.
+
+=== [[tiers]] The format tiers
+
+[cols="1,2,3"]
+|===
+| Tier | Formats | Route
+
+| 1
+| plain text, delimited, HTML, XML, Zim
+| hand-rolled readers, zero dependencies, zero shell-outs
+
+| 2
+| RTF; `.ctb`
+| RTF is plain text and hand-rolled. `.ctb` is SQLite, read through a
+  `sqlite3` shell-out under <<doctrine>>, and is *unverified*: see <<ctb>>
+
+| 3
+| PDF, ODT, DOCX
+| `--via pandoc` only, with the attribution sentence above
+|===
+
+`.ctx` stays refused. It is a 7-zip *encrypted* SQLite database, not a plain
+one, so no reader route exists that does not involve a password; the advice
+link:0014-cherrytree-import.adoc[ADR-0014] already gives, which is to open it in CherryTree and save a copy, remains the
+correct answer.
+
+=== [[txt]] What "txt" and "delimited" actually mean
+
+These look too simple to specify, which is why they need specifying: the
+mapping is the whole design, and left implicit it would be guessed differently
+by every reader.
+
+* One `.txt` file becomes one page, titled from the filename.
+* A *directory* of them becomes a tree, taking its shape from the folders.
+* One delimited file becomes one page holding one Markdown table.
+* The delimiter is sniffed from the first line and *named in a diagnostic*, so
+  the user is told what was assumed rather than left to infer it from a
+  mangled table. `--delimiter` overrides the sniff.
+* Space-separated is never guessed silently. Prose is space-separated too, and
+  a wrong guess turns a paragraph into a fifty-column table. It is accepted
+  only when `--delimiter` asks for it.
+
+=== [[deed]] The `.deed` sidecar is deferred, and it conflicts with a locked rule
+
+The request is that every page be saved in its primary format *and* as a
+`.deed` backup. Written the obvious way, as one sidecar per page inside the
+wiki clone, it does three things:
+
+* it doubles the number of files in the repository, which is the thing a
+  reader sees first on GitHub;
+* it puts non-Markdown files into a clone whose entire promise is that the
+  native reader sees a wiki and nothing else;
+* it makes the store's write path depend on a format specification that is
+  currently moving.
+
+The last is a fact, not a worry. The rename from `a2ml` to `deed` has not
+landed. The local checkout of `hyper-repos/a2ml-ecosystem` is behind its
+remote, so the claim was checked against the remote itself: the recursive
+tree of `hyperpolymath/a2ml-ecosystem` at `28473ea2e08e` on 2026-09-03
+contains no path matching `deed`, and its `spec/` directory holds a single
+`README.adoc`. Wiring a moving target into every save is how a rename becomes
+a migration.
+
+The constraint the first two points bite is worth naming precisely, because it
+is *not* where it is usually cited. link:0001-page-filename-strategy.adoc[ADR-0001] governs filenames and says
+nothing about what else the clone may contain. The rule lives in two other
+places: `CLAUDE.md`'s "the wiki must stay fully usable without BerryWiki", and
+assertion 4 of the planned Solo contract (nothing in the working tree but
+pages, `_Sidebar.md` and attachments), which is a *planned* gate and not yet a
+shipped one. That the project's most load-bearing constraint is not written
+into any accepted ADR is itself a defect, and P6-solo-contract is where it
+gets fixed.
+
+*Ruling.* Build nothing until the specification settles. When it does, the
+sidecar goes *in the backup bundle* that P4-backup already produces: a bundle
+is already the place where a second, complete representation of every page is
+legitimate, and it is outside the clone, so the GitHub reader never sees it.
+App state is the fallback if the bundle turns out to be the wrong grain. A
+sidecar inside the clone is available as a third option but only as an
+explicit opt-in the owner asks for, because it trades the native-reader
+promise for the attestation, and that is a trade only the owner can make.
+
+=== [[tooling]] Text tooling: pointers, not designs
+
+Recorded so they are not lost, and deliberately not designed here.
+
+[cols="1,3"]
+|===
+| Tool | Where it lands
+
+| hunspell / aspell | The editor, Phase 6 or later. Spellcheck is an editing
+  affordance, not an import concern
+| agrep | P9-search-measure. Fuzzy matching is a search engine question and
+  that package already exists to answer it with a measurement
+| i18n | serve. It is a presentation concern and it touches every route
+| pandoc | Exactly the Tier 3 shell-out above and nothing more
+| nickel | Already an estate tool. It validates `ncl.k9` files; it is not an
+  import source and BerryWiki does not call it
+|===
+
+== Gates
+
+Every importer inherits link:0014-cherrytree-import.adoc[ADR-0014] whole: the dry run is the default, the
+lossiness table is stated before the write, the three refusals stand, and the
+import is one commit. A tier is not done until its formats have their own rows
+in a lossiness table and their own fixtures.
+
+[cols="2,3"]
+|===
+| Property | Assertion
+
+| The model is a contract, not one importer's internals | P5-import-zim
+  produces pages, a tree, assets and links through the same `ImportModel`
+| A shell-out is never required | with the binary absent, the command exits
+  with a diagnostic naming it, and every other format still works
+| A shell-out cannot see the token | the child's environment is asserted not
+  to carry `BERRYWIKI_GITHUB_TOKEN`
+| The delimiter is stated, not guessed | the diagnostic naming the sniffed
+  delimiter is present in the report for every delimited import
+| Space-separated is never inferred | a prose file imports as one page, not as
+  a table
+| The dependency tree is unchanged | `cargo tree -e normal` still equals the
+  comrak subtree after every tier
+|===
+
+== Consequences
+
+*The workspace keeps exactly one third-party crate.* Every format on the
+owner's list is reachable without a second, and the two that are not reachable
+cheaply (PDF, office) are reachable through a binary the user chooses to have.
+
+*A converted document's provenance is weaker than an imported one's.* A
+CherryTree import can state its losses because BerryWiki did the conversion. A
+pandoc import cannot, and says so. This is a real difference in the quality of
+the result and it is surfaced rather than smoothed over.
+
+*Some formats will import badly and that is visible.* A `.txt` tree has no
+metadata, so it produces pages with no tags, no ordering beyond filename, and
+no links. The import is still correct; the report says what was not there.
+
+== Deferred, and one unverified hypothesis
+
+* [[ctb]] *The `.ctb` route is a hypothesis and has not been checked.* The
+  attractive version is that CherryTree's SQLite `node` table stores the same
+  rich-text XML in a `txt` column, so a `sqlite3` shell-out would feed the
+  existing XML reader and cost almost nothing. Against it: codeboxes, tables
+  and images are believed to live in *separate* tables keyed by node id and
+  offset, with the tree in a `children` table, which would make this
+  "reconstruct a `.ctd` from five tables" rather than "reuse the reader", which is a
+  different and much larger job. Binary payloads would also need `hex()` to
+  survive the CLI. *No effort estimate may be given and no code written until
+  this is settled* by reading CherryTree's `ct_storage_sqlite.cc` or opening a
+  real `.ctb`. No `.ctb` or `.ctd` file exists on the development machine as
+  of 2026-09-03.
+* The `.deed` sidecar, per <<deed>>, pending the specification.
+* Whether a shipped ADR should state the clone-contents rule directly, rather
+  than leaving it to `CLAUDE.md` and a planned test. It should; P6-solo-contract
+  is the package that owes it.
+
