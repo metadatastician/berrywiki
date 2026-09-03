@@ -58,6 +58,15 @@ pub struct CreatePageInput {
     pub tags: Vec<String>,
     /// Markdown body. A `# Title` heading is prepended when absent.
     pub body: String,
+    /// Extra metadata lines to write verbatim into the page's metadata
+    /// block, in the `key: value` form the parser preserves under
+    /// [`PageMetadata::extra`].
+    ///
+    /// This exists so a caller that mints a page on another system's behalf
+    /// can record where it came from. The importer writes `source:` here,
+    /// which is what lets a second import recognise its own earlier work
+    /// instead of duplicating it. Ordinary callers pass an empty vector.
+    pub extra: Vec<String>,
 }
 
 /// Input for moving/re-parenting a page.

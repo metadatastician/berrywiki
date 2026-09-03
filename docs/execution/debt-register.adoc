@@ -321,7 +321,7 @@ legible; they will be deleted at the next revision.
   `docs/proofs/invariants.adoc` (INV-1..6, each naming its witnessing tests,
   CI-checked by `scripts/check-invariants-ledger.sh`), and are covered by
   tests only. Tracked as *P5-spark*. Until then, no document may describe any
-  BerryWiki property as "proved"; 340 passing tests are evidence, not proof.
+  BerryWiki property as "proved"; 426 passing tests are evidence, not proof.
 
 |===
 

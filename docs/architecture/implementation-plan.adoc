@@ -297,11 +297,13 @@ Workspace, existing members kept unchanged in mission:
   computation. Integration-tested exclusively against the
   `berrywiki-git-compat` sandbox (no network).
 
-| `berrywiki-import` (new, Phase 5)
-| CherryTree `.ctd` (XML, quick-xml) and `.ctb` (SQLite, rusqlite behind a
-  feature) → neutral `ImportModel` → store. Dry-run default; machine + human
-  reports; source opened read-only, byte-hash-verified untouched. Zim reuses
-  the model post-MVP.
+| `berrywiki-import` (built, Phase 5)
+| CherryTree XML → neutral `ImportModel` → store. Pure and dependency-free: a
+  hand-rolled XML reader, so the workspace's only third-party crate is still
+  comrak. Dry-run default; machine + human reports; the source is read, never
+  opened for writing, and re-hashed after an apply to prove it was untouched.
+  `.ctb`/`.ctx` (SQLite) refused by content with conversion advice, pending the
+  dependency decision D-11. Zim reuses the model, the writer and every refusal.
 
 | `berrywiki-app` (new, Phase 1)
 | The axum + maud SSR server and the `berrywiki` CLI (`serve`, `check`,

@@ -50,6 +50,7 @@ fn create_input(id: &str, title: &str, parent: Option<&str>) -> CreatePageInput 
         kind: PageKind::Page,
         tags: vec!["new".to_string()],
         body: String::new(),
+        extra: Vec::new(),
     }
 }
 
@@ -487,6 +488,7 @@ fn page_titled_sidebar_cannot_clobber_generated_sidebar() {
             kind: PageKind::Page,
             tags: vec![],
             body: "# _Sidebar\n\nprecious content\n".to_string(),
+            extra: Vec::new(),
         })
         .unwrap();
 

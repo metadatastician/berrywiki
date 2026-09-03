@@ -18,6 +18,8 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
+mod import;
+
 use berrywiki_appstate::{LockError, RepoLock};
 use berrywiki_core::{generate_sidebar, Severity, SidebarOptions};
 use berrywiki_store::{LocalFolderStore, WikiStore};
@@ -33,6 +35,7 @@ USAGE:
     berrywiki serve --github <owner/repo> [--cache dir] [--addr host:port]
     berrywiki backup <folder> <out-dir>
     berrywiki restore <backup-dir> <folder>
+    berrywiki import <notebook.ctd> <folder> [--apply] [--json]
     berrywiki --help
 
 COMMANDS:
@@ -60,6 +63,15 @@ COMMANDS:
                its remote from the recorded origin, and put the drafts back
                under the new folder's own app state. Refuses a folder that
                already has contents.
+    import     Read a CherryTree notebook and report what it would become.
+               Writes nothing without --apply, and even then refuses rather
+               than overwrite: a title shared by two siblings, a page that
+               already exists and was not imported from this same node, or a
+               folder that is not a git working tree all stop the run before
+               the first write. An applied import is one commit. Re-importing
+               the same notebook writes nothing, because every imported page
+               records where it came from. --json emits the same report as
+               machine-readable data.
 ";
 
 /// Flags that take a value, so `first_path` never mistakes the value for the
@@ -81,6 +93,7 @@ pub fn run(args: &[String], out: &mut dyn Write) -> io::Result<i32> {
         }
         Some("serve") => cmd_serve(&args[1..], out),
         Some("backup") => cmd_backup(&args[1..], out),
+        Some("import") => import::cmd_import(&args[1..], out),
         Some("restore") => cmd_restore(&args[1..], out),
         Some("--help") | Some("-h") | Some("help") | None => {
             write!(out, "{USAGE}")?;
@@ -131,7 +144,7 @@ fn parse_author(raw: &str) -> Option<berrywiki_git::Identity> {
     })
 }
 
-fn has_flag(args: &[String], flag: &str) -> bool {
+pub(crate) fn has_flag(args: &[String], flag: &str) -> bool {
     args.iter().any(|a| a == flag)
 }
 
@@ -196,7 +209,7 @@ fn cmd_check(path: Option<&str>, out: &mut dyn Write) -> io::Result<i32> {
 }
 
 /// Result of asking for the single-writer lock before a mutation.
-enum WriterLock {
+pub(crate) enum WriterLock {
     /// We are the wiki's only writer for as long as the value lives.
     Held(RepoLock),
     /// App state could not be resolved, so no lock exists; the caller warns
@@ -208,7 +221,7 @@ enum WriterLock {
 
 /// Take the single-writer lock (X-lock) or say why not. Never waits: a second
 /// `serve`, or a CLI write while a server runs, is refused naming the holder.
-fn writer_lock(
+pub(crate) fn writer_lock(
     store: &LocalFolderStore,
     label: &str,
     path: &str,

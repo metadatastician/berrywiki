@@ -605,6 +605,7 @@ fn post_new(app: &mut App, form: &str) -> Response {
         // about what a typed tag field means.
         tags: parse_tags(&tags_raw),
         body: body_text.clone(),
+        extra: Vec::new(),
     };
     match app.create_page(input) {
         Ok((id, rec)) => Response::see_other(with_notice(&format!("/page/{id}"), rec)),

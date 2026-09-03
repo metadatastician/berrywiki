@@ -283,9 +283,29 @@ unrepresentable and leaves cloning from the bundle as the only restore path.
 [cols="1,1,4,3", options="header"]
 |===
 | ID | Tier | Contract | Escalation triggers
-| P5-import-ct | opus | CherryTree importer: neutral model, dry-run, machine +
-AsciiDoc report, never touches the source. | Conversion semantics are subtle →
-opus. Report is AsciiDoc, not Markdown (critique minor).
+| P5-import-ct | opus | *DONE* -- **Done 2026-09-03.** Recorded in
+link:../decisions/0014-cherrytree-import.adoc[ADR-0014]. `berrywiki import
+<notebook> <wiki>` reads a CherryTree XML notebook, plans, and prints; `--apply`
+writes. The lossiness table in the ADR is the contract: every construct is
+either carried or dropped with a named diagnostic, and the report prints the
+tally, so a user knows what they lose by count before they decide to apply.
+Format is detected by content, so a password-protected or SQLite notebook is
+refused with the conversion advice rather than a parse error 4,000 bytes into a
+binary file. Every page carries a `source:` marker naming the file hash and the
+node, and the page id derives from that same marker, so a second run reports
+every page unchanged and writes nothing -- including when the user has since
+edited the bodies, which are keyed out of the comparison deliberately and left
+alone. Three refusals fire before the first write (sibling title collision, a
+page that exists without this node's marker, a folder that is not a git working
+tree) and there is no `--overwrite`; a dry run works against a plain folder
+because the git requirement is about writing, not reading. The whole import is
+one commit with the source hash in the message, and the source file is re-read
+and re-hashed afterwards so "we did not touch your notes" is a measurement.
+Import is CLI-only: serve's body cap is 2 MiB against notebooks of tens of
+megabytes, so an `/import` route needs a streaming reader that does not exist.
+71 import-crate tests plus 15 end-to-end CLI tests against real git. |
+Conversion semantics are subtle -> opus. Report is AsciiDoc, not Markdown
+(critique minor).
 | P5-import-zim | sonnet | Zim importer reusing the neutral model + writer. |
 Escalate novel conversion semantics → opus.
 | P5-guix | opus | Guix package (estate-primary) + Nix fallback; correct

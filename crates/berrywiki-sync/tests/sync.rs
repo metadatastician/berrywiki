@@ -55,6 +55,7 @@ fn page(title: &str, id: &str, parent: Option<&str>) -> CreatePageInput {
         kind: PageKind::Page,
         tags: Vec::new(),
         body: String::new(),
+        extra: Vec::new(),
     }
 }
 
