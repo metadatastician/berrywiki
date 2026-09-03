@@ -86,3 +86,20 @@ jobs:
       # every shell script in the repo. shellcheck ships on ubuntu-latest.
       - name: shellcheck + launcher smoke
         run: scripts/check-launcher.sh
+  docs:
+    name: AsciiDoc render gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # Pinned: the gate's verdict is "asciidoctor wrote nothing to stderr", so
+      # an unpinned upgrade that adds one diagnostic would redden files the
+      # host renders clean. A version bump here is a deliberate, reviewable act.
+      - name: Install asciidoctor
+        run: sudo gem install --no-document asciidoctor -v 2.0.26
+      # asciidoctor's default failure level is FATAL, so a malformed table
+      # emits ERROR on stderr and still exits 0. This gate reads stderr, not
+      # the exit code, and plants a known-bad fixture first so a green run
+      # means the gate was able to fail and did not.
+      - name: AsciiDoc render gate
+        run: scripts/check-adoc.sh
