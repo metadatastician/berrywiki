@@ -17,6 +17,7 @@ dependencies = [
  "berrywiki-appstate",
  "berrywiki-core",
  "berrywiki-git",
+ "berrywiki-git-compat",
  "berrywiki-github",
  "berrywiki-serve",
  "berrywiki-store",

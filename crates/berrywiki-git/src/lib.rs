@@ -234,6 +234,11 @@ pub enum GitError {
     Git { op: &'static str, stderr: String },
     /// The git binary could not be spawned at all.
     Io(std::io::Error),
+    /// A path that has to become a git argument is not valid UTF-8.
+    ///
+    /// Reported rather than lossily converted: a backup written to a path that
+    /// is not the one the caller named is worse than a refusal.
+    NonUtf8Path(PathBuf),
 }
 
 impl std::fmt::Display for GitError {
@@ -246,6 +251,11 @@ impl std::fmt::Display for GitError {
                 write!(f, "git {op} failed: {}", stderr.trim())
             }
             GitError::Io(e) => write!(f, "could not run git: {e}"),
+            GitError::NonUtf8Path(p) => write!(
+                f,
+                "{} cannot be passed to git: the path is not valid UTF-8",
+                p.display()
+            ),
         }
     }
 }
@@ -630,6 +640,68 @@ impl GitRepo {
         }
     }
 
+    // ----- archival -----
+
+    /// Write every ref, and `HEAD`, into a single-file git bundle.
+    ///
+    /// A bundle is an ordinary git transport rather than a BerryWiki format:
+    /// `git clone` reads one directly, so a backup stays recoverable with git
+    /// alone and nothing here needs to exist to get the content back.
+    ///
+    /// The honest limit, and the reason the CLI refuses a dirty tree: a bundle
+    /// carries **committed history only**. Work that is still uncommitted —
+    /// which is exactly what `serve --no-commit` leaves behind — is not in it.
+    ///
+    /// `out_file` is resolved against the *process* working directory, not the
+    /// repository's, so a relative path means what the person who typed it
+    /// meant rather than landing inside the wiki.
+    pub fn bundle_all(&self, out_file: &Path) -> Result<(), GitError> {
+        let out_file = std::path::absolute(out_file).map_err(GitError::Io)?;
+        let path = utf8_arg(&out_file)?;
+        self.checked("bundle", &["bundle", "create", path, "--all"])?;
+        Ok(())
+    }
+
+    /// The URL configured for `origin`, or `None` when there is no such remote.
+    ///
+    /// Absence is not an error: a wiki that was never cloned from anywhere is
+    /// a legitimate thing to back up.
+    pub fn origin_url(&self) -> Result<Option<String>, GitError> {
+        let out = self.exec("remote", &["remote", "get-url", "origin"])?;
+        if !out.success {
+            return Ok(None);
+        }
+        let url = out.stdout.trim();
+        Ok((!url.is_empty()).then(|| url.to_string()))
+    }
+
+    /// Point `origin` at `url`, adding the remote when it is absent.
+    ///
+    /// This edits this clone's config. No ref is moved, no object is written,
+    /// and nothing on any remote is contacted or changed.
+    pub fn set_origin_url(&self, url: &str) -> Result<(), GitError> {
+        if self.origin_url()?.is_some() {
+            self.checked("remote", &["remote", "set-url", "origin", url])?;
+        } else {
+            self.checked("remote", &["remote", "add", "origin", url])?;
+        }
+        Ok(())
+    }
+
+    /// Drop the `origin` remote. Config only, with the same guarantee as
+    /// [`set_origin_url`](Self::set_origin_url): local history is untouched and
+    /// no remote is contacted.
+    ///
+    /// This exists because a clone taken from a bundle has an `origin` naming
+    /// the bundle *file*, which is not a remote anyone can fetch from once the
+    /// file is gone. Leaving it in place would be a lie about where the wiki
+    /// came from.
+    pub fn forget_origin(&self) -> Result<(), GitError> {
+        if self.origin_url()?.is_some() {
+            self.checked("remote", &["remote", "remove", "origin"])?;
+        }
+        Ok(())
+    }
     // ----- internals -----
 
     /// Is an upstream tracking branch configured for the current branch?
@@ -662,18 +734,8 @@ impl GitRepo {
     /// Run git hermetically and capture the result. Non-zero exit is returned,
     /// not treated as an error, so callers can inspect expected failures.
     fn exec(&self, _op: &'static str, args: &[&str]) -> Result<Run, GitError> {
-        let mut cmd = Command::new("git");
+        let mut cmd = hermetic_command();
         cmd.current_dir(&self.workdir)
-            // Stable, parseable output regardless of the ambient locale.
-            .env("LC_ALL", "C")
-            // Neutralise ambient config: no user/system aliases, hooks or
-            // signing can change what these commands do.
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            // Never block waiting for interactive credentials.
-            .env("GIT_TERMINAL_PROMPT", "0")
-            // Read-only commands shouldn't take the index lock.
-            .env("GIT_OPTIONAL_LOCKS", "0")
             // A commit never depends on ambient user.name/user.email.
             .env("GIT_AUTHOR_NAME", &self.identity.name)
             .env("GIT_AUTHOR_EMAIL", &self.identity.email)
@@ -691,4 +753,62 @@ impl GitRepo {
             stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
         })
     }
+}
+
+/// A `git` invocation with the ambient environment already neutralised.
+///
+/// Every git command in this crate starts here, including the ones that run
+/// outside any working tree, so hermeticity is one definition rather than a
+/// habit repeated per call site and forgotten once.
+fn hermetic_command() -> Command {
+    let mut cmd = Command::new("git");
+    cmd
+        // Stable, parseable output regardless of the ambient locale.
+        .env("LC_ALL", "C")
+        // Neutralise ambient config: no user/system aliases, hooks or
+        // signing can change what these commands do.
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        // Never block waiting for interactive credentials.
+        .env("GIT_TERMINAL_PROMPT", "0")
+        // Read-only commands shouldn't take the index lock.
+        .env("GIT_OPTIONAL_LOCKS", "0");
+    cmd
+}
+
+/// A path as a git argument, or a refusal if it is not UTF-8.
+fn utf8_arg(path: &Path) -> Result<&str, GitError> {
+    path.to_str()
+        .ok_or_else(|| GitError::NonUtf8Path(path.to_path_buf()))
+}
+
+/// Build a working tree from a bundle written by [`GitRepo::bundle_all`].
+///
+/// `dest` must not already exist as a non-empty directory; git refuses
+/// otherwise, and that refusal is reported rather than worked around, because
+/// the alternative is writing over somebody's clone.
+///
+/// The resulting clone's `origin` names the *bundle file*, which is an artefact
+/// of how bundles are transported rather than a remote anything can fetch from
+/// later. Callers are expected to repoint it with
+/// [`GitRepo::set_origin_url`] or drop it with [`GitRepo::forget_origin`];
+/// the CLI's recovery command does one or the other every time.
+///
+/// (That command cannot be named here. The audit test scans this file for the
+/// tokens of working-tree-discarding git operations and does not exempt
+/// comments, so the engine may not even mention them in prose. The bluntness
+/// is the point: there is no "it was only a comment" hole to slip through.)
+pub fn clone_from_bundle(bundle: &Path, dest: &Path) -> Result<GitRepo, GitError> {
+    let bundle = std::path::absolute(bundle).map_err(GitError::Io)?;
+    let dest = std::path::absolute(dest).map_err(GitError::Io)?;
+    let mut cmd = hermetic_command();
+    cmd.args(["clone", utf8_arg(&bundle)?, utf8_arg(&dest)?]);
+    let out = cmd.output().map_err(GitError::Io)?;
+    if !out.status.success() {
+        return Err(GitError::Git {
+            op: "clone",
+            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+        });
+    }
+    GitRepo::open(dest)
 }
