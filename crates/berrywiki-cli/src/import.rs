@@ -314,11 +314,8 @@ pub(crate) fn cmd_import(rest: &[String], out: &mut dyn Write) -> io::Result<i32
         "Import {} pages from {name}\n\nSource SHA-256: {}\n",
         created, model.source_hash
     );
-    match sync.commit(&message) {
-        Ok(Some(_)) => {}
-        Ok(None) => {
-            writeln!(out, "note: nothing changed, so no commit was made.")?;
-        }
+    let committed = match sync.commit(&message) {
+        Ok(c) => c.is_some(),
         Err(e) => {
             writeln!(
                 out,
@@ -327,7 +324,7 @@ pub(crate) fn cmd_import(rest: &[String], out: &mut dyn Write) -> io::Result<i32
             )?;
             return Ok(2);
         }
-    }
+    };
 
     // The notebook is read-only input, and saying so is cheap. Re-hashing the
     // file we were handed turns "we did not touch your notes" from a promise
@@ -355,11 +352,27 @@ pub(crate) fn cmd_import(rest: &[String], out: &mut dyn Write) -> io::Result<i32
         report::asciidoc(&model, &run)
     };
     write!(out, "{text}")?;
-    writeln!(
-        out,
-        "\nWrote {created} page(s) and {attached} attachment(s) in one commit. Run `berrywiki \
-         serve {}` to read them, and `git push` when you want them on GitHub.",
-        wiki.display()
-    )?;
+    // The second run of the same notebook is the common case, and it must not
+    // read as a failed first run. Nothing written is the *success* here.
+    if created == 0 {
+        writeln!(
+            out,
+            "\nEvery page in {name} had already been imported from this notebook, so nothing was \
+             written and no commit was made."
+        )?;
+    } else if committed {
+        writeln!(
+            out,
+            "\nWrote {created} page(s) and {attached} attachment(s) in one commit. Run `berrywiki \
+             serve {}` to read them, and `git push` when you want them on GitHub.",
+            wiki.display()
+        )?;
+    } else {
+        writeln!(
+            out,
+            "\nwarning: {created} page(s) and {attached} attachment(s) were written, but git \
+             reported nothing to commit. `git status` in the wiki folder shows what is there."
+        )?;
+    }
     Ok(0)
 }

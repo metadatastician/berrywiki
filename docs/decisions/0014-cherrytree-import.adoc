@@ -63,7 +63,7 @@ they decide to apply.
 | Anchors | *no* | `import.ct.anchor-dropped`; CherryTree anchors are node-local and have no Markdown equivalent that GitHub honours
 | Links to local files | *no* | `import.ct.link-to-file-dropped`; the path is on the author's machine and would resolve to nothing for any reader
 | Node icon, read-only flag, custom colours | *no* | `import.ct.node-attribute-dropped`
-| Node creation and modification times | *no* | git history is the record of when a page changed; a copied timestamp would contradict it
+| Node creation and modification times | *no* | dropped silently, because a diagnostic per node would drown the report; git history is the record of when a page changed, and a copied timestamp would contradict it
 |===
 
 The drops are not a to-do list. Each one is dropped because the destination is
@@ -184,8 +184,8 @@ and refusals.
 
 == Gates
 
-`crates/berrywiki-import/tests` and the crate's unit tests cover the reader,
-the model and the two report forms: 71 tests. `crates/berrywiki-cli/tests/import.rs`
+The import crate's unit tests cover the reader, the model and the two report
+forms: 71 tests. `crates/berrywiki-cli/tests/import.rs`
 drives the command end to end against real git through the
 `berrywiki-git-compat` sandbox: 15 tests.
 

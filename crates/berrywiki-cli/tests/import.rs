@@ -269,6 +269,17 @@ fn importing_the_same_notebook_twice_writes_nothing_the_second_time() {
         after_first,
         "the second run committed something:\n{out}"
     );
+    // The report must agree with the commit log. Saying "wrote 0 pages in one
+    // commit" when no commit was made is the kind of contradiction that
+    // teaches a user to distrust every other line of the report.
+    assert!(
+        out.contains("had already been imported"),
+        "the second run does not say why it wrote nothing:\n{out}"
+    );
+    assert!(
+        !out.contains("in one commit"),
+        "the second run claims a commit it did not make:\n{out}"
+    );
 }
 
 #[test]
