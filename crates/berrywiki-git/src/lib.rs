@@ -81,7 +81,12 @@ impl CommitId {
     }
 }
 
-/// One line of history as read by [`GitRepo::recent`].
+/// The one `log` shape every history read shares: id, subject, author date
+/// and author name, separated by US (`\x1f`) so no field can swallow another.
+/// It asks for nothing about paths or diffs.
+const LOG_FORMAT: &str = "--format=%H%x1f%s%x1f%aI%x1f%an";
+
+/// One line of history as read by [`GitRepo::recent`] or [`GitRepo::history`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogEntry {
     pub id: CommitId,
@@ -89,6 +94,10 @@ pub struct LogEntry {
     pub subject: String,
     /// The author date in strict ISO 8601 (`%aI`), as git prints it.
     pub date: String,
+    /// The commit author name (`%an`). In Solo this is the operator's own
+    /// git identity; on a shared server it is the principal the save was
+    /// attributed to.
+    pub author: String,
 }
 
 /// How the local branch and its fetched upstream relate.
@@ -382,15 +391,32 @@ impl GitRepo {
     }
 
     /// The most recent `limit` commits reachable from `HEAD`, newest first.
-    /// A fixed-shape `log` read: id, subject and author date, nothing else
-    /// (no paths, no diffs). An unborn branch yields an empty list rather
-    /// than an error, so a freshly initialised clone can still be described.
+    /// An unborn branch yields an empty list rather than an error, so a
+    /// freshly initialised clone can still be described.
     pub fn recent(&self, limit: usize) -> Result<Vec<LogEntry>, GitError> {
         let n = limit.to_string();
-        let out = self.exec(
-            "log",
-            &["log", "--format=%H%x1f%s%x1f%aI", "-n", n.as_str()],
-        )?;
+        self.log_entries(&["log", LOG_FORMAT, "-n", n.as_str()])
+    }
+
+    /// The most recent `limit` commits that touched one repository-relative
+    /// `path`, newest first. The path is passed after `--`, so a filename can
+    /// never be read as an option however it begins.
+    ///
+    /// A path git has never seen yields an empty list rather than an error: a
+    /// page written while commit-on-save is off has no commits behind it yet,
+    /// and that is a page with no history, not a failure. A page that was
+    /// moved has a history that ends at the move, because this read asks for
+    /// no rename detection; the older commits are still in the log under the
+    /// previous filename.
+    pub fn history(&self, path: &str, limit: usize) -> Result<Vec<LogEntry>, GitError> {
+        let n = limit.to_string();
+        self.log_entries(&["log", LOG_FORMAT, "-n", n.as_str(), "--", path])
+    }
+
+    /// Run one `log` shaped by [`LOG_FORMAT`] and parse its rows. Shared so
+    /// that the format string and the field order can never drift apart.
+    fn log_entries(&self, args: &[&str]) -> Result<Vec<LogEntry>, GitError> {
+        let out = self.exec("log", args)?;
         if !out.success {
             // The only expected failure: `HEAD` names a branch with no commits.
             if out.stderr.contains("does not have any commits") {
@@ -406,11 +432,12 @@ impl GitRepo {
             .lines()
             .filter(|l| !l.is_empty())
             .map(|line| {
-                let mut f = line.splitn(3, '\u{1f}');
+                let mut f = line.splitn(4, '\u{1f}');
                 LogEntry {
                     id: CommitId(f.next().unwrap_or("").to_string()),
                     subject: f.next().unwrap_or("").to_string(),
                     date: f.next().unwrap_or("").to_string(),
+                    author: f.next().unwrap_or("").to_string(),
                 }
             })
             .collect())

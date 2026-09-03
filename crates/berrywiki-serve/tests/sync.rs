@@ -471,6 +471,8 @@ fn every_synced_route_is_script_free() {
         "/search?tag=teaching",
         "/search?q=e&tag=teaching",
         "/search?tag=%22%3E%3Cscript%3Ealert(1)%3C/script%3E",
+        // P4-history.
+        &format!("/page/{PLAN_ID}/history"),
     ] {
         let r = handle(&mut app, &Request::get(target));
         // A 404 body has no `<script` either, so `status < 500` let a route that
@@ -803,4 +805,149 @@ fn a_tag_change_through_the_editor_is_one_commit_on_the_synced_backend() {
     let shown = handle(&mut app, &Request::get(&format!("/page/{PLAN_ID}"))).body;
     assert!(shown.contains("href=\"/tags/alpha\""), "tag link rendered");
     no_script(&shown);
+}
+
+// ---------- P4-history ----------
+
+#[test]
+fn history_lists_the_saves_that_touched_this_page() {
+    let sb = GitSandbox::create(&fixture_dir());
+    let mut app = synced_app(&sb);
+    save_plan(&mut app, "# Plan\n\nrevised once\n");
+    save_plan(&mut app, "# Plan\n\nrevised twice\n");
+    let head = sb.head(&sb.ours);
+
+    let r = handle(&mut app, &Request::get(&format!("/page/{PLAN_ID}/history")));
+    assert_eq!(r.status, 200);
+    assert!(
+        r.body.contains(PLAN_FILE),
+        "names the file whose revisions these are"
+    );
+    assert!(
+        r.body.contains(&head[..7]),
+        "the newest save is listed by its short id"
+    );
+    assert!(
+        r.body.contains("BerryWiki Test"),
+        "the author of each revision is named"
+    );
+    assert!(
+        r.body.matches("<li><code>").count() >= 2,
+        "both saves are listed: {}",
+        r.body
+    );
+    no_script(&r.body);
+}
+
+#[test]
+fn history_excludes_a_commit_that_did_not_touch_this_page() {
+    let sb = GitSandbox::create(&fixture_dir());
+    let mut app = synced_app(&sb);
+    save_plan(&mut app, "# Plan\n\nrevised\n");
+    let ours = sb.head(&sb.ours);
+    // A different page's creation also rewrites `_Sidebar.md`, so this commit
+    // is adjacent to the plan page in the tree without touching its file.
+    create_page(&mut app, "Notes");
+    let theirs = sb.head(&sb.ours);
+    assert_ne!(ours, theirs, "the create really did commit");
+
+    let r = handle(&mut app, &Request::get(&format!("/page/{PLAN_ID}/history")));
+    assert_eq!(r.status, 200);
+    assert!(
+        r.body.contains(&ours[..7]),
+        "this page's own save is listed"
+    );
+    assert!(
+        !r.body.contains(&theirs[..7]),
+        "a commit that did not touch this file is not in its history"
+    );
+}
+
+#[test]
+fn history_escapes_a_hostile_author_and_subject() {
+    let sb = GitSandbox::create(&fixture_dir());
+    let mut app = synced_app(&sb);
+    // Author name and commit subject are attacker-writable by anyone who can
+    // push to the wiki, so they are untrusted text on the way to HTML. The
+    // sandbox pins `GIT_AUTHOR_NAME` in the environment for hermeticity, and
+    // the environment beats `-c user.name`, so the author is set with
+    // `--author`, which beats both. git's own ident sanitisation strips `<`
+    // and `>` from a name (`X <y> Z` is recorded as `X y Z`), so a name cannot
+    // carry a script vector; `&` and `"` survive and are what must be escaped.
+    // A subject carries no such restriction, so that is where the script goes.
+    let file = sb.ours.join(PLAN_FILE);
+    let mut source = fs::read_to_string(&file).expect("plan page exists");
+    source.push_str("\nAppended outside BerryWiki.\n");
+    fs::write(&file, source).unwrap();
+    sb.git(&sb.ours, &["add", PLAN_FILE])
+        .expect_success("stage");
+    sb.git(
+        &sb.ours,
+        &[
+            "commit",
+            "--author=A & B \"quoted\" R <hostile@example.invalid>",
+            "-m",
+            "<script>alert(1)</script> pushed by someone else",
+        ],
+    )
+    .expect_success("hostile commit");
+
+    let r = handle(&mut app, &Request::get(&format!("/page/{PLAN_ID}/history")));
+    assert_eq!(r.status, 200);
+    no_script(&r.body);
+    assert!(
+        r.body.contains("&lt;script&gt;"),
+        "the hostile subject is escaped rather than dropped, so the row is \
+         still readable: {}",
+        r.body
+    );
+    assert!(
+        r.body.contains("A &amp; B &quot;quoted&quot; R"),
+        "the history row escapes the author: {}",
+        r.body
+    );
+
+    // The page footer renders the same untrusted author, so it is a second
+    // HTML surface and not a restatement of the assertion above.
+    let r = handle(&mut app, &Request::get(&format!("/page/{PLAN_ID}")));
+    assert_eq!(r.status, 200);
+    no_script(&r.body);
+    let footer = r
+        .body
+        .split("Last edited by ")
+        .nth(1)
+        .expect("the footer names the last editor");
+    assert!(
+        footer.starts_with("A &amp; B &quot;quoted&quot; R"),
+        "the footer escapes the author it was handed: {footer}"
+    );
+}
+#[test]
+fn the_page_footer_names_the_last_editor_and_links_to_history() {
+    let sb = GitSandbox::create(&fixture_dir());
+    let mut app = synced_app(&sb);
+    save_plan(&mut app, "# Plan\n\nrevised\n");
+
+    let r = handle(&mut app, &Request::get(&format!("/page/{PLAN_ID}")));
+    assert_eq!(r.status, 200);
+    assert!(
+        r.body.contains("Last edited by BerryWiki Test"),
+        "the footer names who saved last: {}",
+        r.body
+    );
+    assert!(r.body.contains(&format!("/page/{PLAN_ID}/history")));
+}
+
+#[test]
+fn history_without_a_repository_explains_itself_rather_than_failing() {
+    let sb = GitSandbox::create(&fixture_dir());
+    let mut app = plain_app(&sb);
+    let r = handle(&mut app, &Request::get(&format!("/page/{PLAN_ID}/history")));
+    assert_eq!(r.status, 200, "the route exists without a repository");
+    assert!(r.body.contains("Commit-on-save is off"));
+    assert!(
+        !r.body.contains("<li><code>"),
+        "no revisions are invented when there is no repository"
+    );
+    no_script(&r.body);
 }
