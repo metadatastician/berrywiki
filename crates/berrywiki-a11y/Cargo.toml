@@ -1,0 +1,13 @@
+[package]
+name = "berrywiki-a11y"
+description = "Structural accessibility audit over a rendered BerryWiki HTML document. Pure, dependency-free, and used only as a test gate: it is a dev-dependency of berrywiki-serve and is never linked into a shipped binary."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"

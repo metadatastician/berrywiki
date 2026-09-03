@@ -123,6 +123,32 @@ legible; they will be deleted at the next revision.
 | L
 | No `CHANGELOG.md`. At `0.0.1` with no releases this costs nothing yet; it
   will the moment a version is published.
+
+| H
+| **P4-a11y's stated exit criterion has not been met.** The package's contract
+  in `work-packages.adoc` is "keyboard-only walkthrough + NVDA smoke script as
+  exit criteria". The script exists, `docs/execution/a11y-walkthrough.adoc`, and
+  it has *not been run*: it needs a person at a browser with a screen reader,
+  and the structural gate that did ship cannot stand in for it. What the gate
+  checks and what only the walkthrough can check are separated in
+  link:../decisions/0012-accessibility.adoc[ADR-0012]. Until the walkthrough is
+  executed and its Status section replaced with a dated record, no document may
+  describe BerryWiki as accessible; it may say that fourteen structural rules
+  are enforced on every swept route, which is what is true. Two findings are
+  expected rather than hoped against: label wording that passes the gate whilst
+  being unhelpful aloud, and focus outlines that are legible in light mode and
+  marginal in dark.
+
+| L
+| link:../decisions/0011-attachments.adoc[ADR-0011] justifies the absence of
+  `svg`, `html`, `htm`, `js` and `xml` from the attachment allowlist with the
+  criterion "each executes, or can be made to execute, in a browser" — but
+  `application/pdf` is *on* the allowlist, and Chrome's PDFium executes a
+  sandboxed subset of PDF JavaScript. The criterion as written therefore does
+  not select the list it is offered as justifying. The refusals are still right;
+  the sentence is too broad. Clearing it: one sentence in ADR-0011 §3.2 stating
+  the real criterion, which is same-origin scripting reach rather than execution
+  as such, and naming PDF as the deliberate, sandboxed exception.
 |===
 
 == Repository hygiene
@@ -295,7 +321,7 @@ legible; they will be deleted at the next revision.
   `docs/proofs/invariants.adoc` (INV-1..6, each naming its witnessing tests,
   CI-checked by `scripts/check-invariants-ledger.sh`), and are covered by
   tests only. Tracked as *P5-spark*. Until then, no document may describe any
-  BerryWiki property as "proved"; 259 passing tests are evidence, not proof.
+  BerryWiki property as "proved"; 332 passing tests are evidence, not proof.
 
 |===
 

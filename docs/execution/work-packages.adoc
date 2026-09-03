@@ -230,8 +230,27 @@ sweeps gained `sweep_response`, which branches on the response kind and asserts 
 content-type allowlist held separately in each test module; all four plants
 fired. The attachment-conflict integration test and the absent delete route are
 scheduled in the debt register, not built here. | conflict-flow contact → opus.
-| P4-a11y | sonnet | Keyboard-only walkthrough + NVDA smoke script as exit
-criteria. | —
+| P4-a11y | sonnet | *DONE* — **Done 2026-09-03.** Recorded in
+link:../decisions/0012-accessibility.adoc[ADR-0012]. The structural half is a
+gate: `crates/berrywiki-a11y` is a pure, dev-only crate of fourteen rules that
+rides `sweep_response` in *both* script-free sweeps, so it adds no third route
+list to forget to update. Writing it found a route that was in neither list,
+`GET /page/<id>/delete`, an unswept rendered surface behind two green tests that
+each called themselves "every route"; it is now in the sync list. Four
+exemptions are deliberate and each is bounded by a test that removes the
+exemption's condition and asserts the rule returns. The renderer normalises
+headings by a constant shift so the shallowest authored heading lands at `h2`,
+rather than demoting by one: a page opening `## Section` would otherwise render
+`h1` then `h3` and turn ordinary authoring into a level skip. A source that
+skips a level still skips it, because the pass shifts rather than repairs. The
+shell gained a skip link, an id on `<main>` and a name on `<aside>`; the draft
+dot and the archived state gained visually-hidden text, since colour and shape
+announce nothing; three foreground colours were darkened and the contrast ratios
+are recorded by hand in the ADR. Seven plants fired, one binary at a time. The
+walkthrough half is *not* done and is not claimed:
+link:a11y-walkthrough.adoc[the keyboard and NVDA script] is written and
+**unexecuted**, because it needs a person at a browser and no automated gate
+substitutes for it. | walkthrough execution → owner.
 | P4-backup | sonnet | Backup/export (a dropped spec item — restore it here or
 declare a non-goal). | —
 |===
