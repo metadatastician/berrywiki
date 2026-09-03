@@ -20,6 +20,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
+/// Every sandbox directory name starts with this. `Drop` checks for it before
+/// removing anything, so the prefix is a safety property and not just a name.
+const PREFIX: &str = "berrywiki-git-compat-";
+
+/// Set this to `1` to keep sandboxes on disk after the tests that made them,
+/// for when a failure needs the repository inspected. The path is printed.
+pub const KEEP_ENV: &str = "BERRYWIKI_KEEP_SANDBOX";
+
 /// Output of one git invocation.
 #[derive(Debug)]
 pub struct GitResult {
@@ -41,6 +49,10 @@ impl GitResult {
 }
 
 /// A bare remote plus two clones, all under one scratch directory.
+///
+/// The directory is removed when the value is dropped, so a sandbox lives
+/// exactly as long as the test that owns it. Set `BERRYWIKI_KEEP_SANDBOX=1`
+/// to keep it for inspection; the path is printed on the way out.
 pub struct GitSandbox {
     pub root: PathBuf,
     pub remote: PathBuf,
@@ -53,7 +65,7 @@ impl GitSandbox {
     /// from `seed_dir` (top level only), commit, push, then clone "theirs".
     pub fn create(seed_dir: &Path) -> GitSandbox {
         let root = std::env::temp_dir().join(format!(
-            "berrywiki-git-compat-{}-{}",
+            "{PREFIX}{}-{}",
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::SeqCst)
         ));
@@ -151,5 +163,126 @@ fn git_in(cwd: &Path, args: &[&str]) -> GitResult {
         success: output.status.success(),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    }
+}
+
+/// Whether the sandbox directory should survive the test that made it.
+///
+/// Split out from [`Drop`] so it can be tested without mutating the process
+/// environment, which is racy: a test binary runs its tests on many threads
+/// and `set_var` is visible to all of them at once.
+fn keep_requested(value: Option<&str>) -> bool {
+    matches!(value, Some("1"))
+}
+
+/// True only for a path this crate minted: directly inside the temp directory
+/// and carrying [`PREFIX`].
+///
+/// `GitSandbox::root` is a public field, so nothing in the type system stops a
+/// caller pointing it somewhere real before the value is dropped. This check
+/// is what makes the recursive delete below safe to write at all: anything
+/// that does not look like ours is left exactly where it is.
+fn is_our_sandbox(path: &Path) -> bool {
+    let temp = std::env::temp_dir();
+    path.parent() == Some(temp.as_path())
+        && path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with(PREFIX))
+}
+
+impl Drop for GitSandbox {
+    /// Remove the whole sandbox.
+    ///
+    /// Every sandbox is a bare repository plus two clones, so it is three git
+    /// object stores' worth of small files. A test binary makes one per test;
+    /// left behind they accumulate until the temp filesystem runs out of
+    /// *inodes*, which `df -h` does not show and which then surfaces as
+    /// unrelated tests failing to write.
+    fn drop(&mut self) {
+        if keep_requested(std::env::var(KEEP_ENV).ok().as_deref()) {
+            eprintln!("{KEEP_ENV}=1: kept {}", self.root.display());
+            return;
+        }
+        if !is_our_sandbox(&self.root) {
+            return;
+        }
+        // Errors are swallowed deliberately. A panic here would fire during
+        // unwinding from the test failure that is being reported, which aborts
+        // the process and loses the failure. A sandbox that cannot be removed
+        // is the lesser problem, and the next run's name is different anyway.
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/test-wiki")
+    }
+
+    #[test]
+    fn dropping_a_sandbox_removes_its_directory() {
+        // This test is about the very flag a developer sets when they are
+        // debugging some *other* failure, so it asserts whichever branch it
+        // was actually run in rather than failing in their face.
+        let keep = keep_requested(std::env::var(KEEP_ENV).ok().as_deref());
+
+        let root = {
+            let sb = GitSandbox::create(&fixture_dir());
+            assert!(sb.root.is_dir(), "the sandbox was not created");
+            sb.root.clone()
+        };
+
+        if keep {
+            assert!(
+                root.exists(),
+                "{KEEP_ENV} was set and the sandbox was removed anyway: {}",
+                root.display()
+            );
+            // Kept on request, but this one was made by a test, so it is this
+            // test's to clear up.
+            let _ = fs::remove_dir_all(&root);
+        } else {
+            assert!(
+                !root.exists(),
+                "the sandbox outlived the value that owned it: {}",
+                root.display()
+            );
+        }
+    }
+
+    #[test]
+    fn only_paths_this_crate_minted_are_removable() {
+        let temp = std::env::temp_dir();
+        assert!(is_our_sandbox(&temp.join(format!("{PREFIX}1-0"))));
+
+        // The cases that matter are the ones a recursive delete must refuse.
+        assert!(!is_our_sandbox(&temp), "the temp directory itself");
+        assert!(
+            !is_our_sandbox(&temp.join("something-else")),
+            "wrong prefix"
+        );
+        assert!(
+            !is_our_sandbox(&temp.join(format!("{PREFIX}1-0")).join("ours")),
+            "a clone inside a sandbox is not itself a sandbox"
+        );
+        assert!(
+            !is_our_sandbox(Path::new("/home/someone/berrywiki-git-compat-1-0")),
+            "the prefix alone is not enough; it must be in the temp directory"
+        );
+    }
+
+    #[test]
+    fn only_the_exact_value_one_keeps_a_sandbox() {
+        assert!(keep_requested(Some("1")));
+        assert!(!keep_requested(None));
+        assert!(!keep_requested(Some("")));
+        assert!(!keep_requested(Some("0")));
+        // "true" and "yes" are deliberately not accepted: one spelling means
+        // the flag either worked or plainly did not, with no near-miss.
+        assert!(!keep_requested(Some("true")));
     }
 }
