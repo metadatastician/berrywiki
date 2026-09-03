@@ -232,10 +232,11 @@ ADR before or in the slice that implements them.
 | n/a.
 
 | Generated-JS-glue doctrine question
-| *Parked, not ruled.* The SSR MVP ships zero JS of any provenance, so
-  nothing depends on the answer. A formal user ruling (*ADR required,
-  ADR-0007*) is the gate for starting the post-MVP AffineScript-era
-  enhancement layer (drag-and-drop, inline autocomplete, live preview).
+| *Ruled 2026-09-03 (ADR-0007): generated-only.* The SSR MVP ships zero JS of
+  any provenance, so nothing shipped depended on the answer. The gate for the
+  post-MVP AffineScript-era enhancement layer (drag-and-drop, inline
+  autocomplete, live preview) is now the provenance manifest and its
+  served-response test, not the ruling.
 | Resolves the contradiction between the risk-first design (build a
   timeboxed wasm spike pre-MVP to force the ruling) and the base design
   (park it): the spike is *unbuildable on the local toolchain* (no rustup →
@@ -583,9 +584,9 @@ the owner supplies, and MVP-declare may not treat it as passed before then.
 * Full CI green including the manual-dispatch live job.
 * *MVP declared:* every checklist item verified against real wikis, the
   compatibility report fully evidence-backed. Post-MVP backlog recorded:
-  Zim import, AffineScript enhancement layer (gated on ADR-0007), FTS5 at
-  scale, gitoxide re-evaluation, SPARK proofs (see <<spark>>), dual-input
-  DnD contract.
+  Zim import, AffineScript enhancement layer (ADR-0007 ruled generated-only;
+  gated on its provenance manifest), FTS5 at scale, gitoxide re-evaluation,
+  SPARK proofs (see <<spark>>), dual-input DnD contract.
 
 == Risk register
 
@@ -609,8 +610,8 @@ the owner supplies, and MVP-declare may not treat it as passed before then.
 | Medium
 | MVP checklist deliberately mapped to form-based equivalents; drag-drop and
   inline enhancement explicitly reserved as the first AffineScript-era
-  deliverables over the unchanged HTTP API; ADR-0007 ruling required before
-  any script of any provenance ships
+  deliverables over the unchanged HTTP API; ADR-0007 is ruled generated-only,
+  so a provenance manifest and its gate are required before any script ships
 | User friction reports during the Phase 3 daily-use week
 
 | Link rewriting on move corrupts content (the classic wiki-tool failure)
@@ -860,9 +861,11 @@ not scheduled. Full-engine SPARK translation is explicitly *not* planned.
 * v1 spec non-goals, reaffirmed: realtime collaboration, mobile-first UI,
   plugins, end-to-end encryption, self-hosted Gollum, graph visualisation,
   AI content generation.
-* No client-side script of any provenance (handwritten, generated, or glue)
-  before the ADR-0007 doctrine ruling — enforced by the no-`<script>` CI
-  test.
+* No client-side script is served. ADR-0007 ruled generated script
+  permissible on 2026-09-03; hand-written script stays banned by ADR-0003, and
+  nothing generated ships before the provenance manifest and its
+  served-response gate exist — enforced meanwhile by the unchanged
+  no-`<script>` CI test.
 * No TUI as a product surface (the `berrywiki check`/`sidebar`/`spike` CLI
   covers terminal workflows).
 * No wasm toolchain in the MVP; no Leptos/Dioxus/Yew.
@@ -881,8 +884,10 @@ not scheduled. Full-engine SPARK translation is explicitly *not* planned.
 . *Generated-JS-glue doctrine (blocking the post-MVP enhancement layer, not
   the MVP):* is wasm-bindgen-style compiler-generated JS glue acceptable
   under the estate JS ban, or must the AffineScript→typed-wasm layer avoid
-  it entirely? Parked by the SSR choice; requires an explicit user ruling
-  recorded as ADR-0007 before any enhancement work starts.
+  it entirely? *Ruled 2026-09-03 as ADR-0007: generated-only.* Compiler-emitted
+  glue is acceptable, from a named toolchain, reproducible in CI and listed in
+  a provenance manifest. No enhancement work ships until that manifest and its
+  served-response gate exist.
 . *Sidebar depth (unverified):* how deep does GitHub's rendered sidebar
   honour nested lists in `_Sidebar.md`? Spike part A answers; the generator
   may need a depth clamp + "more" pages.
@@ -936,9 +941,10 @@ slice is executed.
   exit criterion "an unsaved draft survives a killed process" and the
   never-lose-a-keystroke promise cannot hold as written. Options: explicit
   Save/Save-draft actions with clear unsaved-state indication; accept that
-  drafts are server-side per submit; or reopen the client-script question via
-  ADR-0007 *before* promising autosave. Do not ship a trust-critical feature
-  that cannot work.
+  drafts are server-side per submit; or an idle-autosave enhancement once
+  ADR-0007's provenance gate exists (that ADR was ruled generated-only on
+  2026-09-03, but the gate it requires is not built). Do not ship a
+  trust-critical feature that cannot work.
 . *Non-leaf move/rename is a subtree cascade.* Under ADR-0001 flat
   `Parent--Child.md` filenames, moving or renaming a page changes the filename
   of *every descendant*, not just the page. The move planner design, its test

@@ -16,9 +16,11 @@ everything else:
 Concretely, these are treated as bugs rather than preferences. A change that
 violates one will not be merged, however useful it otherwise is:
 
-* **No JavaScript or TypeScript, hand-written or generated** (ADR-0003). The UI
-  is server-rendered; a test asserts no `<script>` element appears in any
-  response.
+* **No hand-written JavaScript or TypeScript** (ADR-0003). The UI is
+  server-rendered; a test asserts no `<script>` element appears in any
+  response. *Generated* script is permitted in principle by ADR-0007 (ruled
+  2026-09-03) and forbidden in practice until a provenance manifest and its
+  served-response gate exist. Neither does, so the no-`<script>` test stands.
 * **App state never enters the wiki clone** (ADR-0008). Drafts, journals and
   indexes live under the XDG state home, so a plain-git user cannot commit them.
 * **Hierarchy lives in metadata, never in filenames** (ADR-0001).

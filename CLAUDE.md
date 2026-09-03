@@ -12,8 +12,12 @@ repo. **The wiki must stay fully usable without BerryWiki.**
   *Scope:* the ban covers everything **shipped or served** — no `<script>` in
   any response, no JS/TS in any crate. It does not cover local agent tooling
   (`.claude/workflows/*.js` is a Claude Code harness, never distributed).
-  Whether *generated* client script may ever ship is ADR-0007, **unruled** —
-  do not assume either answer.
+  Whether *generated* client script may ever ship is ADR-0007, **RULED
+  2026-09-03: generated-only.** Script may ship only when emitted by a named
+  toolchain from typed sources held in this repository, never hand-edited,
+  reproducible byte-for-byte in CI, and listed in a provenance manifest.
+  Nothing ships until that manifest and its served-response gate exist; the
+  no-`<script>` test stands unchanged today. See ADR-0007 for the gate.
 - **Native GitHub wiki reader must work.** Flat `--`-separated filenames
   (ADR-0001, provisional); tree lives in `<!-- berrywiki -->` metadata +
   generated `_Sidebar.md`, never inferred from filenames.

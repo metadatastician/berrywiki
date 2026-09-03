@@ -3,14 +3,18 @@
 
 == Status
 
-*Open — awaiting an owner ruling.* Not accepted, not rejected.
+*Accepted* (2026-09-03). Rules *option 2*, generated-only with provenance
+constraints. This is the owner's ruling on *D-1*.
 
-This ADR exists because eight places across the codebase already defer to
-"ADR-0007" as the gate on post-MVP UI work, while no such document existed.
-A dangling reference to a decision is worse than an open one: a reader cannot
-tell whether the rule was decided and lost, or never made. This file records
-*the question and its options* so the gate is visible. **It does not decide
-anything.** Nobody should read a preference into the ordering below.
+This ADR was filed open because eight places across the codebase already
+deferred to "ADR-0007" as the gate on post-MVP UI work while no such document
+existed. That gap is now closed in the other direction: the gate is ruled, and
+every one of those eight references means something.
+
+*Nothing shipped changes today.* The ruling activates a rule; it does not
+weaken one. The existing no-`<script>` test stays in place byte-for-byte until
+a first generated artefact actually lands, and the successor gate in
+<<the-successor-gate>> is what must exist before it may be relaxed.
 
 == Context
 
@@ -20,14 +24,14 @@ zero-`<script>` server-rendered UI, and notes that the generated-JS-glue
 question is "deliberately parked, not answered", since the SSR MVP depends on
 no ruling either way.
 
-That parking is now load-bearing. Three separate threads run into it:
+That parking was load-bearing. Three separate threads ran into it:
 
 * *The enhancement layer.* Anything richer than plain forms — inline
   autocomplete, drag-and-drop tree reordering, live preview without a round
   trip — needs code running in the browser. The intended answer is
   AffineScript compiled to typed-wasm, but wasm still needs a small JS loader
   in every current browser. Whether that loader counts as "JavaScript" under
-  ADR-0003 is exactly the unruled question.
+  ADR-0003 is exactly the question that was unruled.
 * *Idle autosave.* link:0006-draft-model.adoc[ADR-0006] replaced silent
   autosave with explicit Save/Save-draft precisely because a zero-script page
   cannot detect idleness. It records that if ADR-0007 permitted generated
@@ -49,6 +53,8 @@ acceptable build product — the same argument as machine code emitted by rustc.
 
 == Options
 
+_Recorded as they were framed before the ruling. Option 2 is the one taken._
+
 . *Total ban, including generated script.* The product is script-free
   forever; the enhancement layer is limited to what plain HTML can express.
   Simplest to state and to enforce (the existing gate stands unchanged).
@@ -67,21 +73,126 @@ acceptable build product — the same argument as machine code emitted by rustc.
   AffineScript path with the smallest possible surface. Cost: needs a precise
   definition of "minimal", or it becomes option 2 by drift.
 
-== Consequences of leaving this open
+== Decision
 
-Deliberately tolerable, and this is why the ADR is filed rather than forced:
+*Option 2.* BerryWiki may ship JavaScript that no human wrote, and only that.
+Hand-written JavaScript and TypeScript remain banned outright by ADR-0003,
+which this ruling does not touch.
 
-* Nothing currently shipped depends on the answer. The SSR UI serves no script
-  of any provenance, so the MVP is unaffected.
-* The post-MVP enhancement layer (BerryBlocks-style rich editing, graph views,
-  inline autocomplete) **cannot start** until this is ruled. That is the
-  intended effect of a gate, not an accident.
-* Until it is ruled, no code, comment or document may assume either answer.
-  Agent instructions in `CLAUDE.md` and `AGENTS.md` say so explicitly.
+A script artefact may ship if and only if all five hold:
+
+. It was *emitted by a named toolchain* from typed sources held in this
+  repository. The toolchain is named, with a pinned version, in the manifest.
+. It was *never hand-edited* after emission.
+. It is *reproducible from those sources in CI*, byte-for-byte.
+. It is *listed in the provenance manifest* with the hash CI reproduces.
+. It is *served from a route the manifest covers*.
+
+Option 3 is *subsumed, not rejected.* A wasm bootstrap loader is permitted
+under this ruling on exactly the same terms as any other artefact: it must
+come from a named toolchain and appear in the manifest. That is a stricter
+test than option 3's size bound, and it needs no definition of "minimal",
+which is the part of option 3 that would have drifted.
+
+[[the-successor-gate]]
+=== The successor gate
+
+The ADR's own statement of option 2 warns that "a weak version of it would be
+a fake gate". That warning is the reason this section exists, and it is
+binding: *the gate is part of the ruling, not a later detail.*
+
+*The manifest.* A checked-in file recording, per artefact:
+
+[cols="1,3"]
+|===
+| Field | Meaning
+
+| artefact path
+| Where the emitted file lives in the repository or the build output.
+
+| source paths
+| Every typed source file it was emitted from. All of them, in this repository.
+
+| toolchain
+| Name and pinned version of the compiler that emitted it.
+
+| hash
+| The hash of the emitted bytes, as CI reproduces them.
+
+| routes
+| Which served responses may reference it.
+|===
+
+*The CI check.* Rebuild every listed artefact from its listed sources with the
+pinned toolchain and assert the emitted bytes hash to the recorded value. A
+mismatch fails. A hand-edit is a mismatch, which is what makes constraint 2
+enforceable rather than aspirational.
+
+*The served-response test.* The rule that replaces "no `<script>` element" is:
+
+> the set of script hashes referenced by any response, across every route in
+> `route()`, is a subset of the manifest's hashes.
+
+Not "there is a manifest". Not "the manifest is non-empty". A subset test over
+what is actually served, enumerated route by route, in the same shape as the
+existing script-free sweep. A route that serves an unlisted script fails; a
+route added without being considered fails, because the enumeration is over
+`route()` and not over a list someone maintains by hand.
+
+*What would make this a fake gate,* stated so it can be recognised:
+
+* Checking that a manifest file exists, rather than comparing hashes.
+* Rebuilding in CI but not comparing the result to the recorded hash.
+* Enumerating a hand-maintained route list instead of `route()`, so a new
+  route is silently exempt.
+* Allowing an artefact whose sources are fetched rather than held here, which
+  makes constraint 1 unverifiable.
+* Relaxing the existing no-`<script>` test before the subset test is green on
+  a real artefact.
+
+*Order of operations.* The existing test stays exactly as it is until the
+first artefact lands. The manifest, the rebuild check and the subset test ship
+*with* that artefact, in the same change, or the artefact does not ship. There
+is never a window in which neither gate is running.
+
+=== What this does not change
+
+* *The Solo contract is untouched.* Its assertion that no response contains
+  `<script>`, `Set-Cookie` or `WWW-Authenticate` stands as written. A package
+  proposing to serve generated script must therefore either fall outside the
+  Solo profile or come with an explicit re-ruling of that assertion. Nothing
+  in this ADR authorises quietly editing it.
+* *ADR-0003 is untouched.* Hand-written JavaScript and TypeScript are still
+  banned in every crate and every response.
+* *No existing crate gains a dependency, a build step or a script tag* as a
+  consequence of this ruling.
+
+=== First consumer
+
+`P6-blocks-hydrate`, and it is *design-only*: mapping the host-neutral
+enhancement contract onto typed source, with the conformance fixtures as its
+acceptance criteria. No hydration code ships until the manifest, the rebuild
+check and the subset test exist.
+
+== Consequences
+
+* The post-MVP enhancement layer is unblocked as a design activity. It is
+  *not* unblocked as a shipping activity until the successor gate exists.
+* The zero-JavaScript property becomes a *profile guarantee* rather than a
+  property of the product as a whole. Every document that describes BerryWiki
+  as script-free must now say which profile it means.
+* The honest cost is real and was accepted with the ruling: verifying "no
+  human wrote this" is a reproducibility claim, and reproducibility claims
+  rot quietly. The rebuild check is what keeps it from rotting silently.
+* `CLAUDE.md`, `AGENTS.md`, `ARCHITECTURE.md`, `docs/architecture/overview.adoc`
+  and the debt register all asserted that this ADR was unruled. Those
+  assertions are now wrong rather than merely stale, and are corrected in the
+  same change as this ruling.
 
 == References
 
 * link:0003-implementation-language.adoc[ADR-0003] — implementation language
-* link:0005-ui-technology.adoc[ADR-0005] — UI technology; parks this question
-* link:0006-draft-model.adoc[ADR-0006] — draft model; would extend if ruled
+* link:0005-ui-technology.adoc[ADR-0005] — UI technology; parked this question
+* link:0006-draft-model.adoc[ADR-0006] — draft model; idle autosave now design-permitted
+* link:0016-deployment-model.adoc[ADR-0016] — ruled the same day; unrelated axis
 * `docs/architecture/implementation-plan.adoc` — gates enhancement work here

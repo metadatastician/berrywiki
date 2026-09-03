@@ -14,8 +14,12 @@ repo. **The wiki must stay fully usable without BerryWiki.**
 - **No TypeScript or hand-written JavaScript** (ADR-0003). The ban covers
   everything shipped or served: no `<script>` in any response, no JS/TS in any
   crate. Local agent tooling (`.claude/workflows/*.js`) is out of scope.
-  Whether *generated* client script may ever ship is **ADR-0007, unruled** —
-  do not assume either answer, and do not write code that presumes one.
+  Whether *generated* client script may ever ship is **ADR-0007, RULED
+  2026-09-03: generated-only** — emitted by a named toolchain from typed
+  sources held here, never hand-edited, reproducible in CI, listed in a
+  provenance manifest. Do not write hydration code: the ruling permits it in
+  principle and forbids it in practice until the manifest and the
+  served-response gate exist. The no-`<script>` test is unchanged.
 - **Hierarchy lives in metadata, never in filenames** (ADR-0001). Flat
   `--`-separated filenames are derived from titles; the tree comes from the
   `<!-- berrywiki -->` block and the generated `_Sidebar.md`.

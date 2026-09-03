@@ -64,10 +64,11 @@ The MVP UI is a *zero-JavaScript, server-side-rendered web application*:
 * The `berrywiki` CLI (`check`, `sidebar`, `spike`, later `reindex`,
   `import`) covers terminal workflows; it is tooling, not a second UI.
 
-The generated-JS-glue doctrine question is deliberately *parked, not
-answered*: the SSR MVP ships no JS of any provenance, so nothing depends on
-the ruling. A formal user ruling (to be recorded as ADR-0007) is required
-before the post-MVP enhancement layer starts.
+The generated-JS-glue doctrine question was deliberately *parked* here: the
+SSR MVP ships no JS of any provenance, so nothing depended on the ruling. It
+was ruled on 2026-09-03 in link:0007-client-script-doctrine.adoc[ADR-0007] as
+*generated-only*, under a provenance manifest that does not exist yet. Nothing
+in this ADR changes as a result.
 
 [NOTE]
 .Amendment (2026-07-11): server library
@@ -165,9 +166,11 @@ spike pre-MVP" (rejected — the spike is unbuildable on the local toolchain,
 and a ruling is a user decision, not an artifact) to "park it" (adopted).
 This ADR takes no position on the ruling itself. It records only that: (1)
 the MVP is deliberately structured so the answer does not matter yet; (2) an
-explicit user ruling, recorded as ADR-0007 with whatever evidence the user
-wants, is a *hard gate* on starting any client-script work, including
-AffineScript-generated or wasm-bindgen-generated output.
+  explicit user ruling, recorded as ADR-0007, is a *hard gate* on starting any
+  client-script work, including AffineScript-generated or
+  wasm-bindgen-generated output. That ruling was given on 2026-09-03:
+  generated-only, under a provenance manifest. The gate now sits at the
+  manifest, not at the ruling.
 
 == Consequences
 
@@ -194,7 +197,8 @@ AffineScript-generated or wasm-bindgen-generated output.
   the AffineScript enhancement layer, not silent losses.
 * *AffineScript migration seam:* all logic lives server-side behind HTTP
   endpoints; maud templates are thin and dumb. When AffineScript→typed-wasm
-  matures (and ADR-0007 is ruled), it either progressively enhances the
+  matures (ADR-0007 is ruled generated-only, so this is permitted once its
+  provenance manifest exists), it either progressively enhances the
   served pages (drag-and-drop via the dual-input-one-path contract, inline
   autocomplete, live preview) or replaces the front end wholesale — in both
   cases against the unchanged HTTP API, touching zero engine, store, git,
@@ -208,9 +212,10 @@ AffineScript-generated or wasm-bindgen-generated output.
 [#revisit]
 == What evidence would trigger revisiting this decision
 
-* *ADR-0007 is ruled* (either way) on generated JS glue — the enhancement
-  layer's shape follows the ruling; a rejection also permanently forecloses
-  option (b) as a fallback.
+* *ADR-0007 is ruled* — **this trigger fired on 2026-09-03**: generated JS
+  glue is permitted, from a named toolchain and under a provenance manifest.
+  Option (b) is therefore not foreclosed. What remains is building the gate,
+  not obtaining the ruling.
 * *AffineScript reaches base-language completion* with a usable typed-wasm
   (or Deno-ESM) target — starts the enhancement/replacement work on the
   existing HTTP API.

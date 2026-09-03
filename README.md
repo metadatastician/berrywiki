@@ -161,8 +161,10 @@ stops being part of the tree. That is the point.
 Eleven crates, layered so the parts that must be provably correct have no I/O
 to be wrong about — see [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-* **Engine:** Rust. No JavaScript or TypeScript, hand-written or generated
-  (ADR-0003); the UI is server-rendered and script-free by test.
+* **Engine:** Rust. No hand-written JavaScript or TypeScript (ADR-0003); the UI
+  is server-rendered and script-free by test. ADR-0007 was ruled on 2026-09-03:
+  *generated* script may ship, but only from a named toolchain, reproducibly,
+  and listed in a provenance manifest. None exists, so nothing is served.
 * **`berrywiki-serve`** has no third-party dependencies at all — a hand-rolled
   `std::net` server, no async runtime, no web framework.
 * **Docs:** AsciiDoc (`.adoc`) for technical docs and ADRs; Markdown (`.md`) for
