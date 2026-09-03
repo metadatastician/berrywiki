@@ -697,6 +697,8 @@ fn unknown_methods_are_405() {
         path: format!("/page/{PLAN_ID}"),
         query: String::new(),
         body: String::new(),
+        bytes: Vec::new(),
+        content_type: String::new(),
     };
     assert_eq!(handle(&mut app, &req).status, 405);
 }

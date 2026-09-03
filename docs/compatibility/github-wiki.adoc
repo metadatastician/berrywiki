@@ -75,7 +75,11 @@ Each row below is a concrete test to run against a disposable
 | Do `[[Page#heading]]` anchor links work? | ❓ | 🟡 Partial.
 | Do links with spaces / `.md` / no `.md` all resolve? | ❓ | 🟡 Mixed; needs the matrix run.
 | How do case-only renames behave on GitHub's store? | ❓ | 🟡 Risky on case-insensitive clients.
-| How should attachments be linked so they survive sync? | ❓ | 📌 Page-id-keyed `assets/<id>/…` (ADR pending).
+| How should attachments be linked so they survive sync? | 📌 | Settled by link:../decisions/0011-attachments.adoc[ADR-0011]: page-id-keyed `assets/<page-id>/<filename>`, authored as an ordinary relative Markdown link and anchored at the root only at render time.
+| Does a relative `assets/<page-id>/<file>.png` link render as an image in the native wiki reader? | ❓ | 🟡 Yes — the wiki repo is an ordinary git repo and the path is an ordinary relative path. This is the assumption the whole attachment layout rests on; if it is refuted, ADR-0011's layout section is reopened, not merely amended.
+| Does GitHub enforce a size limit on a `.wiki.git` repository, and what is the failure shape when it is hit? | ❓ | 🟡 A limit exists and a push over it is rejected with a server-side message. BerryWiki's 1 MiB per-file cap bounds the rate of growth, never the total.
+| Does Git LFS work on a `.wiki.git` remote at all? | ❓ | 🟡 No. If it does, it is still not adopted: an LFS pointer file is unreadable in the native reader, which the locked constraints forbid.
+| Is an attachment inside `assets/` reachable by URL from the wiki's own web UI? | ❓ | 🟡 Only through the repository's blob view, not as a bare asset URL. Relevant to §3.8: a read lock is enforceable only where BerryWiki is the read path.
 | How does `_Sidebar.md` behave / is it honoured? | ❓ | 🟡 Honoured as the sidebar.
 | How do concurrent pushes fail (non-fast-forward)? | ❓ | 🟡 Rejected; must fetch-before-push.
 | Does the default wiki branch have special behaviour? | ❓ | 🟡 `master` historically; confirm.
@@ -117,7 +121,9 @@ Source remains canonical regardless; the preview is advisory.
   GitHub-compatible approximation; confirm edge cases with Unicode).
 * Whether `_Sidebar.md` supports nested lists in the rendered sidebar to the
   depth we generate.
-* Attachment path resolution relative to page location after sync.
+* Whether a relative `assets/<page-id>/<file>` link renders in the native reader.
+  Recorded as a spike row above because it is the assumption
+  link:../decisions/0011-attachments.adoc[ADR-0011] rests on, not a loose end.
 
 == Recommendations (provisional, pending the spike)
 

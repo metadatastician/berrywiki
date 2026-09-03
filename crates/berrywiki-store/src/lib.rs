@@ -168,6 +168,17 @@ pub trait WikiStore {
     fn add_attachment(&mut self, page_id: &str, filename: &str, bytes: &[u8])
         -> Result<Attachment>;
 
+    /// List a page's attachments, sorted by filename.
+    ///
+    /// A page with no `assets/<page-id>/` directory has no attachments; that
+    /// is an empty list, not an error. Entries whose names would not survive
+    /// [`validate_component`](crate::paths::validate_component) are skipped
+    /// rather than reported, so a file planted by hand cannot be served.
+    fn attachments(&self, page_id: &str) -> Result<Vec<Attachment>>;
+
+    /// Read one attachment's bytes.
+    fn read_attachment(&self, page_id: &str, filename: &str) -> Result<Vec<u8>>;
+
     /// Regenerate `_Sidebar.md`. Returns `true` when the file was written,
     /// `false` when the existing content was already up to date.
     fn regenerate_sidebar(&mut self) -> Result<bool>;

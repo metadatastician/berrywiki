@@ -126,6 +126,79 @@ fn no_script(html: &str) {
     assert!(!lower.contains(" onclick="), "no inline handlers");
 }
 
+/// Assert a response carries no script, choosing the gate that can actually
+/// fire. `no_script` reads `Response::body`, which is empty on a bytes
+/// response, so running it over an asset would sweep nothing whilst passing.
+/// A binary route is gated on its content type instead: the type is chosen
+/// from the filename extension by a fixed table, so if it is on this list the
+/// browser cannot be talked into executing the payload. `svg` and `html` are
+/// absent deliberately; both execute a `<script>` inside them.
+fn sweep_response(r: &Response, target: &str) {
+    match &r.bytes {
+        None => no_script(&r.body),
+        Some(_) => {
+            assert!(
+                ALLOWED_CONTENT_TYPES.contains(&r.content_type),
+                "{target} served bytes as {}, which is not in the allowlist",
+                r.content_type
+            );
+            assert!(
+                !r.content_type.contains("html") && !r.content_type.contains("svg"),
+                "{target} served bytes as an executable type: {}",
+                r.content_type
+            );
+        }
+    }
+}
+
+/// Hand-written on purpose rather than read from `berrywiki_serve`'s table:
+/// widening the served set must not widen the gate in the same edit.
+const ALLOWED_CONTENT_TYPES: &[&str] = &[
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "application/pdf",
+    "text/plain; charset=utf-8",
+    "text/csv; charset=utf-8",
+];
+
+/// A minimal `multipart/form-data` body carrying one file part, built by hand
+/// because the server's parser is hand-rolled and the tests must exercise the
+/// wire format rather than a shared helper that could drift with it.
+fn multipart(filename: &str, bytes: &[u8]) -> (String, Vec<u8>) {
+    let boundary = "----berrywikitestboundary";
+    let mut body = Vec::new();
+    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(
+        format!("Content-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n")
+            .as_bytes(),
+    );
+    body.extend_from_slice(b"Content-Type: application/octet-stream\r\n\r\n");
+    body.extend_from_slice(bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    (format!("multipart/form-data; boundary={boundary}"), body)
+}
+
+/// A 1x1 PNG: the smallest payload whose bytes must survive the round trip
+/// unchanged, so a truncating or re-encoding parser is visible.
+const PNG: &[u8] = &[
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+    0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+    0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+    0x42, 0x60, 0x82,
+];
+
+/// Upload one attachment to a page through the attach form.
+fn upload(app: &mut App, page: &str, filename: &str, bytes: &[u8]) -> Response {
+    let (content_type, body) = multipart(filename, bytes);
+    handle(
+        app,
+        &Request::post_bytes(&format!("/page/{page}/attach"), &content_type, body),
+    )
+}
+
 /// Save new text to the plan page through the editor form.
 fn save_plan(app: &mut App, text: &str) -> Response {
     let edit = handle(app, &Request::get(&format!("/page/{PLAN_ID}/edit")));
@@ -448,6 +521,11 @@ fn detached_head_refuses_the_save_and_keeps_the_text() {
 fn every_synced_route_is_script_free() {
     let sb = GitSandbox::create(&fixture_dir());
     let mut app = synced_app(&sb);
+    // `GitSandbox::create` seeds files, not directories, so the fixture's
+    // `assets/` tree does not reach this clone. The asset route therefore has
+    // nothing to serve until this test puts something there itself, and an
+    // unswept asset route is exactly the hole this sweep exists to close.
+    assert_eq!(upload(&mut app, PLAN_ID, "berry.png", PNG).status, 303);
     for target in [
         "/",
         "/changes",
@@ -473,13 +551,18 @@ fn every_synced_route_is_script_free() {
         "/search?tag=%22%3E%3Cscript%3Ealert(1)%3C/script%3E",
         // P4-history.
         &format!("/page/{PLAN_ID}/history"),
+        // P4-attach. The asset route is the first that answers with bytes
+        // rather than HTML, which is why the assertion below is
+        // `sweep_response` and not `no_script`.
+        &format!("/page/{PLAN_ID}/attach"),
+        &format!("/assets/{PLAN_ID}/berry.png"),
     ] {
         let r = handle(&mut app, &Request::get(target));
         // A 404 body has no `<script` either, so `status < 500` let a route that
         // had quietly stopped existing pass this sweep whilst proving nothing.
         // Every target below is a route that must render, so pin it to 200.
         assert_eq!(r.status, 200, "{target}");
-        no_script(&r.body);
+        sweep_response(&r, target);
     }
 }
 

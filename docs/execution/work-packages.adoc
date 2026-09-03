@@ -211,9 +211,25 @@ path and never a fragment of the URL, and every page carries a last-edited
 footer naming the author and date. A page that was moved has a history that ends
 at the move; the page says so rather than implying otherwise. | git contact →
 opus.
-| P4-attach | sonnet | Attachment upload UI over the store's id-keyed dirs;
-schedule the missing attachment-conflict integration test. | conflict-flow
-contact → opus.
+| P4-attach | sonnet | *DONE* — **Done 2026-09-03.** Recorded in
+link:../decisions/0011-attachments.adoc[ADR-0011]. An attachment lives at
+`assets/<page-id>/<filename>`, linked from the page by an ordinary relative
+Markdown link that the native reader resolves; only the emitted href is anchored
+at the root, never the Markdown on disk. `multipart/form-data` is parsed by hand
+because the workspace keeps one third-party crate. The served content type comes
+from a nine-extension allowlist keyed on the filename, never from the upload's
+declared type and never sniffed; `svg`, `html`, `htm`, `js` and `xml` are absent
+on purpose, because a bytes response is invisible to `no_script`. Two size caps,
+1 MiB on the file and 8 KiB of envelope headroom on the whole body, so the
+file-sized check can actually fire. Filenames are validated by the store's own
+`validate_component`, and `read_attachment` now applies it on the way out too:
+`resolve` alone would have read `a/b.pdf` as two valid components, a file
+`add_attachment` could never have written. Duplicates are a 409, never an
+overwrite; the asset route answers one undifferentiated 404. Both script-free
+sweeps gained `sweep_response`, which branches on the response kind and asserts a
+content-type allowlist held separately in each test module; all four plants
+fired. The attachment-conflict integration test and the absent delete route are
+scheduled in the debt register, not built here. | conflict-flow contact → opus.
 | P4-a11y | sonnet | Keyboard-only walkthrough + NVDA smoke script as exit
 criteria. | —
 | P4-backup | sonnet | Backup/export (a dropped spec item — restore it here or
