@@ -81,10 +81,16 @@ The advice matters more than the refusal. "This is a password-protected
 notebook; open it in CherryTree and save a copy as `.ctd`" is actionable.
 A parse error 4 000 bytes into a binary file is not.
 
-`.ctb` and `.ctx` are the SQLite formats. Reading them means a SQLite
-dependency in a workspace whose only third-party crate is comrak, which is
-*D-11*, an owner decision. Until it is ruled, the refusal names the conversion
-path rather than pretending the format is unsupported forever.
+`.ctb` and `.ctx` are the SQLite formats. *D-11* asked whether reading them
+justifies a SQLite dependency in a workspace whose only third-party crate is
+comrak; the answer, in
+link:0015-import-formats-and-dependency-doctrine.adoc[ADR-0015], is that it does
+not, because `sqlite3` is a *binary* and shelling out to it costs the dependency
+tree nothing. Whether that actually reaches `.ctb`'s content is an open
+hypothesis there, not a plan. `.ctx` stays refused whatever the answer: it is a
+7-zip *encrypted* database, so no reader route exists that does not involve a
+password. The refusal therefore keeps naming the conversion path rather than
+pretending the format is unsupported forever.
 
 === A dry run is the default
 
@@ -234,7 +240,9 @@ recorded here so a future bulk writer knows where to look.
 
 == Deferred
 
-* `.ctb` and `.ctx`, pending *D-11*.
+* `.ctb`, pending the schema investigation in
+  link:0015-import-formats-and-dependency-doctrine.adoc[ADR-0015] (`P6-import-ctb-spike`).
+  `.ctx` is refused permanently, not deferred: it is encrypted.
 * Zim import (`P5-import-zim`), which reuses the model, the writer and every
   refusal above; only the reader is new.
 * An `/import` route in serve, per <<noroute>>.

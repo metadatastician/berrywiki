@@ -565,6 +565,15 @@ reproducibly installable, complete hardening, and formally declare the MVP.
 * A real CherryTree notebook imports cleanly: dry-run report reviewed, apply
   produces a browsable, GitHub-renderable tree in one commit, source file
   hash unchanged.
++
+NOTE: *This criterion currently has no available input.* A survey of this
+machine on 2026-09-03 found no CherryTree notebook of any format: the only
+`.ctx` files present are SPARK/Coq proof counterexamples under
+`~/.alire/`, and no `.ctd` or `.ctb` exists at all. The importer's 86 tests
+run against synthetic fixtures, which prove the conversion rules but cannot
+prove that a notebook grown over years in real use parses. The criterion is
+*outstanding*, not met and not waived; it is satisfied by importing a notebook
+the owner supplies, and MVP-declare may not treat it as passed before then.
 * `guix shell -f guix.scm` builds and runs the binary; nix build verified
   once.
 * Full CI green including the manual-dispatch live job.

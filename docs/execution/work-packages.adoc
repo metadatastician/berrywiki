@@ -57,7 +57,7 @@ tests. comrak default features off (rustc-1.85 compat at the time). Divergence r
 the compatibility report. | Residual: GitHub parity unverified until the live
 spike (→ opus); syntax highlighting deferred behind a feature.
 | P1-serve | *DONE* | `berrywiki serve`: zero-dep `std::net` three-pane SSR
-(tree | rendered page | outline/backlinks) over a `WikiStore`; `/`, `/page/<id>`,
+(tree \| rendered page \| outline/backlinks) over a `WikiStore`; `/`, `/page/<id>`,
 `/search`, `/diagnostics`; testable pure `route()`; 9 tests + curl-verified.
 std::net not axum (ADR-0005 amendment). | Follow-ups: outline anchors don't jump
 yet; no `_Footer`; single-threaded (fine for single user).
@@ -316,6 +316,63 @@ runtime-dep mechanism for `git`; a CI Guix lane. | *Blocked-by* critique major
 grammar → forest builder → move state machine); nothing labelled "proven"
 without a green `gnatprove` CI lane. | Post-MVP; inherently opus.
 |===
+
+== Import formats track (parallel to Phase 6, Solo tier)
+
+Ruled in link:../decisions/0015-import-formats-and-dependency-doctrine.adoc[ADR-0015],
+which decomposes the owner's widened format list into import sources, the
+`.deed` attestation sidecar and run-time text tooling, and sets the dependency
+doctrine every row below obeys. *None of these packages gates MVP-declare*, and
+none may be claimed in a release note before its own fixtures are green.
+`P5-import-zim` still comes first: ADR-0014 asserts the neutral model is a
+contract between two importers, and Zim is the importer that makes that true.
+
+[cols="1,1,4,3", options="header"]
+|===
+| ID | Tier | Contract | Escalation triggers
+| P6-import-txt | haiku | Tier 1. One `.txt` becomes one page titled from the
+filename; a directory becomes a tree from the folder shape. No metadata exists
+in the source, so the report says what was absent rather than inventing it. |
+Stop if a mapping decision is needed that ADR-0015 does not state.
+| P6-import-delim | sonnet | Tier 1. One delimited file becomes one page holding
+one GFM table. The delimiter is sniffed from the first line and *named in a
+diagnostic*; `--delimiter` overrides; space-separated is accepted only when
+asked for, never guessed, because prose is space-separated too. |
+Escalate if a file needs more than one table or a quoting rule beyond RFC 4180.
+| P6-import-html | sonnet | Tier 1. Hand-rolled reader over the existing XML
+machinery; a lossiness table in the ADR-0014 form; raw HTML is never carried
+through, since the renderer would drop it anyway. | Escalate on any construct
+needing raw HTML in the output.
+| P6-import-xml | sonnet | Tier 1. Generic XML with a stated element mapping,
+reusing `berrywiki-import`'s reader. | Escalate if the mapping needs to be
+configurable; that is a different package.
+| P6-import-rtf | sonnet | Tier 2. RTF is plain text with a control-word
+grammar, so it is hand-rolled like the rest. Formatting maps onto the same
+carried/dropped table. | Escalate on embedded objects.
+| P6-import-ctb-spike | opus | Tier 2, *investigation only, no code*. Settle the
+hypothesis recorded in ADR-0015 by reading CherryTree's `ct_storage_sqlite.cc`
+or opening a real `.ctb`: is the rich-text XML whole in one column, or spread
+across `codebox`, `grid`, `image` and `children`? Report the schema and the
+real size of the job. | *No estimate and no implementation before this
+reports.* `.ctx` stays refused; it is encrypted.
+| P6-import-pandoc | opus | Tier 3. `--via pandoc` for PDF, ODT and DOCX under
+the ADR-0015 shell-out doctrine: optional always, fixed argv, binary resolved
+from `PATH` only, `BERRYWIKI_GITHUB_TOKEN` removed from the child environment,
+and a report line saying losses inside pandoc are unknown to BerryWiki. |
+Escalate if any format wants a Rust crate instead; that reopens the dependency
+tree and is an owner decision.
+| P6-deed-sidecar | opus | *Deferred, builds nothing yet.* The attestation
+sidecar per every page. Blocked on the `.deed` specification, which has not
+landed (the string "deed" appears nowhere in `a2ml-ecosystem` as of
+2026-09-03), and on the clone-contents conflict ADR-0015 states: the ruling is
+that it lands in the P4-backup bundle, outside the clone, so the native GitHub
+reader still sees a wiki. | Any design that puts sidecars in the working tree
+is an owner decision, not an implementation choice.
+|===
+
+Deferred text tooling, recorded so it is not lost and deliberately not designed:
+hunspell/aspell belong to the editor (Phase 6+), agrep to `P9-search-measure`,
+i18n to serve, and nickel is an estate validation tool BerryWiki does not call.
 
 == Cross-cutting standing packages
 
