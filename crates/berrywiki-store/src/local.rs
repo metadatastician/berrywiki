@@ -988,6 +988,81 @@ impl WikiStore for LocalFolderStore {
         })
     }
 
+    fn attachments(&self, page_id: &str) -> Result<Vec<Attachment>> {
+        validate_component(page_id).map_err(|_| StoreError::InvalidName {
+            name: page_id.to_string(),
+            reason: "page id is not usable as a directory name".to_string(),
+        })?;
+        let dir = self.root.join(ASSETS_DIR).join(page_id);
+        let entries = match fs::read_dir(&dir) {
+            Ok(e) => e,
+            // No directory means no attachments. Every other I/O failure is
+            // reported: silently returning an empty list would render a page
+            // that quietly claims to have lost its files.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => {
+                return Err(StoreError::io(
+                    format!("listing attachments for {page_id:?}"),
+                    e,
+                ))
+            }
+        };
+        let mut out = Vec::new();
+        for entry in entries {
+            let entry = entry
+                .map_err(|e| StoreError::io(format!("reading attachment entry in {dir:?}"), e))?;
+            if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                continue;
+            }
+            let filename = entry.file_name().to_string_lossy().into_owned();
+            // A name that would not have been accepted on the way in is not
+            // served on the way out. This is the only defence against a file
+            // planted directly in the clone by hand or by a pull.
+            if validate_component(&filename).is_err() {
+                continue;
+            }
+            out.push(Attachment {
+                page_id: page_id.to_string(),
+                filename: filename.clone(),
+                path: format!("{ASSETS_DIR}/{page_id}/{filename}"),
+            });
+        }
+        // Directory order is filesystem-dependent; the listing is sorted so a
+        // rendered page is byte-deterministic.
+        out.sort_by(|a, b| a.filename.cmp(&b.filename));
+        Ok(out)
+    }
+
+    fn read_attachment(&self, page_id: &str, filename: &str) -> Result<Vec<u8>> {
+        // Both halves are single components, checked with the same rule that
+        // `add_attachment` applies on the way in. `resolve` alone is not
+        // enough: it validates each `/`-separated component, so a filename of
+        // `a/b.pdf` would pass it as two valid components and read a file that
+        // BerryWiki could never have written. A name that would have been
+        // refused on the way in is refused on the way out.
+        for part in [page_id, filename] {
+            validate_component(part).map_err(|_| StoreError::InvalidName {
+                name: part.to_string(),
+                reason: "not usable as an attachment path component".to_string(),
+            })?;
+        }
+        // `resolve` then re-validates and proves containment under the root.
+        let relative = format!("{ASSETS_DIR}/{page_id}/{filename}");
+        let path = self.resolve(&relative)?;
+        match fs::read(&path) {
+            Ok(bytes) => Ok(bytes),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                Err(StoreError::AttachmentNotFound {
+                    page: page_id.to_string(),
+                    filename: filename.to_string(),
+                })
+            }
+            Err(e) => Err(StoreError::io(
+                format!("reading attachment {relative:?}"),
+                e,
+            )),
+        }
+    }
     fn regenerate_sidebar(&mut self) -> Result<bool> {
         self.write_sidebar_if_changed()
     }

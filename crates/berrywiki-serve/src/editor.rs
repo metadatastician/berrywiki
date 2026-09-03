@@ -383,7 +383,7 @@ fn post_edit(app: &mut App, id: &str, form: &str) -> Response {
 }
 
 /// Append the post-save notice token (commit-on-save only) to a redirect.
-fn with_notice(target: &str, rec: Recorded) -> String {
+pub(crate) fn with_notice(target: &str, rec: Recorded) -> String {
     match rec.notice_token() {
         Some(t) => format!("{target}?notice={t}"),
         None => target.to_string(),

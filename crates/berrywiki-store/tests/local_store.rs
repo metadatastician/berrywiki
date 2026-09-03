@@ -1074,3 +1074,90 @@ fn update_with_tags_on_an_unmanaged_page_is_refused() {
         .update_page_with_tags("no-such-page", "body", &["x".to_string()])
         .is_err());
 }
+
+#[test]
+fn attachments_are_listed_sorted_and_read_back_byte_for_byte() {
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+
+    // A page with no assets directory has no attachments. That is an empty
+    // list, not an error: every page starts in this state.
+    assert!(store.attachments(PLAN_ID).unwrap().is_empty());
+
+    // Added out of alphabetical order on purpose. Directory order is
+    // filesystem-dependent, so the sort is what makes a rendered page
+    // byte-deterministic.
+    let png: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff];
+    store.add_attachment(PLAN_ID, "zebra.txt", b"z").unwrap();
+    store.add_attachment(PLAN_ID, "berry.png", png).unwrap();
+    store
+        .add_attachment(PLAN_ID, "alpha.csv", b"a,b\n")
+        .unwrap();
+
+    let names: Vec<String> = store
+        .attachments(PLAN_ID)
+        .unwrap()
+        .into_iter()
+        .map(|a| a.filename)
+        .collect();
+    assert_eq!(names, vec!["alpha.csv", "berry.png", "zebra.txt"]);
+
+    // Non-UTF-8 bytes survive the round trip. An attachment that is silently
+    // re-encoded is a corrupted file, not an attachment.
+    assert_eq!(store.read_attachment(PLAN_ID, "berry.png").unwrap(), png);
+
+    // Another page's assets are not visible from this one.
+    assert!(store.attachments(HOME_ID).unwrap().is_empty());
+
+    let missing = store.read_attachment(PLAN_ID, "absent.png").unwrap_err();
+    assert!(matches!(missing, StoreError::AttachmentNotFound { .. }));
+}
+
+#[test]
+fn reading_an_attachment_cannot_escape_the_wiki_root() {
+    let dir = scratch_wiki();
+    let mut store = LocalFolderStore::open(&dir).unwrap();
+    store
+        .add_attachment(PLAN_ID, "rubric.pdf", b"%PDF")
+        .unwrap();
+
+    // Traversal in either half of the path. `resolve` validates every
+    // component, so the defence sits in the store and a second front end
+    // cannot forget to repeat it.
+    for (page, name) in [
+        ("..", "rubric.pdf"),
+        (PLAN_ID, ".."),
+        (PLAN_ID, "../../Home.md"),
+        ("../..", "passwd"),
+        (PLAN_ID, "a/b.pdf"),
+    ] {
+        let err = store.read_attachment(page, name).unwrap_err();
+        assert!(
+            matches!(err, StoreError::InvalidName { .. }),
+            "{page:?}/{name:?} must be rejected, got {err:?}"
+        );
+    }
+}
+
+#[test]
+fn a_hand_planted_file_with_an_unusable_name_is_not_listed() {
+    let dir = scratch_wiki();
+    let store = LocalFolderStore::open(&dir).unwrap();
+
+    // Nothing stops a file arriving by `git pull` or by hand, so the listing
+    // re-checks every name on the way out rather than trusting that it was
+    // checked on the way in.
+    let assets = dir.join("assets").join(PLAN_ID);
+    fs::create_dir_all(&assets).unwrap();
+    fs::write(assets.join("ordinary.txt"), b"fine").unwrap();
+    fs::write(assets.join(".hidden"), b"planted").unwrap();
+    fs::create_dir_all(assets.join("subdir")).unwrap();
+
+    let names: Vec<String> = store
+        .attachments(PLAN_ID)
+        .unwrap()
+        .into_iter()
+        .map(|a| a.filename)
+        .collect();
+    assert_eq!(names, vec!["ordinary.txt"], "dotfiles and dirs are skipped");
+}

@@ -27,14 +27,25 @@ use berrywiki_render::render_markdown;
 use berrywiki_store::{CreatePageInput, LocalFolderStore, MovePageInput, WikiStore};
 use berrywiki_sync::{ConflictReport, DivergedHandoff, Saved, SyncError, SyncOutcome, SyncedStore};
 
+mod attach;
 mod editor;
 mod ids;
 
 /// A minimal HTTP response.
+///
+/// `body` is the text payload and is what every HTML assertion reads. A
+/// response that carries a file instead sets `bytes`; when it is `Some`,
+/// those bytes are written and `body` is ignored. Keeping them as separate
+/// fields rather than one enum means a binary response has an empty `body`,
+/// which matters: a script sweep over `body` proves nothing about such a
+/// response and must gate on `content_type` instead (see
+/// `assets_are_served_under_a_narrow_content_type_allowlist`).
 pub struct Response {
     pub status: u16,
     pub content_type: &'static str,
     pub body: String,
+    /// Binary payload; when `Some` it is written in place of `body`.
+    pub bytes: Option<Vec<u8>>,
     /// `Location` header for 303 redirects (Post/Redirect/Get).
     pub location: Option<String>,
 }
@@ -45,6 +56,18 @@ impl Response {
             status,
             content_type: "text/html; charset=utf-8",
             body,
+            bytes: None,
+            location: None,
+        }
+    }
+
+    /// A file response: raw bytes under a content type from the allowlist.
+    fn binary(content_type: &'static str, bytes: Vec<u8>) -> Self {
+        Response {
+            status: 200,
+            content_type,
+            body: String::new(),
+            bytes: Some(bytes),
             location: None,
         }
     }
@@ -56,6 +79,7 @@ impl Response {
             status: 303,
             content_type: "text/html; charset=utf-8",
             body: String::new(),
+            bytes: None,
             location: Some(to.into()),
         }
     }
@@ -76,12 +100,23 @@ fn reason(status: u16) -> &'static str {
 }
 
 /// A parsed HTTP request, decoupled from the socket so tests can construct it.
+///
+/// `body` is the lossy text view used by every form handler; `bytes` is the
+/// body as it arrived. They are kept side by side rather than folded together
+/// because an upload must survive byte-for-byte while form parsing stays a
+/// string operation: `String::from_utf8_lossy` would replace a PNG's
+/// non-UTF-8 bytes with U+FFFD and corrupt the file.
 pub struct Request {
     pub method: String,
     pub path: String,
     pub query: String,
-    /// Raw `application/x-www-form-urlencoded` body (empty for GET).
+    /// Raw `application/x-www-form-urlencoded` body (empty for GET), as text.
     pub body: String,
+    /// The body exactly as received. Equal to `body` for a form POST.
+    pub bytes: Vec<u8>,
+    /// The request's `Content-Type` header, empty when absent. Carries the
+    /// multipart boundary, which is the only way to parse an upload.
+    pub content_type: String,
 }
 
 impl Request {
@@ -93,6 +128,8 @@ impl Request {
             path,
             query,
             body: String::new(),
+            bytes: Vec::new(),
+            content_type: String::new(),
         }
     }
 
@@ -104,6 +141,21 @@ impl Request {
             path,
             query,
             body: body.to_string(),
+            bytes: body.as_bytes().to_vec(),
+            content_type: "application/x-www-form-urlencoded".to_string(),
+        }
+    }
+
+    /// Convenience constructor for a body that is not text — an upload.
+    pub fn post_bytes(target: &str, content_type: &str, bytes: Vec<u8>) -> Self {
+        let (path, query) = split_target(target);
+        Request {
+            method: "POST".to_string(),
+            path,
+            query,
+            body: String::from_utf8_lossy(&bytes).into_owned(),
+            bytes,
+            content_type: content_type.to_string(),
         }
     }
 }
@@ -318,6 +370,26 @@ impl App {
         }
     }
 
+    /// Store a file under `assets/<page-id>/` and, with commit-on-save, commit
+    /// it in the same operation. Mirrors the page mutations: the editor never
+    /// gets a handle that could write the file without recording it.
+    pub(crate) fn add_attachment(
+        &mut self,
+        page_id: &str,
+        filename: &str,
+        bytes: &[u8],
+    ) -> Result<Recorded, SyncError> {
+        match &mut self.backend {
+            Backend::Plain(s) => {
+                s.add_attachment(page_id, filename, bytes)?;
+                Ok(Recorded::plain())
+            }
+            Backend::Synced(s) => Ok(Recorded::from_saved(
+                &s.add_attachment(page_id, filename, bytes)?,
+            )),
+        }
+    }
+
     pub(crate) fn reload(&mut self) -> Result<(), SyncError> {
         match &mut self.backend {
             Backend::Plain(s) => Ok(s.reload()?),
@@ -344,7 +416,17 @@ pub(crate) struct Ctx<'a> {
 pub fn handle(app: &mut App, req: &Request) -> Response {
     match req.method.as_str() {
         "GET" => handle_get(app, &req.path, &req.query),
-        "POST" => editor::handle_post(app, &req.path, &req.body),
+        "POST" => {
+            // An upload is bytes and its boundary lives in a header, so it is
+            // split off here: `editor::handle_post` takes a `&str` body and
+            // structurally cannot carry a file.
+            if let Some(rest) = req.path.strip_prefix("/page/") {
+                if let Some(id) = rest.strip_suffix("/attach") {
+                    return attach::post_attach(app, &percent_decode(id), req);
+                }
+            }
+            editor::handle_post(app, &req.path, &req.body)
+        }
         _ => Response::html(405, "<h1>405 Method Not Allowed</h1>".to_string()),
     }
 }
@@ -360,6 +442,9 @@ fn handle_get(app: &App, path: &str, query: &str) -> Response {
         }
         if let Some(id) = rest.strip_suffix("/move") {
             return editor::move_form(ctx, &percent_decode(id));
+        }
+        if let Some(id) = rest.strip_suffix("/attach") {
+            return attach::attach_form(ctx, &percent_decode(id), None);
         }
     }
     if path == "/new" {
@@ -402,6 +487,9 @@ fn dispatch(ctx: Ctx<'_>, path: &str, query: &str) -> Response {
     }
     if path == "/tags" {
         return tags_index_page(ctx);
+    }
+    if let Some(rest) = path.strip_prefix("/assets/") {
+        return attach::asset(ctx, rest);
     }
     if let Some(rest) = path.strip_prefix("/tags/") {
         return tag_page(ctx, &percent_decode(rest));
@@ -484,6 +572,7 @@ fn page_view(ctx: Ctx<'_>, id: &str, notice: &str) -> Response {
             "<p class=\"page-actions\"><a href=\"/page/{id_a}/edit\">Edit</a> · \
              <a href=\"/new?parent={id_a}\">New subpage</a> · \
              <a href=\"/page/{id_a}/move\">Move…</a> · \
+             <a href=\"/page/{id_a}/attach\">Attach…</a> · \
              <a class=\"danger\" href=\"/page/{id_a}/delete\">Delete…</a>{badge}</p>",
             id_a = escape_attr(id),
             badge = badge,
@@ -491,6 +580,9 @@ fn page_view(ctx: Ctx<'_>, id: &str, notice: &str) -> Response {
     }
     let rendered = render_markdown(&page.body);
     main.push_str(&format!("<article class=\"page\">{rendered}</article>"));
+    // Attachments are page content, not an editing affordance, so a reader
+    // on the read-only path sees the list too.
+    main.push_str(&attach::attachment_list(ctx, id));
     // Last-edited footer. `lead` is already escaped by `git_text` above, so it
     // is interpolated as markup on purpose; nothing else here comes from git.
     // The History link is unconditional, so the page's revisions stay reachable
@@ -1456,8 +1548,10 @@ fn handle_connection_app(stream: &mut TcpStream, app: &mut App) -> io::Result<()
     let method = parts.next().unwrap_or("").to_string();
     let target = parts.next().unwrap_or("/").to_string();
 
-    // Read headers only for Content-Length; nothing else matters to us.
+    // Two headers matter: the length, and the type that carries a multipart
+    // boundary. Everything else is ignored.
     let mut content_length: usize = 0;
+    let mut content_type = String::new();
     loop {
         let mut line = String::new();
         if reader.read_line(&mut line)? == 0 {
@@ -1470,6 +1564,8 @@ fn handle_connection_app(stream: &mut TcpStream, app: &mut App) -> io::Result<()
         if let Some((k, v)) = trimmed.split_once(':') {
             if k.eq_ignore_ascii_case("content-length") {
                 content_length = v.trim().parse().unwrap_or(0);
+            } else if k.eq_ignore_ascii_case("content-type") {
+                content_type = v.trim().to_string();
             }
         }
     }
@@ -1485,7 +1581,9 @@ fn handle_connection_app(stream: &mut TcpStream, app: &mut App) -> io::Result<()
         reader.read_exact(&mut body_bytes)?;
     }
     // Invalid UTF-8 degrades lossily rather than panicking or dropping the
-    // request (spec: malformed input degrades with a diagnostic).
+    // request (spec: malformed input degrades with a diagnostic). The lossy
+    // string is a *view*: `bytes` keeps the body intact so an upload is not
+    // corrupted by a conversion it never asked for.
     let body = String::from_utf8_lossy(&body_bytes).into_owned();
 
     let (path, query) = split_target(&target);
@@ -1494,6 +1592,8 @@ fn handle_connection_app(stream: &mut TcpStream, app: &mut App) -> io::Result<()
         path,
         query,
         body,
+        bytes: body_bytes,
+        content_type,
     };
     let response = handle(app, &req);
     write_response(stream, &response)
@@ -1511,13 +1611,19 @@ fn write_response(stream: &mut TcpStream, response: &Response) -> io::Result<()>
         debug_assert!(loc.starts_with('/') && !loc.contains(['\r', '\n']));
         head.push_str(&format!("Location: {loc}\r\n"));
     }
+    // A binary response carries its payload in `bytes`; the length must come
+    // from whichever half is actually written, never from `body` alone.
+    let payload: &[u8] = match &response.bytes {
+        Some(b) => b,
+        None => response.body.as_bytes(),
+    };
     head.push_str(&format!(
         "Content-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         response.content_type,
-        response.body.len(),
+        payload.len(),
     ));
     stream.write_all(head.as_bytes())?;
-    stream.write_all(response.body.as_bytes())?;
+    stream.write_all(payload)?;
     stream.flush()
 }
 
@@ -1684,17 +1790,114 @@ mod tests {
             // for a page the store does not know must not render a page.
             (&format!("/page/{HOME_ID}/history"), ""),
             ("/page/missing/history", ""),
+            // P4-attach. The asset route is the first that answers with bytes,
+            // and `no_script` on a bytes response reads an empty `body` and
+            // therefore proves nothing. `sweep_response` below is what closes
+            // that hole; see also
+            // `assets_are_served_under_a_narrow_content_type_allowlist`.
+            (&format!("/assets/{HOME_ID}/berry.png"), ""),
+            (&format!("/assets/{HOME_ID}/absent.png"), ""),
+            ("/assets/missing", ""),
         ] {
             let r = route(&s, path, query);
             // Same reason as the synced sweep: an absent route 404s, and a 404
             // is script-free, so without this the sweep passes vacuously.
-            let expected = if path.starts_with("/page/missing") {
+            let expected = if path.starts_with("/page/missing")
+                || path.ends_with("absent.png")
+                || path == "/assets/missing"
+            {
                 404
             } else {
                 200
             };
             assert_eq!(r.status, expected, "{path}?{query}");
-            no_script(&r.body);
+            sweep_response(&r, path);
+        }
+    }
+
+    /// The script-free assertion for one swept response, whichever half it
+    /// carries.
+    ///
+    /// A text response is swept for `<script`. A response carrying bytes has an
+    /// empty `body`, so that sweep would pass without inspecting anything; what
+    /// bites there is the content type, because a browser only executes an
+    /// attachment when it is told the file is HTML or an SVG. Keeping both in
+    /// one helper means a future binary route cannot be added to the list and
+    /// silently swept by the vacuous half.
+    fn sweep_response(r: &Response, target: &str) {
+        match &r.bytes {
+            None => no_script(&r.body),
+            Some(_) => {
+                assert!(
+                    ALLOWED_CONTENT_TYPES.contains(&r.content_type),
+                    "{target} served bytes as {}, which is not in the allowlist",
+                    r.content_type
+                );
+                assert!(
+                    !r.content_type.contains("html") && !r.content_type.contains("svg"),
+                    "{target} served bytes as an executable type: {}",
+                    r.content_type
+                );
+            }
+        }
+    }
+
+    /// Every content type an asset response is permitted to carry.
+    ///
+    /// Written out by hand rather than read from `attach::ALLOWED` so that
+    /// widening the allowlist in the module cannot widen the gate at the same
+    /// time; adding a type means editing both, deliberately.
+    const ALLOWED_CONTENT_TYPES: &[&str] = &[
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "application/pdf",
+        "text/plain; charset=utf-8",
+        "text/csv; charset=utf-8",
+    ];
+
+    /// The gate the script sweep cannot be: an attachment is served under a
+    /// type that a browser will not execute, and that type comes from the
+    /// filename rather than from anything a submitter controls.
+    ///
+    /// The plant that proves this test bites: make `content_type_for` return
+    /// `"text/html; charset=utf-8"` for `png` and watch it fail. The plant that
+    /// proves the sweep above bites: the same change, seen through
+    /// `sweep_response`.
+    #[test]
+    fn assets_are_served_under_a_narrow_content_type_allowlist() {
+        let s = store();
+        let r = route(&s, &format!("/assets/{HOME_ID}/berry.png"), "");
+        assert_eq!(r.status, 200);
+        assert_eq!(r.content_type, "image/png");
+        assert!(r.bytes.is_some(), "an asset must answer with bytes");
+        assert_eq!(&r.bytes.unwrap()[1..4], b"PNG", "the file arrives intact");
+
+        // An extension outside the allowlist is not served at all, and the
+        // refusal is the same 404 as a missing file so the route cannot be
+        // used to enumerate the folder.
+        for name in ["berry.svg", "berry.html", "berry.js", "berry.xml", "berry"] {
+            let r = route(&s, &format!("/assets/{HOME_ID}/{name}"), "");
+            assert_eq!(r.status, 404, "{name}");
+            assert_eq!(r.content_type, "text/html; charset=utf-8", "{name}");
+        }
+    }
+
+    /// A traversal segment in either half of an asset path is refused by the
+    /// store, not by a second set of rules in serve.
+    #[test]
+    fn asset_route_cannot_escape_the_wiki_folder() {
+        let s = store();
+        for target in [
+            "/assets/../../etc/passwd.png",
+            &format!("/assets/{HOME_ID}/../../Home.md"),
+            "/assets/%2e%2e/%2e%2e/passwd.png",
+            &format!("/assets/{HOME_ID}/..%2fberry.png"),
+        ] {
+            let r = route(&s, target, "");
+            assert_eq!(r.status, 404, "{target}");
+            assert!(r.bytes.is_none(), "{target} must not answer with a file");
         }
     }
 

@@ -333,6 +333,17 @@ impl<S: WikiStore> SyncedStore<S> {
         })
     }
 
+    /// List a page's attachments. Read-only, so it commits nothing and does
+    /// not checkpoint: nothing on disk changes.
+    pub fn attachments(&self, page_id: &str) -> Result<Vec<Attachment>> {
+        Ok(self.store.attachments(page_id)?)
+    }
+
+    /// Read one attachment's bytes. Read-only, as above.
+    pub fn read_attachment(&self, page_id: &str, filename: &str) -> Result<Vec<u8>> {
+        Ok(self.store.read_attachment(page_id, filename)?)
+    }
+
     // ----- the remote cycle -----
 
     /// Precondition + fetch, returning the up-to-date divergence. A repo with no

@@ -45,6 +45,8 @@ pub enum StoreError {
     InvalidTag { tag: String, reason: String },
     /// An attachment with this filename already exists for the page.
     DuplicateAttachment { page: String, filename: String },
+    /// No attachment with this filename is stored for the page.
+    AttachmentNotFound { page: String, filename: String },
     /// A file changed on disk since it was loaded (external editor, concurrent
     /// terminal git). The write was refused to avoid clobbering that change.
     StaleWrite { path: String },
@@ -122,6 +124,9 @@ impl fmt::Display for StoreError {
                 "Attachment {filename:?} already exists for page {page:?}. \
                  Nothing was overwritten; rename the file and retry."
             ),
+            StoreError::AttachmentNotFound { page, filename } => {
+                write!(f, "No attachment {filename:?} is stored for page {page:?}.")
+            }
             StoreError::StaleWrite { path } => write!(
                 f,
                 "File {path:?} changed on disk since it was loaded, so the write \

@@ -61,12 +61,34 @@ fn neutralise_urls<'a>(node: &'a AstNode<'a>) {
         if let NodeValue::Link(ref mut link) | NodeValue::Image(ref mut link) = &mut data.value {
             if is_dangerous_url(&link.url) {
                 link.url = "#".to_string();
+            } else if let Some(rest) = attachment_path(&link.url) {
+                // An attachment is written the way the repository stores it,
+                // `assets/<page>/<file>`, so that the link also works in a
+                // plain clone and in GitHub's own reader. Served from
+                // `/page/<id>`, that relative path would resolve to
+                // `/page/assets/...`, so it is anchored here. The Markdown on
+                // disk is untouched; only the rendered href changes.
+                link.url = format!("/assets/{rest}");
             }
         }
     }
     for child in node.children() {
         neutralise_urls(child);
     }
+}
+
+/// The `<page>/<file>` tail of a repository-relative attachment URL.
+///
+/// Only the exact `assets/` prefix counts, and only when it is genuinely
+/// relative: a scheme, a leading `/`, or a `//` authority is left alone, and
+/// so is anything carrying a `..` component, because rewriting those would be
+/// inventing a link the author did not write.
+fn attachment_path(url: &str) -> Option<&str> {
+    let rest = url.strip_prefix("assets/")?;
+    if rest.is_empty() || rest.split('/').any(|c| c == ".." || c.is_empty()) {
+        return None;
+    }
+    Some(rest)
 }
 
 /// True for URL schemes that can execute script or smuggle active content.
@@ -160,6 +182,79 @@ mod tests {
         let html = render_markdown("[a](Teaching--Course-A) and [b](https://example.com)\n");
         assert!(html.contains("href=\"Teaching--Course-A\""));
         assert!(html.contains("href=\"https://example.com\""));
+    }
+
+    #[test]
+    fn an_attachment_link_is_anchored_so_it_resolves_from_a_page_route() {
+        // The Markdown on disk says `assets/<page>/<file>` because that is
+        // where the repository actually stores it, so a plain clone and
+        // GitHub's own reader both follow the link. Served from `/page/<id>`
+        // a relative path would resolve to `/page/assets/...`, which is not a
+        // route, so the rendered href is anchored at the root.
+        for (md, want) in [
+            (
+                "![berry](assets/page-1/berry.png)\n",
+                "src=\"/assets/page-1/berry.png\"",
+            ),
+            (
+                "[notes](assets/page-1/notes.pdf)\n",
+                "href=\"/assets/page-1/notes.pdf\"",
+            ),
+        ] {
+            let html = render_markdown(md);
+            assert!(html.contains(want), "{md:?} -> {html}");
+        }
+    }
+
+    #[test]
+    fn only_the_attachment_prefix_is_rewritten() {
+        // A link that merely mentions the word must be left alone, or the
+        // rewrite silently breaks ordinary page links.
+        for md in [
+            "[a](assets)\n",
+            "[a](assetsxyz/file.png)\n",
+            "[a](my-assets/file.png)\n",
+            "[a](https://example.com/assets/x.png)\n",
+            "[a](/assets/already-absolute.png)\n",
+        ] {
+            let html = render_markdown(md);
+            assert!(
+                !html.contains("href=\"/assets/file.png\"") && !html.contains("//assets/"),
+                "{md:?} -> {html}"
+            );
+        }
+        // The last two must survive byte-for-byte as authored.
+        assert!(render_markdown("[a](https://example.com/assets/x.png)\n")
+            .contains("href=\"https://example.com/assets/x.png\""));
+        assert!(render_markdown("[a](/assets/already-absolute.png)\n")
+            .contains("href=\"/assets/already-absolute.png\""));
+    }
+
+    #[test]
+    fn a_traversal_inside_an_attachment_link_is_not_anchored() {
+        // Anchoring `assets/../../etc/passwd` would hand the serve layer a
+        // path it then has to defend against. It is left as authored instead,
+        // so it is an ordinary relative link that resolves to nothing.
+        for md in [
+            "[a](assets/../secret.png)\n",
+            "[a](assets/..)\n",
+            "[a](assets//double.png)\n",
+            "[a](assets/)\n",
+        ] {
+            let html = render_markdown(md);
+            assert!(
+                !html.contains("href=\"/assets/"),
+                "not anchored: {md:?} -> {html}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_dangerous_scheme_still_wins_over_the_attachment_rewrite() {
+        // Order matters: the scheme check runs first, so nothing that looks
+        // like an attachment can be used to get past it.
+        let html = render_markdown("[x](javascript:alert(1))\n");
+        assert!(html.contains("href=\"#\""), "{html}");
     }
 
     #[test]

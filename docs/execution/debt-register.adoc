@@ -212,6 +212,26 @@ legible; they will be deleted at the next revision.
   remote blocks every other request for the duration. Acceptable for one
   user on loopback; the push-off-the-request-path worker is P7-sync-worker.
 
+| M
+| No attachment-conflict test. Two clones that add the same filename to the
+  same page produce a git conflict on a binary file, which has no textual
+  resolution: the merge driver cannot leave both versions in markers the way
+  `same_page_conflict_preserves_both_versions_and_aborts_safely` proves it does
+  for a page. The sync layer's `Diverged` hand-off means nothing is lost, but
+  the shape of the hand-off in this case is asserted nowhere. Clearing it: a
+  case in `crates/berrywiki-git-compat/tests/conflicts.rs` that adds differing
+  bytes under one name from two clones and pins what `git status --porcelain`
+  reports and what `merge --abort` restores.
+
+| M
+| No delete-attachment route. An upload is permanent as far as the server is
+  concerned; removal is a git operation the operator performs in the clone.
+  This is why a duplicate filename is a 409 rather than a replacement — with no
+  delete, an overwrite would be the only way to lose an attachment, and it
+  would be silent. Clearing it needs the same ruling the page-delete flow needs:
+  what happens to the pages that still link the file. Recorded in
+  link:../decisions/0011-attachments.adoc[ADR-0011].
+
 | L
 | The `/changes` page lists the last 50 commits and the `/conflicts` page
   renders a hand-off and, for a merge the operator started, the classified
@@ -241,15 +261,24 @@ legible; they will be deleted at the next revision.
   it is a ruling, not a task.
 
 | L
-| The `no_script` helper is duplicated in
-  `crates/berrywiki-serve/tests/editor.rs` and
-  `crates/berrywiki-serve/tests/sync.rs`, and both copies are naive substring
-  probes: lowercase the response, then assert it contains none of `<script`,
-  `javascript:`, `onerror=` or `onclick=` (the last two each preceded by a
-  space). Escaped page text that merely contains an attribute-looking
-  substring trips them, which forced a test payload change during P3-conflict
-  rather than a fix to the probe. Clearing it: one shared helper that inspects
-  elements and attributes instead of raw substrings.
+| The script-free sweep helpers are copied per test module, and the copies have
+  now diverged in reach. `no_script` exists in four places
+  (`crates/berrywiki-serve/src/lib.rs` and `tests/{editor,sync,attach}.rs`);
+  `sweep_response`, which is the only one of the two that can gate a bytes
+  response, exists in two (`src/lib.rs` and `tests/sync.rs`). Every copy of
+  `no_script` is a naive substring probe: lowercase the response, then assert it
+  contains none of `<script`, `javascript:`, `onerror=` or `onclick=` (the last
+  two each preceded by a space). Escaped page text that merely contains an
+  attribute-looking substring trips them, which forced a test payload change
+  during P3-conflict rather than a fix to the probe.
+
+  The content-type allowlist inside `sweep_response` is duplicated
+  *deliberately* and must stay that way: a hand-written list in the test module
+  is what stops a widened served set from widening the gate in the same edit.
+  The debt is everything else. Clearing it: one shared helper that inspects
+  elements and attributes rather than raw substrings, and one shared route
+  enumeration that both sweeps consume, so that a new surface serving bytes
+  cannot be swept by one list and missed by another.
 |===
 
 == Proof debt

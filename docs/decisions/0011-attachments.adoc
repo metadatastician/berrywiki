@@ -1,0 +1,224 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+= ADR-0011: Attachments
+:sectnums:
+
+== Status
+
+*Accepted* (2026-09-03). Implements work package P4-attach. Sits on the store's
+safe-mutation model (ADR-0008) and reaches git through the sync layer
+(ADR-0010), whose `add_attachment` is already part of the committing set. The
+implementation plan required this ADR to state that multipart parsing is
+hand-rolled; that statement is <<multipart>>.
+
+== Context
+
+A wiki that cannot carry an image is not a wiki. GitHub's own wiki editor
+accepts a dragged-in file and rewrites it into the page, but offers no listing,
+no removal, and no way to see what a page already holds. BerryWiki needs
+attachments that a reader of the plain repository — and GitHub's native reader —
+sees exactly as BerryWiki does.
+
+Three things make this harder than "write the bytes to disk".
+
+. **The response is bytes, not HTML.** Every safety gate BerryWiki has for a
+  rendered surface reads `Response::body` and looks for `<script`. On a bytes
+  response `body` is empty, so those gates pass whilst inspecting nothing. An
+  asset route added without a new kind of gate is an unswept surface behind a
+  green test.
+. **Some image formats execute.** An SVG served as `image/svg+xml` runs any
+  `<script>` element inside it, with the artifact's origin. So "it is an image"
+  is not a safety argument; the format matters.
+. **A filename is attacker-controlled.** It arrives inside a multipart body,
+  chosen by whoever uploads, and is used to build a path and an href.
+
+== Decision
+
+=== Layout on disk
+
+An attachment lives at `assets/<page-id>/<filename>` in the wiki working tree,
+beside the pages. The page id — not the title — keys the folder, so renaming a
+page never moves or breaks its attachments, matching the reasoning in ADR-0001
+that titles are mutable and ids are not.
+
+A page's Markdown links its attachment the way the repository stores it:
+
+[source,markdown]
+----
+![Week 1 diagram](assets/0195f6d0-.../week-1.png)
+----
+
+That relative path is correct in a plain clone and in GitHub's own reader. It is
+_not_ correct when served from `/page/<id>`, where a browser would resolve it to
+`/page/assets/...`. So `berrywiki-render` anchors the href at the root at render
+time. **The Markdown on disk is never rewritten**; only the emitted href
+changes, which is what keeps the wiki usable without BerryWiki.
+
+The rewrite is deliberately narrow. It fires only on a `assets/` prefix with no
+empty and no `..` component, so `my-assets/x.png`, `assetsxyz/x.png`,
+`https://example.com/assets/x.png` and an already-absolute `/assets/x.png` are
+all left as authored, and `assets/../secret` is left as an ordinary relative
+link that resolves to nothing rather than being handed to the serve layer as an
+absolute one.
+
+=== [[allowlist]] Content type comes from the extension, and the list is short
+
+The served `Content-Type` is looked up in a fixed table keyed on the filename's
+lower-cased extension. It is never taken from the upload's declared part type
+and never sniffed from the payload.
+
+[cols="1,3"]
+|===
+| Extension | Served as
+
+| `png` | `image/png`
+| `jpg`, `jpeg` | `image/jpeg`
+| `gif` | `image/gif`
+| `webp` | `image/webp`
+| `pdf` | `application/pdf`
+| `txt`, `md` | `text/plain; charset=utf-8`
+| `csv` | `text/csv; charset=utf-8`
+|===
+
+An extension not on that list is refused at upload and is not stored. In
+particular **`svg`, `html`, `htm`, `js` and `xml` are absent on purpose**, not
+by oversight. Each executes, or can be made to execute, in a browser, and the
+script-free sweeps cannot see into a bytes response to catch it.
+
+Taking the type from the extension rather than the upload is what makes this an
+allowlist rather than a suggestion: a client that declares `image/svg+xml` for a
+file named `.png` gets `image/png`, because the declaration is discarded before
+it is ever consulted.
+
+The consequence to state plainly: BerryWiki cannot host an SVG diagram. The
+workaround is a PNG, or a fenced code block that GitHub renders natively. If
+that trade is ever revisited it needs a sanitiser, which is a dependency
+decision of the D-4 class and belongs in its own ADR, not in a widened table.
+
+=== Two size caps, both reachable
+
+`MAX_ATTACHMENT` is 1 MiB, the file's own limit. The whole request body is
+capped separately at `MAX_ATTACHMENT + MAX_ENVELOPE`, where the 8 KiB envelope
+covers the boundary and part headers.
+
+They are different numbers for a reason worth recording, because the obvious
+implementation is wrong: a multipart body is always larger than the file inside
+it, so capping both at the same value makes the file-sized check *unreachable* —
+a gate that can never fire, which is worse than no gate because it reads as one.
+With the envelope allowance a file of exactly 1 MiB is accepted and one byte
+over is refused by the check that names the file, whilst an enormous body is
+still rejected before it is parsed.
+
+=== Names are validated by the store, not by the server
+
+The multipart parser reduces the submitted filename to its basename, taking the
+text after the last `/` or `\` — the latter because Windows browsers
+historically sent a full path. The result is then handed to the store, where
+`validate_component` applies the same rules every other name in the wiki obeys:
+non-empty, at most 200 bytes, not `.` or `..`, not starting with `.`, no control
+characters, none of `< > : " / \ | ? *`, no trailing dot or space, and not a
+reserved Windows device name.
+
+The serve layer does not restate any of those rules. One definition of a legal
+name, in one place, is what stops the two layers drifting apart.
+
+That drift was real rather than hypothetical. `LocalFolderStore::resolve`
+validates each `/`-separated *component* of a path, so a filename of `a/b.pdf`
+passed it as two individually valid components and read a file that lay under
+the root but that `add_attachment` would never have written. Read and write
+disagreed about what a filename was. `read_attachment` now validates both the
+page id and the filename as single components before `resolve` sees them, so a
+name that would have been refused on the way in is refused on the way out.
+
+=== The asset route answers one undifferentiated 404
+
+`GET /assets/<page-id>/<filename>` is the only way to read an attachment. Every
+failure — no such page, no such file, an extension off the allowlist, a
+malformed path — produces the same not-found page. Distinguishing them would
+turn the route into a way to ask which pages and which files exist, which
+matters now for a private wiki and matters more once §3.8 access control lands.
+
+=== Duplicates are refused, never overwritten
+
+Uploading a filename a page already holds is a 409. The rule against discarding
+content the user already has does not have an exception for content they are
+replacing by accident. Replacing a file is delete-then-upload, and the delete
+route is not built yet (see <<debt>>).
+
+=== [[multipart]] Multipart parsing is hand-rolled
+
+The workspace has one third-party dependency, `comrak`, and adding a second for
+one form would be a poor trade. So `berrywiki-serve::attach` parses
+`multipart/form-data` itself: it reads the boundary from the `Content-Type`
+header, accepts it quoted or bare, finds the delimiters by byte search, splits
+headers from payload at the blank line, and reads `filename=` out of the
+`Content-Disposition` header.
+
+What it deliberately does not implement: multiple file parts (a second file is
+refused rather than silently ignored), `Content-Transfer-Encoding`, RFC 2231 or
+RFC 5987 extended filename encoding, nested multipart, and streaming. Every one
+of those is unnecessary for a single `<input type="file">` in a form BerryWiki
+itself renders, and each would be surface area for no gain.
+
+The limitation to state: a filename containing a `"` cannot be submitted, and a
+non-ASCII filename arrives as whatever bytes the browser sent, interpreted as
+UTF-8. Both degrade to a refusal with a diagnostic, never to a wrong file.
+
+== Gates
+
+The script-free sweeps could not have covered this route, so they were changed
+rather than extended.
+
+`sweep_response` branches on whether the response carries bytes. An HTML
+response gets `no_script` as before. A bytes response is asserted to carry a
+content type from a hand-written allowlist held *in the test module*, and
+asserted never to be an html or svg type. The allowlist is written out by hand
+rather than read from the server's table on purpose: widening what is served
+must not widen the gate in the same edit.
+
+Both sweeps were plant-tested one binary at a time, because `cargo test` stops
+at the first failing binary and a plant in two lists at once witnesses only the
+first:
+
+[cols="2,2,1"]
+|===
+| Plant | Gate | Fired
+
+| `png` served as `text/html` | unit sweep, `serve/src/lib.rs` | yes
+| `png` served as `text/html` | synced sweep, `serve/tests/sync.rs` | yes
+| `png` served as `text/html` | the content-type test | yes
+| `/assets/` branch deleted from `dispatch` | unit sweep | yes
+|===
+
+`crates/berrywiki-serve/tests/attach.rs` covers the round trip byte-for-byte,
+the discarded declared type, both size caps at their exact boundaries, every
+refused extension in both cases, the traversal basenames, the forbidden
+character, the duplicate, the four malformed-body shapes, and the
+indistinguishability of the asset route's refusals.
+
+== Consequences
+
+*Repo growth is permanent.* Every attachment is a git blob for ever, and
+deleting the file later does not shrink the history. The 1 MiB cap is the only
+brake. Whether GitHub enforces a size limit on a `.wiki.git` repository, and
+whether Git LFS works there at all, are both unverified; they are rows in
+`docs/compatibility/github-wiki.adoc` and belong to the P9 spike.
+
+*The native reader keeps working.* An attachment is an ordinary file at an
+ordinary path, linked by an ordinary relative Markdown link. Nothing about it
+requires BerryWiki to read.
+
+*A conflicting attachment is untested.* Two clones adding the same filename to
+the same page produce a git conflict on a binary file, which has no textual
+resolution. The sync layer's existing `Diverged` hand-off covers it in the sense
+that nothing is lost, but the case has no test; it is <<debt,registered>>.
+
+== [[debt]] Deferred
+
+* No delete-attachment route. Removal is a git operation the operator performs
+  in the clone. Adding one means deciding what happens to the pages that still
+  link the file, which is the same question the page-delete flow answers, and it
+  should answer it the same way.
+* No conflicting-attachment test in `berrywiki-git-compat`.
+* No image dimensions, no thumbnails, no preview. A link is a link.
+* No SVG. See <<allowlist>>.
