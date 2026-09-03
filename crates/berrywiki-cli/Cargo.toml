@@ -24,3 +24,8 @@ path = "src/main.rs"
 
 [lints.rust]
 unsafe_code = "forbid"
+
+# Test-only: the bare-remote + two-clone git sandbox the engine tests use, so
+# the backup round trip runs against real git rather than a mock.
+[dev-dependencies]
+berrywiki-git-compat = { path = "../berrywiki-git-compat" }

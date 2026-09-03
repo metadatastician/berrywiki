@@ -94,6 +94,8 @@ berrywiki serve ./my-wiki           # browse and edit at http://127.0.0.1:23779
 berrywiki serve ./my-wiki --no-commit           # same, without commit-on-save
 berrywiki serve ./my-wiki --author "Ada <ada@example.org>"   # commit identity
 berrywiki serve --github owner/repo # mirror a GitHub wiki (read-only)
+berrywiki backup ./my-wiki ./backup-2026-09-03  # bundle + drafts + journal
+berrywiki restore ./backup-2026-09-03 ./restored-wiki
 ```
 
 For a private wiki, supply a token via `BERRYWIKI_GITHUB_TOKEN` — never as a

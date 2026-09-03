@@ -251,8 +251,31 @@ walkthrough half is *not* done and is not claimed:
 link:a11y-walkthrough.adoc[the keyboard and NVDA script] is written and
 **unexecuted**, because it needs a person at a browser and no automated gate
 substitutes for it. | walkthrough execution → owner.
-| P4-backup | sonnet | Backup/export (a dropped spec item — restore it here or
-declare a non-goal). | —
+| P4-backup | sonnet | *DONE* — **Done 2026-09-03.** Recorded in
+link:../decisions/0013-backup-and-restore.adoc[ADR-0013]. `berrywiki backup
+<folder> <out-dir>` writes a directory, not an archive: a `git bundle --all`, a
+copy of the drafts and the operation journal, and a MANIFEST. A directory is
+readable with git alone, which is the same constraint the wiki itself obeys, and
+it costs no new format code. A bundle carries committed history only, so backup
+refuses a dirty tree and names each pending path rather than producing an
+archive that silently omits the work it was asked to protect. The search index
+is excluded as derived data and the lock as a process artefact, both asserted
+positively because nothing about copying a directory ever fails on its own.
+`berrywiki restore <backup-dir> <folder>` clones from the bundle, then either
+repoints `origin` at the recorded URL or drops it, because a clone taken from a
+bundle otherwise carries a remote that vanishes with the backup. Drafts are
+written back through `AppState::for_wiki(<new folder>)`: `repo_id` hashes the
+wiki's path, so restoring to a different directory is a different state dir and
+copying to the source's path would produce real files the restored wiki never
+reads. Credentials are stripped from the origin URL before it reaches the
+MANIFEST, since a backup is a file that gets copied. No timestamp is recorded,
+so two backups of an unchanged wiki compare equal. Four assertions were
+plant-tested one at a time and all four fired. Writing it found that the git
+audit scan does not exempt comments: the engine may not name `reset`,
+`checkout`, `restore` or `clean` even in prose, which also makes `checkout-index`
+unrepresentable and leaves cloning from the bundle as the only restore path.
+**This is the plan's P6-backup as well** — the contract is listed twice — so
+`P8-backup-fleet` now has its dependency satisfied. | —
 |===
 
 == Phase 5 — Import, packaging, MVP declaration

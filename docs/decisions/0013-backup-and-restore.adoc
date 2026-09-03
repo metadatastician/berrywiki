@@ -1,0 +1,233 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+= ADR-0013: Backup and restore
+:sectnums:
+
+== Status
+
+*Accepted* (2026-09-03). Implements work package P4-backup, which the plan
+lists a second time as P6-backup; they are one package and this ADR closes
+both, so `P8-backup-fleet` has its dependency satisfied. Extends the closed
+git-operation set of ADR-0009 and archives the app state defined by ADR-0008.
+
+== Context
+
+A wiki that lives in one working tree on one machine has one copy. The clone
+carries committed history, and `git push` sends that history to GitHub, but two
+things exist only on the local disk: drafts (ADR-0006), which are unsaved by
+definition, and the operation journal. Neither is in the repository, so neither
+survives losing the machine.
+
+The dropped spec item asked for `berrywiki backup` and `berrywiki restore`. The
+question is what those two commands should actually move, and what they should
+refuse to do.
+
+== Decision
+
+=== A backup is a directory, not an archive
+
+`berrywiki backup <folder> <out-dir>` writes a directory:
+
+[source]
+----
+<out-dir>/
+  MANIFEST              # berrywiki-backup: 1, repo-id, head, branch, origin
+  wiki.bundle           # git bundle --all
+  state/drafts/         # copied from the app-state drafts dir
+  state/operation.journal
+----
+
+A directory is readable with git alone: `git clone wiki.bundle somewhere` works
+with no BerryWiki present, which is the same constraint that governs the wiki
+itself. It also costs no new format code. Nothing in the plan needs a single
+file, and anyone who wants one has `tar`.
+
+=== [[bundle]] A bundle carries committed history only, so a dirty tree is refused
+
+`git bundle --all` packs every ref and `HEAD`. It does not pack the working
+tree, so uncommitted changes are simply absent.
+
+With P3-serve-sync every editor save is a commit, so in normal use the tree is
+clean and this limit costs nothing. But `serve --no-commit` exists, and under it
+a whole session's work sits uncommitted. Producing a bundle then would yield an
+archive that silently omits exactly the work the user was trying to protect.
+
+So `backup` runs `status` first and refuses a non-empty result, printing each
+pending path. A refusal that names the files is recoverable in one commit; an
+archive missing a day's work is discovered months later.
+
+=== What is archived and what is not
+
+[cols="2,1,3"]
+|===
+| Thing | Archived | Why
+
+| Committed history, all refs | yes | <<bundle,the bundle>>
+| Drafts | yes | unsaved by definition; exist nowhere else
+| Operation journal | yes | small, and it explains a half-finished mutation
+| Search index (`index_dir`) | *no* | derived data, rebuilt on demand
+| Lock file | *no* | describes a running process, not the wiki
+| Working tree files | *no* | reconstructed by the clone; a dirty tree is refused instead
+|===
+
+The two exclusions are asserted positively in the test suite, because nothing
+about copying a directory ever fails: only an explicit "this must not be here"
+check keeps derived data out.
+
+The summary printed on success states the index omission in words. An omission
+the user is not told about is indistinguishable from a bug.
+
+=== [[repoid]] Restore writes drafts through the new folder's own app state
+
+`berrywiki_appstate::repo_id` hashes the wiki's canonical path, and the state
+directory is keyed by that hash. A wiki restored to a different directory is
+therefore a different repo id with a different state directory.
+
+The consequence is easy to get wrong: copying the archived drafts back to the
+path the *source* used produces real files in a real directory that the restored
+wiki will never look at. `restore` opens `AppState::for_wiki(<new folder>)` and
+writes through that.
+
+A round-trip test that restores to the same path cannot see this at all. The
+test restores to a fresh directory and asserts the draft is readable through the
+restored wiki's own `AppState`, and asserts the two repo ids differ so the test
+cannot degenerate into comparing a path with itself.
+
+=== [[origin]] A clone from a bundle has an origin that vanishes
+
+`git clone wiki.bundle dest` leaves `origin` pointing at the bundle file. That
+file lives in the backup directory, which is usually on removable media or
+another machine, so the restored wiki would carry a remote that resolves to
+nothing and a `push` that fails obscurely.
+
+The manifest records the source's origin URL. Restore sets `origin` to that URL,
+or removes `origin` outright when none was recorded. Either way the restored
+wiki never points at the backup.
+
+=== Credentials are stripped before the URL reaches the manifest
+
+An origin of `https://user:token@github.com/o/r.wiki.git` would put a live
+credential into a plain file whose entire purpose is being copied elsewhere.
+`strip_userinfo` removes any `userinfo@` from the authority before the URL is
+written. scp-style `git@host:path` is left alone: it has no password field and
+the `@` is the user name.
+
+This is the same rule as ADR-0002's, applied to the one new place a URL is
+written down: tokens are never in URLs, arguments, or logs.
+
+=== The manifest carries no timestamp
+
+Two backups of an unchanged wiki should compare equal. A clock reading would
+make every backup differ from every other for no information, and the
+information anyone actually wants (which commit) is already there as `head`.
+The file's own mtime records when it was taken.
+
+The first line is the magic string `berrywiki-backup: 1`. Restore refuses a
+directory whose MANIFEST is missing or does not start with it, rather than
+guessing at the format of a directory it was pointed at by accident.
+
+=== Both commands refuse a destination that is not empty
+
+`backup` refuses an out-dir with contents; `restore` refuses a target folder
+with contents. Absent, or present and empty, are both fine. This is the same
+rule as everywhere else in BerryWiki: nothing overwrites content the user
+already has.
+
+=== [[audit]] The engine may not name the operations it refuses to perform
+
+`crates/berrywiki-git/tests/audit.rs` scans the whole of `berrywiki-git/src`
+for the tokens of working-tree-discarding git operations, including `reset`,
+`checkout`, `restore` and `clean`. It does not exempt comments.
+
+That was found the blunt way: a doc comment reading "`berrywiki restore` does
+one or the other every time" failed the build on the word `restore`. The comment
+was reworded to "the CLI's recovery command", with a note recording why the
+command cannot be named there.
+
+This bluntness is the property, not a defect. A scan that exempted comments
+would need to parse Rust to find them, and would then have an "it was only a
+comment" hole to slip an argument through. The engine not being able to *say*
+`reset` is a small price for a gate with no escape hatch.
+
+It also constrains the implementation. `git checkout-index` contains the token
+`checkout`, so the obvious `init + fetch + populate` restore is unrepresentable
+in the engine. Cloning from the bundle is the path that introduces no forbidden
+token, and it is also the simpler one.
+
+=== Engine additions
+
+`berrywiki-git` gains `bundle_all`, `origin_url`, `set_origin_url`,
+`forget_origin` and the free function `clone_from_bundle`. None of them can
+discard a working tree.
+
+Two incidental repairs came with them. `exec`'s environment chain was factored
+into `hermetic_command`, so hermeticity (`LC_ALL`, both `GIT_CONFIG_*`,
+`GIT_TERMINAL_PROMPT`, `GIT_OPTIONAL_LOCKS`) now has one definition that the
+audit test's `engine_runs_git_hermetically` checks, and `clone_from_bundle`
+inherits it rather than reinventing it. And a path that cannot be a `&str` is
+reported as `GitError::NonUtf8Path` rather than lossily converted: a backup
+written to a path that is not the one the caller named is worse than a refusal.
+
+== Gates
+
+`crates/berrywiki-cli/tests/backup.rs` drives real git through the
+`berrywiki-git-compat` sandbox. Four assertions were plant-tested one at a time,
+because a suite that has never been seen to fail is not yet evidence:
+
+[cols="3,2,1"]
+|===
+| Plant | Assertion that caught it | Fired
+
+| Restore writes drafts through the *source* path's `AppState`
+| draft readable through the restored wiki's own state dir
+| yes
+
+| Backup skips the `status` check
+| dirty tree refused, exit 2, pending path named
+| yes
+
+| Backup copies `index_dir` into the archive
+| `state/index` absent from the backup
+| yes
+
+| Restore leaves `origin` at the bundle file
+| origin equals the recorded remote (failure printed the bundle path)
+| yes
+|===
+
+Also covered: history equality by `rev-list --all` rather than by branch tip, a
+commit that exists only in the source clone, both non-empty-destination
+refusals, a missing MANIFEST, a MANIFEST without the magic line, and the usage
+message when either command is given one path instead of two.
+`strip_userinfo` has its own unit test including the `@`-in-path and scp-style
+cases, and `help_and_unknown` now asserts every dispatched subcommand appears in
+`USAGE`.
+
+Workspace total: 340 tests, from 332 at P4-a11y.
+
+== Consequences
+
+*A backup is only as fresh as the last commit.* Under `serve --no-commit` that
+is a refusal rather than a silent gap, but it is still a refusal the user has to
+act on. Nothing here changes the default, which commits on save.
+
+*Restore does not verify the bundle against the manifest before cloning.* It
+compares the recorded `head` with what the clone produced and warns on a
+mismatch, which catches a swapped or truncated bundle after the fact rather
+than before. The clone lands in a fresh directory, so a mismatch costs nothing
+but the diagnostic.
+
+*The archive is not encrypted and not compressed beyond git's own packing.* A
+read-locked page (planned in §3.8) is plaintext in the bundle exactly as it is
+plaintext in the clone. A backup inherits the confidentiality of the medium it
+is written to, and the documentation says so rather than implying otherwise.
+
+== Deferred
+
+* No scheduled or incremental backup. `P8-backup-fleet` covers a registry-wide
+  schedule and is unblocked by this package.
+* No restore into an existing clone (fetch-from-bundle rather than clone). It
+  would be useful and it is representable, but it needs a merge policy, which is
+  the same question the conflict UX answers.
+* No verification subcommand (`berrywiki backup --verify <dir>`). Today the
+  check is the head comparison performed during restore.

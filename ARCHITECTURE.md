@@ -104,7 +104,7 @@ I/O to be wrong about.
   runtime and no third-party dependencies. Editing uses explicit Save and
   Save-draft with a two-layer stale-write guard; a refused save never discards
   what you typed.
-* **`berrywiki-cli`** — `berrywiki check | sidebar | serve`.
+* **`berrywiki-cli`** — `berrywiki check | sidebar | serve | backup | restore`.
 
 ```
                  berrywiki-cli
