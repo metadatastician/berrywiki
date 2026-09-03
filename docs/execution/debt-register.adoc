@@ -94,12 +94,15 @@ legible; they will be deleted at the next revision.
 | **ADR-0007 was referenced eight times and did not exist.** ADR-0005 and
   ADR-0006 both defer to it, and the implementation plan gates all post-MVP
   enhancement work on it. Now filed as an explicitly *open* ADR stating the
-  question and options — the ruling itself is still owed.
+  question and options; ruled on 2026-09-03 (see the row below).
 
-| H
-| **ADR-0007 is unruled**, and it blocks the entire post-MVP enhancement
-  layer. Recorded above as documentation debt *cleared*; the decision is
-  still outstanding and is an owner action, not an engineering one.
+| *CLEARED*
+| **ADR-0007 is unruled.** Ruled 2026-09-03 as generated-only with provenance
+  constraints. The enhancement layer is unblocked as *design* work only: the
+  ADR's successor gate (a provenance manifest, a CI rebuild-and-compare, and a
+  subset test over every route in `route()`) does not exist yet, and no
+  generated script may ship until it does. Building that gate is engineering
+  work tracked with its first consumer, not standing debt here.
 
 | M
 | `docs/compatibility/github-wiki.adoc` records the GitHub Wiki behaviours the

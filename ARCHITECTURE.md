@@ -126,10 +126,12 @@ I/O to be wrong about.
 
 * **Rust** for everything shipped. SPARK/proof work on the invariants ledger is
   planned, not done (P5-spark).
-* **No JavaScript or TypeScript, hand-written or generated** (ADR-0003). The UI
-  is server-rendered; a test asserts no `<script>` element appears in any
-  response. A richer client is gated on ADR-0007, which is *not yet ruled* —
-  see `docs/decisions/0007-client-script-doctrine.adoc`.
+* **No hand-written JavaScript or TypeScript** (ADR-0003). The UI is
+  server-rendered; a test asserts no `<script>` element appears in any
+  response. ADR-0007 was ruled on 2026-09-03: *generated* script may ship, but
+  only from a named toolchain, reproducibly, and listed in a provenance
+  manifest. None exists, so nothing is served — see
+  `docs/decisions/0007-client-script-doctrine.adoc`.
 * **No async runtime, no web framework** in `berrywiki-serve` — it is a
   single-user localhost tool, and the HTTP surface is the seam to swap later.
 * **AsciiDoc** for technical docs and ADRs; Markdown only for wiki content and

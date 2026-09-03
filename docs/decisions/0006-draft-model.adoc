@@ -60,13 +60,15 @@ survives a killed process"* — not *"an idle editor autosaves"*.
   taken the draft is durable and recoverable.
 * The draft store is app-private and never committed.
 * Real idle-autosave remains available to the future AffineScript→typed-wasm
-  enhancement layer (client-side), once
-  link:0005-ui-technology.adoc[ADR-0005]'s parked generated-JS-glue question is
-  ruled (ADR-0007). It would drive the *same* Save-draft endpoint.
+  enhancement layer (client-side).
+  link:0007-client-script-doctrine.adoc[ADR-0007] ruled that question
+  generated-only on 2026-09-03, so the remaining gate is its provenance
+  manifest. It would drive the *same* Save-draft endpoint.
 
 == Revisit triggers
 
-* ADR-0007 rules generated client script acceptable → an idle-autosave
-  enhancement can layer on the existing Save-draft path.
+* ADR-0007 rules generated client script acceptable — **fired 2026-09-03.**
+  An idle-autosave enhancement may layer on the existing Save-draft path once
+  that ADR's provenance manifest and served-response gate exist.
 * Real use shows the explicit-save burden causes lost work despite persistence →
   reconsider the interaction (e.g. save-on-navigation via form submission).

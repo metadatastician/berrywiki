@@ -35,7 +35,11 @@ with `workflow` scope.
 == Alternatives considered
 
 * *GitHub App installation token* — better for multi-user/hosted deployment;
-  heavier to set up. Deferred to the deployment-model ADR.
+  heavier to set up. Deferred to the deployment-model ADR, which now exists as
+  link:0016-deployment-model.adoc[ADR-0016]. That ADR rules on-prem
+  single-team and answers this option "not now": the one-hour token refresh
+  needs an HTTP client, which is a dependency-tree decision, and App behaviour
+  against `.wiki.git` specifically is unverified.
 * *OAuth device flow* — good UX for an interactive desktop app; revisit when the
   UI exists.
 * *`gh auth` piggy-backing* — convenient locally but not a deployment story.

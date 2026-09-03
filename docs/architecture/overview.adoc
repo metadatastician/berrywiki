@@ -15,7 +15,7 @@ known debt in link:../execution/debt-register.adoc[the debt register].
 ----
 ┌──────────────────────────────────────────────────────────┐
 │ Enhancement layer (AffineScript → typed-wasm) — DEFERRED │
-│   gated on ADR-0007, which is UNRULED                    │
+│   ADR-0007 RULED generated-only; no artefact yet         │
 ├──────────────────────────────────────────────────────────┤
 │ berrywiki-serve · -render · -cli              — BUILT    │
 │   zero-JS three-pane explorer AND editor                 │
