@@ -1,0 +1,242 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+= ADR-0014: CherryTree import
+:sectnums:
+
+== Status
+
+*Accepted* (2026-09-03). Implements work package P5-import-ct. The neutral
+model and Markdown writer it defines are what `P5-import-zim` reuses, so the
+shape below is a contract between two importers, not one command's internals.
+
+== Context
+
+BerryWiki exists because a GitHub wiki has no hierarchy and CherryTree does.
+The obvious first question a CherryTree user asks is whether their existing
+notebook can come across, and the honest answer has two halves: the tree,
+the text and the attachments can; a good deal of CherryTree's rich-text
+formatting cannot, because the destination is plain Markdown that must render
+in GitHub's own wiki reader.
+
+An import is also the largest single write BerryWiki will ever make into
+somebody's notes. Every other mutation touches one page. This one touches all
+of them at once, from a file the program did not write, in a format it does not
+control.
+
+So the design question is not "how do we convert a notebook" but "how do we
+convert a notebook in a way whose losses are stated in advance, whose failure
+modes refuse rather than half-succeed, and whose result is one thing to undo".
+
+== Decision
+
+=== [[lossy]] The lossiness table is the contract
+
+Conversion is lossy and saying so vaguely is worse than not saying it. Every
+row below is either carried or dropped with a named diagnostic; the importer
+emits that diagnostic and the report prints a tally
+(`ImportModel::loss_summary`), so a user knows what they lost by count before
+they decide to apply.
+
+[cols="2,1,3"]
+|===
+| CherryTree construct | Carried | How, or the diagnostic when not
+
+| Node tree, ordering, depth | yes | parent + `position` metadata; `_Sidebar.md` regenerated
+| Node title | yes | page title; an empty one becomes `Untitled` with `import.ct.untitled-node`
+| Node tags | yes | `tags:` metadata, whitespace-split as CherryTree stores them
+| Plain text | yes | escaped so prose that looks like markup stays prose
+| Bold, italic, strikethrough | yes | `**`, `_`, `~~`
+| Monospace runs | yes | code spans, fence-length-aware so backticks in content survive
+| Code boxes | yes | fenced blocks, syntax label preserved when CherryTree recorded one
+| Headings (h1-h3) | yes | `#`, `##`, `###`
+| Bulleted and numbered lists | as text | CherryTree stores no list construct; bullets are literal characters. A line starting `-`, `+`, `#`, `>`, `=` or `1.` is escaped so it renders as the characters the author typed, not as a Markdown list
+| Tables | yes | GFM tables; first row assumed the header (`import.ct.table-header-assumed`), embedded newlines flattened to spaces (`import.ct.table-newline-flattened`)
+| Web links | yes | `[text](url)`, target percent-escaped
+| Node links | yes | `[[Title]]` when the target resolves; `import.ct.link-target-missing` or `import.ct.link-target-unknown` otherwise, and `import.ct.wikilink-title-unusable` when a title cannot be a link label
+| Embedded images | yes | written as attachments, referenced from the body; `import.ct.image-decode-failed` on a corrupt payload
+| Embedded files | yes | attachments; `import.ct.embedded-file-not-servable` when the type is not one serve will hand back, `import.ct.embedded-file-decode-failed` on a corrupt payload
+| Underline | *no* | `import.ct.underline-dropped`; Markdown has no underline and `<u>` is raw HTML, which BerryWiki never emits
+| Superscript, subscript | *no* | `import.ct.superscript-dropped`
+| Small text | *no* | `import.ct.small-text-dropped`
+| Foreground and background colour | *no* | `import.ct.colour-dropped`
+| Justification, indentation | *no* | `import.ct.justification-dropped`, `import.ct.indent-dropped`
+| Anchors | *no* | `import.ct.anchor-dropped`; CherryTree anchors are node-local and have no Markdown equivalent that GitHub honours
+| Links to local files | *no* | `import.ct.link-to-file-dropped`; the path is on the author's machine and would resolve to nothing for any reader
+| Node icon, read-only flag, custom colours | *no* | `import.ct.node-attribute-dropped`
+| Node creation and modification times | *no* | dropped silently, because a diagnostic per node would drown the report; git history is the record of when a page changed, and a copied timestamp would contradict it
+|===
+
+The drops are not a to-do list. Each one is dropped because the destination is
+Markdown that has to render correctly in a reader BerryWiki does not control,
+and every alternative is raw HTML.
+
+=== [[detect]] Format is detected by content, never by extension
+
+A file named `.ctd` may be any of CherryTree's four formats. The reader looks
+at the bytes: an XML document whose root is `<cherrytree>` is read; SQLite
+(`SQLite format 3\0`) and 7-zip (`7z\xBC\xAF\x27\x1C`, which is what CherryTree
+writes for a password-protected notebook) are refused by name with advice.
+
+The advice matters more than the refusal. "This is a password-protected
+notebook; open it in CherryTree and save a copy as `.ctd`" is actionable.
+A parse error 4 000 bytes into a binary file is not.
+
+`.ctb` and `.ctx` are the SQLite formats. Reading them means a SQLite
+dependency in a workspace whose only third-party crate is comrak, which is
+*D-11*, an owner decision. Until it is ruled, the refusal names the conversion
+path rather than pretending the format is unsupported forever.
+
+=== A dry run is the default
+
+`berrywiki import <notebook> <wiki>` reads, plans and prints. `--apply` writes.
+
+The report has two halves and they answer different questions. The importer's
+own report says what the *notebook* holds: node count, depth, asset count, the
+loss tally, the diagnostics. The plan says what would happen to the *wiki*:
+how many pages would be created, how many are already imported and unchanged,
+and which are occupied by something else. The importer cannot know the second
+and the wiki cannot know the first.
+
+`--json` emits the same content machine-readably, for a caller that wants to
+gate on the loss tally rather than read it.
+
+=== [[idempotent]] Importing twice is importing once, and it is keyed on provenance
+
+Every imported page carries one metadata line:
+
+[source]
+----
+source: cherrytree:<64 hex of the source file's SHA-256>:<node's unique_id>
+----
+
+The page id is derived from that same marker, so identity and provenance are
+the same fact recorded twice rather than two facts that can disagree.
+
+A second run finds every page present, every marker matching, reports them
+unchanged, and writes nothing.
+
+The important consequence is what "unchanged" is keyed on. It is the *marker*,
+not the body. A page the user has since edited still carries the marker that
+says where it came from, so the importer recognises it and leaves the edit
+alone. Keying on content would have meant deciding whose version wins, and the
+only defensible answer to that is the user's, which is the same as not looking.
+
+=== Three refusals, and no `--overwrite`
+
+`--apply` stops before the first write if:
+
+* two siblings would share a title. Filenames encode ancestry (ADR-0001), so
+  the second page would land on a disambiguated name nobody chose;
+* a page id exists but does not carry this node's marker. That page is
+  somebody's work;
+* the wiki folder is not a git working tree. The refusal names `git init` as
+  the cure.
+
+A dry run has none of these; it works against a plain folder, because the git
+requirement is about writing, not reading.
+
+There is deliberately no override flag. Refusing and naming the page is a
+decision the user can act on. A flag that clobbers on request is one they can
+regret, and nothing here needs it. Relaxing this later is one flag; recovering
+somebody's overwritten notes is not.
+
+=== One commit
+
+Pages are written through `SyncedStore::store_mut`, which does not commit, and
+a single `SyncedStore::commit` records the whole import with the source hash in
+the message. `commit_all` stages with `add -A`, so the regenerated sidebar
+lands in the same commit as the pages.
+
+An import is one act. It should be one thing to revert.
+
+The commit is *not* pushed. An import is a large change to somebody's wiki and
+the moment to publish it is theirs to pick; the closing line says so and names
+`git push`.
+
+=== The report names the file, never the path that holds it
+
+`Run.source` is `Path::file_name()` only. A report is the thing a user pastes
+into a bug tracker, and the directories above a personal notebook are nobody
+else's business. A test imports from `secret-dir/notes.ctd` and asserts the
+output contains `notes.ctd` and does not contain `secret-dir`, in both the
+AsciiDoc and JSON forms.
+
+=== The source file is re-hashed after the write
+
+The notebook is read-only input, and saying so costs one `read` and one hash.
+After committing, the file is re-read and re-hashed against
+`ImportModel::source_hash`. A mismatch is a warning naming the file.
+
+This turns "we did not touch your notes" from a promise into a measurement.
+
+=== [[noroute]] There is no `/import` route in serve
+
+Import is a CLI command only. Serve's body reader takes `Content-Length` and
+allocates the whole body in memory, capped at `MAX_BODY` = 2 MiB, with
+`MAX_ATTACHMENT` = 1 MiB for a single file (ADR-0011). A CherryTree notebook
+with images is routinely tens of megabytes, so an upload route would need a
+streaming multipart reader that the hand-rolled parser does not have and that
+ADR-0005 does not ask for.
+
+Deferred rather than rejected: if serve ever grows a streaming body path, an
+import route becomes a small addition on top of exactly the same model, plan
+and refusals.
+
+== Gates
+
+The import crate's unit tests cover the reader, the model and the two report
+forms: 71 tests. `crates/berrywiki-cli/tests/import.rs`
+drives the command end to end against real git through the
+`berrywiki-git-compat` sandbox: 15 tests.
+
+[cols="3,2"]
+|===
+| Property | Assertion
+
+| A dry run writes nothing | no commit, no new file, clean `status --porcelain`
+| The report is private | `notes.ctd` present, `secret-dir` absent, in both forms
+| One commit | commit count grows by exactly one; `show --name-only HEAD` contains `_Sidebar.md`; tree clean afterwards
+| The tree survives | the child node becomes a page whose metadata names its parent
+| Idempotence | a second apply makes no commit
+| An edit survives | a page edited after import is byte-identical after a second apply
+| A foreign page stops the run | marker rewritten to another notebook's; exit 2, no new commit
+| Title collisions stop an apply | exit 2, colliding title named
+| A non-git folder is refused with the cure | exit 2, `git init` named
+| A dry run works anywhere | plain folder, exit 0
+| A protected notebook is advice, not a parse error | 7-zip magic refused by name
+| Format is content-detected | a SQLite file named `.ctd` refused as SQLite
+| A missing file is an error, not a panic | exit 2
+|===
+
+Workspace total: 426 tests, from 340 at P4-backup.
+
+== Consequences
+
+*The import is one-way.* Nothing writes a CherryTree file back. The dropped
+formatting is dropped permanently in the destination, which is why the table
+above is stated before the write rather than discovered after it.
+
+*A notebook whose nodes were reordered between two imports produces new pages.*
+Node identity is CherryTree's `unique_id`, which is stable across edits, so this
+is rare; but a notebook rebuilt from scratch has fresh ids and imports as new
+pages beside the old ones rather than replacing them. That is the safe
+direction of the two.
+
+*The source hash is part of the marker, so editing the notebook and re-importing
+creates a second set of pages.* This is deliberate: two different files are two
+different sources, and silently merging them would mean guessing which node in
+the new file corresponds to which page from the old one. Re-importing an edited
+notebook into the same wiki is a refusal by title collision, not a merge.
+
+*`create_page` reloads and rewrites the sidebar per call*, so an N-node import
+is O(N^2) in reload cost. Notebook-sized inputs make this invisible; it is
+recorded here so a future bulk writer knows where to look.
+
+== Deferred
+
+* `.ctb` and `.ctx`, pending *D-11*.
+* Zim import (`P5-import-zim`), which reuses the model, the writer and every
+  refusal above; only the reader is new.
+* An `/import` route in serve, per <<noroute>>.
+* Re-import as merge. It needs a node-correspondence rule, which needs a
+  decision about which side wins; neither exists yet.

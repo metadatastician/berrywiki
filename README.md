@@ -67,8 +67,11 @@ Being explicit, because the difference matters:
   relies on is recorded in [`docs/compatibility/github-wiki.adoc`](docs/compatibility/github-wiki.adoc)
   and, as of today, **none has been tested against a real wiki** — those spikes
   are credential-gated. Treat the compatibility report as a hypothesis list.
-* **No importers, no packaging, no proofs yet** — CherryTree/Zim import and
-  Guix packaging are Phase 5. The invariants a proof would cover are written
+* **CherryTree import works; Zim import, packaging and proofs do not yet** —
+  `berrywiki import` reads CherryTree XML notebooks, and what it cannot carry
+  across is listed construct by construct in
+  [ADR-0014](docs/decisions/0014-cherrytree-import.adoc). Zim import and Guix
+  packaging are the rest of Phase 5. The invariants a proof would cover are written
   down in [`docs/proofs/invariants.adoc`](docs/proofs/invariants.adoc), each
   with the tests that witness it and a CI gate that keeps the list honest.
   They are tested, not proved.
@@ -96,6 +99,8 @@ berrywiki serve ./my-wiki --author "Ada <ada@example.org>"   # commit identity
 berrywiki serve --github owner/repo # mirror a GitHub wiki (read-only)
 berrywiki backup ./my-wiki ./backup-2026-09-03  # bundle + drafts + journal
 berrywiki restore ./backup-2026-09-03 ./restored-wiki
+berrywiki import notes.ctd ./my-wiki            # dry run: what it would bring across
+berrywiki import notes.ctd ./my-wiki --apply    # write the pages, in one commit
 ```
 
 For a private wiki, supply a token via `BERRYWIKI_GITHUB_TOKEN` — never as a

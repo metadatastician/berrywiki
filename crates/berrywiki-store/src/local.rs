@@ -885,6 +885,7 @@ impl WikiStore for LocalFolderStore {
         meta.position = input.position;
         meta.kind = input.kind.clone();
         meta.tags = input.tags.clone();
+        meta.extra = input.extra.clone();
 
         // Prepend the title only when the body does not already open with an
         // H1. A leading `##`/`###` is NOT a title, so we must still prepend —

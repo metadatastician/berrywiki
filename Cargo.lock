@@ -19,6 +19,7 @@ dependencies = [
  "berrywiki-git",
  "berrywiki-git-compat",
  "berrywiki-github",
+ "berrywiki-import",
  "berrywiki-serve",
  "berrywiki-store",
  "berrywiki-sync",
@@ -49,6 +50,13 @@ version = "0.0.1"
 dependencies = [
  "berrywiki-git-compat",
  "berrywiki-store",
+]
+
+[[package]]
+name = "berrywiki-import"
+version = "0.0.1"
+dependencies = [
+ "berrywiki-core",
 ]
 
 [[package]]

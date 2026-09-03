@@ -16,6 +16,7 @@ berrywiki-store = { path = "../berrywiki-store" }
 berrywiki-serve = { path = "../berrywiki-serve" }
 berrywiki-github = { path = "../berrywiki-github" }
 berrywiki-git = { path = "../berrywiki-git" }
+berrywiki-import = { path = "../berrywiki-import" }
 berrywiki-sync = { path = "../berrywiki-sync" }
 
 [[bin]]
