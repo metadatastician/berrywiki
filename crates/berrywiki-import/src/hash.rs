@@ -43,10 +43,16 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
     }
     msg.extend_from_slice(&bit_len.to_be_bytes());
 
-    for block in msg.chunks_exact(64) {
+    // `as_chunks` rather than `chunks_exact`: the padding above guarantees a
+    // whole number of blocks, and the array types carry that guarantee into
+    // the loop, so the word assembly below needs no bounds checks.
+    let (blocks, rest) = msg.as_chunks::<64>();
+    debug_assert!(rest.is_empty(), "padding must produce whole blocks");
+    for block in blocks {
         let mut w = [0u32; 64];
-        for (i, word) in block.chunks_exact(4).enumerate() {
-            w[i] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
+        let (words, _) = block.as_chunks::<4>();
+        for (i, word) in words.iter().enumerate() {
+            w[i] = u32::from_be_bytes(*word);
         }
         for i in 16..64 {
             let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
