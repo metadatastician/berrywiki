@@ -302,8 +302,12 @@ Workspace, existing members kept unchanged in mission:
   hand-rolled XML reader, so the workspace's only third-party crate is still
   comrak. Dry-run default; machine + human reports; the source is read, never
   opened for writing, and re-hashed after an apply to prove it was untouched.
-  `.ctb`/`.ctx` (SQLite) refused by content with conversion advice, pending the
-  dependency decision D-11. Zim reuses the model, the writer and every refusal.
+  `.ctb`/`.ctx` (SQLite) refused by content with conversion advice. D-11 is
+  ruled in ADR-0015: no SQLite crate, because `sqlite3` is a binary and
+  shelling out costs the dependency tree nothing. Whether that route actually
+  reaches `.ctb`'s content is an open hypothesis there (`P6-import-ctb-spike`),
+  not a plan; `.ctx` is refused permanently because it is encrypted. Zim
+  reuses the model, the writer and every refusal.
 
 | `berrywiki-app` (new, Phase 1)
 | The axum + maud SSR server and the `berrywiki` CLI (`serve`, `check`,
