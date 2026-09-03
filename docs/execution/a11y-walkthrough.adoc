@@ -1,0 +1,135 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+= Accessibility walkthrough: keyboard and screen reader
+:sectnums:
+
+== Status
+
+*NOT EXECUTED.*
+
+This is a script to be run, not a record of a run. Nothing in it has been
+performed, by an agent or by anyone else. It needs a person at a browser with a
+screen reader; no automated gate substitutes for it, and ADR-0012 states why.
+
+When it is run, replace this section with the date, the browser and version, the
+screen reader and version, and the outcome of every numbered step. A partial run
+is recorded as a partial run.
+
+== Why this exists separately from the gate
+
+`crates/berrywiki-a11y` audits structure on every route both script-free sweeps
+cover. Structure is the part a machine can check. It cannot check:
+
+* **Reading order** — whether the DOM order matches the visual order, and
+  whether that order makes sense read aloud.
+* **Label quality** — `aria-label="Search"` passes the gate whether or not it
+  is the right word for what the control does.
+* **Focus visibility** — that a `:focus-visible` outline exists in the
+  stylesheet is checkable; that it is *visible* against the background it lands
+  on is not.
+* **Usability** — whether a task can actually be completed without a mouse, in
+  a reasonable number of keystrokes, without getting lost.
+
+Every step below targets one of those four.
+
+== Setup
+
+[source,sh]
+----
+cargo run -p berrywiki-cli -- serve ./fixtures/test-wiki
+----
+
+Browser: Firefox and Chromium, both, because focus behaviour differs.
+Screen reader: NVDA on Windows is the package's named target; Orca on Linux and
+VoiceOver on macOS are acceptable substitutes if the substitution is recorded.
+
+Run the whole script **with the mouse physically unplugged**. Reaching for it
+once invalidates the run; note where you reached and start again.
+
+== Part 1 — keyboard only, no screen reader
+
+[cols="1,4,3"]
+|===
+| # | Step | Pass condition
+
+| 1 | Load `/`. Press Tab once. | The skip link appears, is legible, and is the
+first thing focused. It must not be off-screen while focused.
+| 2 | Press Enter on the skip link. | Focus moves into `<main>`; the next Tab
+lands inside the page content, not back at the top bar.
+| 3 | From `/`, Tab through the whole page without pressing Enter. | Focus is
+visible at every stop. No stop is invisible, and no stop is skipped over.
+| 4 | Continue tabbing past the last control. | Focus leaves the document to the
+browser chrome. It does not loop silently or become trapped.
+| 5 | Navigate the sidebar tree to a page and open it with Enter. | The target
+page loads and focus is in a sensible place, not lost at the document root.
+| 6 | Open a page with an unsaved draft. | The draft state is discoverable
+without seeing the dot.
+| 7 | Reach the search field by keyboard, type a term, submit with Enter. | The
+results page loads; focus is not lost.
+| 8 | Open `/page/<id>/edit`, reach the textarea, type, reach Save, submit. | The
+whole edit round trip is completable. Note the keystroke count.
+| 9 | On `/page/<id>/edit`, press Tab from inside the textarea. | Focus leaves
+the textarea rather than inserting a tab character.
+| 10 | Open `/page/<id>/delete`. Reach the confirm control. | The destructive
+action is reachable *and* is not the first thing focused.
+| 11 | Open `/page/<id>/attach`. Reach the file input and the submit button. |
+Both reachable; the file input announces its own label.
+| 12 | Open `/page/<id>/move`. Complete a move. | Completable by keyboard.
+| 13 | Zoom the browser to 200% and repeat steps 1 to 3. | No content is clipped
+or unreachable; the skip link still lands where it should.
+| 14 | Force dark mode (`prefers-color-scheme: dark`) and repeat step 3. | The
+focus outline is visible against every background it lands on. This is the
+specific thing the gate cannot check.
+|===
+
+== Part 2 — screen reader smoke script
+
+[cols="1,4,3"]
+|===
+| # | Step | Pass condition
+
+| 15 | Load `/`. Listen to the page title announcement. | The page is
+identifiable from the title alone.
+| 16 | List headings (NVDA: `H` / the elements list). | Exactly one heading at
+level 1, and it is the page title. Section headings sit beneath it with no
+level skipped.
+| 17 | List landmarks. | `main` announced once; `nav` announced as "Notebook";
+`aside` announced as "Page context". No unnamed duplicate landmark.
+| 18 | List links. | Every link's text says where it goes when read out of
+context. Flag any "here", "click", "more", or bare URL.
+| 19 | Read the sidebar tree top to bottom. | The current page is announced as
+current. An archived page is announced as archived. A page with an unsaved
+draft is announced as having one. None of the three may be conveyed by colour
+or shape alone.
+| 20 | Read a page containing a GFM task list. | Checked and unchecked items
+are distinguishable, and the item text is read with its checkbox.
+| 21 | Read a page containing an image attachment. | The alt text is read and
+describes the image. A decorative image is skipped silently.
+| 22 | Read a page containing a table. | Row and column structure is navigable.
+| 23 | Enter the search form. | The field is announced with a useful name, not
+as "edit blank".
+| 24 | Enter the editor form. | Every field announces its own label. The tags
+field announces its hint via `aria-describedby`.
+| 25 | Submit a save that fails (stale hash: edit the same page in two tabs). |
+The error is announced, not merely displayed. Note whether it is announced on
+load or only when reached.
+| 26 | Read `/diagnostics`. | Every warning is announced with enough context to
+act on. Nothing depends on a colour.
+| 27 | Read `/conflicts` with a diverged clone. | Both sides of the conflict are
+distinguishable by ear.
+| 28 | Read `/changes`. | Commit times are announced usefully rather than as
+bare numbers.
+|===
+
+== Part 3 — record
+
+For each numbered step: pass, fail, or not-reached, with a sentence. A failure
+becomes a row in `docs/execution/debt-register.adoc` and, if it needs a code
+change, a work package. A step that cannot be run (no screen reader available,
+route not built) is recorded as not-reached, never as a pass.
+
+Two things this walkthrough is expected to find that the gate cannot, listed
+here so that finding them is not treated as a surprise:
+
+* label wording that passes the gate whilst being unhelpful aloud, and
+* focus outlines that are legible in light mode and marginal in dark mode.

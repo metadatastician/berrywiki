@@ -135,7 +135,10 @@ fn no_script(html: &str) {
 /// absent deliberately; both execute a `<script>` inside them.
 fn sweep_response(r: &Response, target: &str) {
     match &r.bytes {
-        None => no_script(&r.body),
+        None => {
+            no_script(&r.body);
+            a11y_sweep(&r.body, target);
+        }
         Some(_) => {
             assert!(
                 ALLOWED_CONTENT_TYPES.contains(&r.content_type),
@@ -149,6 +152,22 @@ fn sweep_response(r: &Response, target: &str) {
             );
         }
     }
+}
+
+/// Structural accessibility gate, riding the same route enumeration as the
+/// script-free sweep so that there is no third list to forget to update. What
+/// this audit can and cannot see is documented in `berrywiki_a11y` itself.
+fn a11y_sweep(html: &str, target: &str) {
+    let findings = berrywiki_a11y::audit(html);
+    assert!(
+        findings.is_empty(),
+        "{target} has accessibility defects:\n  {}",
+        findings
+            .iter()
+            .map(|f| f.to_string())
+            .collect::<Vec<_>>()
+            .join("\n  ")
+    );
 }
 
 /// Hand-written on purpose rather than read from `berrywiki_serve`'s table:
@@ -551,6 +570,9 @@ fn every_synced_route_is_script_free() {
         "/search?tag=%22%3E%3Cscript%3Ealert(1)%3C/script%3E",
         // P4-history.
         &format!("/page/{PLAN_ID}/history"),
+        // Routed to `editor::delete_confirm`, and until now in neither sweep
+        // list: an unswept rendered surface behind two green "every route" tests.
+        &format!("/page/{PLAN_ID}/delete"),
         // P4-attach. The asset route is the first that answers with bytes
         // rather than HTML, which is why the assertion below is
         // `sweep_response` and not `no_script`.

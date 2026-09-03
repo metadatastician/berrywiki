@@ -21,6 +21,7 @@ berrywiki-git = { path = "../berrywiki-git" }
 berrywiki-sync = { path = "../berrywiki-sync" }
 
 [dev-dependencies]
+berrywiki-a11y = { path = "../berrywiki-a11y" }
 berrywiki-git-compat = { path = "../berrywiki-git-compat" }
 
 [lints.rust]

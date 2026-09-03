@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/berrywiki-a11y",
     "crates/berrywiki-appstate",
     "crates/berrywiki-cli",
     "crates/berrywiki-core",

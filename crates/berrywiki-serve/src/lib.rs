@@ -1229,14 +1229,21 @@ fn nav_tree(ctx: Ctx<'_>, current: Option<&str>) -> String {
     for (depth, page) in ctx.store.graph().walk() {
         let is_current = current == Some(page.id.as_str());
         let archived = if page.is_archived() { " archived" } else { "" };
+        // Italics and a dimmed colour announce nothing; the state needs words.
+        let archived_note = if page.is_archived() {
+            "<span class=\"visually-hidden\"> (archived)</span>"
+        } else {
+            ""
+        };
         let dot = if draft_ids.contains(&page.id) {
-            "<span class=\"draft-dot\" title=\"unsaved draft\"></span>"
+            "<span class=\"draft-dot\" aria-hidden=\"true\"></span>\
+             <span class=\"visually-hidden\"> (unsaved draft)</span>"
         } else {
             ""
         };
         out.push_str(&format!(
             "<li style=\"--depth:{depth}\" class=\"tree-item{archived}{}\">\
-             <a href=\"/page/{}\"{}>{}{dot}</a></li>",
+             <a href=\"/page/{}\"{}>{}{archived_note}{dot}</a></li>",
             if is_current { " current" } else { "" },
             escape_attr(&page.id),
             if is_current {
@@ -1268,7 +1275,7 @@ pub(crate) fn layout_three(
     let aside_html = if aside.is_empty() {
         String::new()
     } else {
-        format!("<aside class=\"context\">{aside}</aside>")
+        format!("<aside class=\"context\" aria-label=\"Page context\">{aside}</aside>")
     };
     let new_link = if ctx.editing {
         "<a class=\"new-link\" href=\"/new\">New page</a>"
@@ -1280,12 +1287,13 @@ pub(crate) fn layout_three(
         "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
 <title>{title} — BerryWiki</title><style>{CSS}</style></head><body>\
+<a class=\"skip-link\" href=\"#berrywiki-main\">Skip to content</a>\
 <header class=\"topbar\"><a class=\"brand\" href=\"/\">BerryWiki</a>{new_link}\
 <form class=\"search\" method=\"get\" action=\"/search\" role=\"search\">\
 <input type=\"search\" name=\"q\" placeholder=\"Search…\" aria-label=\"Search\">\
 <button type=\"submit\">Search</button></form>\
 <a class=\"diag-link\" href=\"/diagnostics\">Diagnostics</a></header>{strip}\
-<div class=\"grid\">{nav}<main class=\"main\"><h1>{title_h1}</h1>{main}</main>{aside_html}</div>\
+<div class=\"grid\">{nav}<main class=\"main\" id=\"berrywiki-main\"><h1>{title_h1}</h1>{main}</main>{aside_html}</div>\
 </body></html>",
         title = escape_html(title),
         title_h1 = escape_html(title),
@@ -1298,6 +1306,13 @@ pub(crate) fn layout_three(
 }
 
 const CSS: &str = "\
+/* Off-screen until focused, then the first thing a keyboard reader lands on. */\
+.skip-link{position:absolute;left:-9999px;top:0;z-index:100;padding:.5rem .9rem;background:#fff;color:#111;border:2px solid #111;text-decoration:none}\
+.skip-link:focus{left:.5rem;top:.5rem}\
+/* Announced but not painted: state that colour or shape alone would carry. */\
+.visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}\
+/* A visible focus indicator on every focusable thing, not just the styled ones. */\
+:focus-visible{outline:3px solid #0b5fff;outline-offset:2px}\
 :root{--depth:0}\
 *{box-sizing:border-box}\
 body{margin:0;font:15px/1.5 system-ui,sans-serif;color:#1a1a1a;background:#fff}\
@@ -1314,14 +1329,14 @@ body{margin:0;font:15px/1.5 system-ui,sans-serif;color:#1a1a1a;background:#fff}\
 .tree-item a{display:block;padding:.2rem .6rem .2rem calc(.6rem + var(--depth)*.9rem);color:#333;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\
 .tree-item a:hover{background:#f3f3f3}\
 .tree-item.current a{background:#f0e0e2;color:#7a1f2b;font-weight:600}\
-.tree-item.archived a{opacity:.55;font-style:italic}\
+.tree-item.archived a{color:#6b6b6b;font-style:italic}\
 .main{padding:1rem 2rem;min-width:0}\
 .main h1{margin-top:0}\
 .page table{border-collapse:collapse}\
 .page th,.page td{border:1px solid #ccc;padding:.3rem .6rem}\
 .page pre{background:#f6f6f6;padding:.6rem;overflow:auto;border-radius:4px}\
 .context{border-left:1px solid #e5e5e5;padding:.5rem 1rem;font-size:.9rem}\
-.context h2{font-size:.8rem;text-transform:uppercase;letter-spacing:.03em;color:#888;margin:1rem 0 .3rem}\
+.context h2{font-size:.8rem;text-transform:uppercase;letter-spacing:.03em;color:#6b6b6b;margin:1rem 0 .3rem}\
 .outline{list-style:none;padding:0;margin:0}\
 .outline .h2{padding-left:.6rem}.outline .h3{padding-left:1.2rem}.outline .h4{padding-left:1.8rem}\
 .tag{background:#f0e0e2;color:#7a1f2b;padding:.05rem .4rem;border-radius:3px;font-size:.8rem}\
@@ -1353,7 +1368,7 @@ a.tag:hover,a.tag:focus{background:#e2c8cc;text-decoration:underline}\
 .inline-form button{padding:.2rem .6rem;border:1px solid #7a1f2b;border-radius:3px;background:#fff;color:#7a1f2b;cursor:pointer}\
 .status-strip{margin:0;padding:.3rem 1rem;font-size:.85rem;background:#f6f1f2;border-bottom:1px solid #e5e5e5;color:#444}\
 .status-on{color:#2e7d32;font-weight:600}.status-off{color:#7a5b00;font-weight:600}\
-.commits{padding-left:1.4rem}.commits .when{color:#888;font-size:.85rem}\
+.commits{padding-left:1.4rem}.commits .when{color:#6b6b6b;font-size:.85rem}\
 .page-footer{margin-top:1.6rem;padding-top:.6rem;border-top:1px solid #e3e3e3;color:#666;font-size:.85rem}\
 .pending{padding-left:1.4rem}.hint{font-size:.85rem;color:#555}\
 .handoff th{text-align:left;padding-right:1rem}\
@@ -1361,7 +1376,10 @@ a.tag:hover,a.tag:focus{background:#e2c8cc;text-decoration:underline}\
 @media(prefers-color-scheme:dark){.status-strip{background:#1d1d1d;border-color:#333;color:#cfcfcf}body{background:#161616;color:#e6e6e6}.tree,.context{border-color:#333}.tree-item a{color:#cfcfcf}.tree-item a:hover{background:#222}.page pre{background:#222}\
 .editor textarea{background:#1d1d1d;color:#e6e6e6;border-color:#444}\
 .editor-field input,.editor-field select{background:#1d1d1d;color:#e6e6e6;border-color:#444}\
-.notice{background:#12290f}.error-banner{background:#2e1212}.draft-banner{background:#2b230c}}";
+.notice{background:#12290f}.error-banner{background:#2e1212}.draft-banner{background:#2b230c}\
+.context h2,.commits .when,.tree-item.archived a{color:#9a9a9a}\
+.skip-link{background:#161616;color:#e6e6e6;border-color:#e6e6e6}\
+:focus-visible{outline-color:#7aa7ff}}";
 
 // --- helpers ---------------------------------------------------------------
 
@@ -1826,7 +1844,10 @@ mod tests {
     /// silently swept by the vacuous half.
     fn sweep_response(r: &Response, target: &str) {
         match &r.bytes {
-            None => no_script(&r.body),
+            None => {
+                no_script(&r.body);
+                a11y_sweep(&r.body, target);
+            }
             Some(_) => {
                 assert!(
                     ALLOWED_CONTENT_TYPES.contains(&r.content_type),
@@ -1840,6 +1861,23 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Structural accessibility gate, riding the same route enumeration as the
+    /// script-free sweep. Keeping the two in one helper is what stops a route
+    /// being script-swept but accessibility-unswept: there is no second list to
+    /// forget to update. What it cannot check is in `berrywiki_a11y`'s own docs.
+    fn a11y_sweep(html: &str, target: &str) {
+        let findings = berrywiki_a11y::audit(html);
+        assert!(
+            findings.is_empty(),
+            "{target} has accessibility defects:\n  {}",
+            findings
+                .iter()
+                .map(|f| f.to_string())
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
     }
 
     /// Every content type an asset response is permitted to carry.

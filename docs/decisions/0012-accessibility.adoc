@@ -1,0 +1,254 @@
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+= ADR-0012: Accessibility
+:sectnums:
+
+== Status
+
+*Accepted* (2026-09-03). Implements work package P4-a11y. Takes the number
+after ADR-0011 (attachments); the deployment-model ADR the roadmap sketched as
+"ADR-0011" therefore needs a later number. The work-package contract asks for a
+"keyboard-only walkthrough + NVDA smoke script as exit criteria"; what that
+means here, and what it does not, is <<walkthrough>>.
+
+== Context
+
+BerryWiki serves HTML with no client script at all. That removes a whole class
+of accessibility failure — no focus stolen by a widget, no state that exists
+only in JavaScript, no ARIA pattern whose keyboard handling was never written —
+and it creates one specific risk in exchange: **every affordance must be carried
+by the markup, because there is nothing else to carry it.** A state shown only
+as a colour, a shape or a `title` attribute is not conveyed at all.
+
+Three things then had to be decided.
+
+. **Where the gate lives.** BerryWiki's zero-JS guarantee already rests on two
+  hardcoded route lists, `every_route_is_script_free` in
+  `crates/berrywiki-serve/src/lib.rs` and `every_synced_route_is_script_free` in
+  `crates/berrywiki-serve/tests/sync.rs`. Both call themselves "every route" and
+  neither is. A third list would have been a third place to forget.
+. **What an automated audit can honestly claim.** Most of accessibility is not
+  machine-checkable. A gate that implies otherwise is worse than no gate.
+. **Which defects the shell actually had.** This was settled by running the
+  audit over the real fixture routes rather than by inspection; the survey and
+  the gate disagreed, and the gate was right.
+
+== Decision
+
+=== The audit rides the existing sweeps, and adds no route list
+
+`crates/berrywiki-a11y` is a pure, dependency-free crate exposing one function,
+`audit(html) -> Vec<Finding>`. It is a **dev-dependency of `berrywiki-serve`
+only**: `cargo tree -p berrywiki-cli -e normal` does not contain it, and the
+workspace's third-party set is unchanged at the comrak subtree, because the
+crate's `[dependencies]` is empty.
+
+`sweep_response` — the helper both sweeps already call — gained one line. An
+HTML response now gets `no_script` **and** `a11y_sweep`; a bytes response is
+unchanged, because `no_script` and the audit both read `Response::body`, which
+is empty on a bytes response, so running either over an asset would sweep
+nothing whilst passing.
+
+The consequence is the property worth having: **a route cannot be script-swept
+but accessibility-unswept.** The two are the same enumeration. The inherited
+blind spot is undiminished and is stated plainly in <<blind>>.
+
+=== Why a crate rather than a test helper
+
+The attachments allowlist is duplicated on purpose (ADR-0011 §Gates): widening
+what the server serves must not widen the gate in the same edit. That reasoning
+is adversarial and specific to a safety allowlist. An accessibility audit has no
+such coupling — there is no server-side table it could be tempted to read — so
+it lives in one place rather than two.
+
+The mechanical reason is separate: integration tests cannot see `#[cfg(test)]`
+items in `src/`, and both sweeps need the same code.
+
+=== Rules, and their exemptions
+
+[cols="2,3"]
+|===
+| Rule | Fires when
+
+| `a11y.lang` | no `<html>`, or no non-empty `lang`
+| `a11y.title` | no `<title>`, or it is empty
+| `a11y.skip-link` | the first focusable link is not a `#` target, its target id is absent, or it has no text
+| `a11y.h1-count` | not exactly one `<h1>`
+| `a11y.heading-skip` | a heading level jumps by more than one
+| `a11y.landmark-name` | a `<nav>` or `<aside>` has no `aria-label`/`aria-labelledby`
+| `a11y.main` | not exactly one `<main>`
+| `a11y.control-label` | an operable input/textarea/select has no `<label for>`, `aria-label` or `aria-labelledby`
+| `a11y.link-text` | an `<a href>` has no accessible text
+| `a11y.button-text` | a `<button>` has no accessible text
+| `a11y.img-alt` | an `<img>` has no `alt` attribute at all
+| `a11y.positive-tabindex` | `tabindex` is greater than zero
+| `a11y.fake-widget` | a `role` of `tab`, `tablist` or `tabpanel` appears without script behind it
+| `a11y.duplicate-id` | an id appears twice
+|===
+
+Four exemptions are deliberate and each is tested in both directions.
+
+`title` and `placeholder` are **not** accepted as labels. Neither is announced
+dependably, and a placeholder vanishes the moment the field has a value.
+
+`alt=""` is accepted: an empty alt is how a decorative image declares itself.
+A *missing* `alt` is the defect.
+
+`<main>` is exempt from `a11y.landmark-name` because there is exactly one and
+its role names it.
+
+**A `disabled` control is exempt from `a11y.control-label`.** This one was
+forced by evidence rather than chosen: comrak renders a GFM task list as
+`<input type="checkbox" disabled>` followed by the item text, byte-for-byte as
+GitHub renders the same Markdown. Labelling those would mean diverging from the
+native reader — the project's first constraint — to satisfy a rule that does not
+apply to a control that is out of the tab order and cannot be operated. The
+exemption is bounded: removing `disabled` brings the rule straight back, and
+`an_enabled_control_still_needs_a_label` asserts exactly that, so it is a rule
+with an exception rather than a hole.
+
+Document-level rules are unconditional on purpose. An emitter that stopped
+producing `<html>` would otherwise silently switch four rules off, which is the
+shape of a gate that cannot fail.
+
+=== Headings are normalised, not demoted
+
+`render_markdown` now shifts every authored heading by a constant so the
+shallowest lands at `<h2>`. The shell supplies the document's `<h1>`; everything
+an author writes is a section inside it.
+
+A plain "demote by one" was the obvious implementation and it is wrong. Eleven
+of the fixture pages open with `# Heading`, which produced two competing `<h1>`s
+— the gate reported `found 2 ["Home", "Home"]` — but a page opening `## Section`
+is at least as common in a GitHub wiki, and demoting that would render
+`h1 → h3` and skip a level. Shifting by the shallowest fixes both whilst keeping
+the author's relative nesting byte-exact.
+
+Two properties are deliberate. A page that already starts at `##` is left where
+it is; a page that starts at `####` is pulled *up*, because leaving it deep
+would skip. And **a source that itself skips still skips afterwards**: the
+renderer shifts, it does not repair. Normalising an authoring defect away would
+hide it, which is the same failure mode as a gate that cannot fire.
+
+Safe because `header_ids` is not enabled, so rendered headings carry no anchors
+and nothing links to them; the outline pane indents from core's own extraction
+over the source, not from the rendered level. `render_markdown` has exactly
+three call sites, all rendering page body into a `<main>` that already carries
+the shell's `<h1>`. **The Markdown on disk is untouched**; GitHub renders the
+same file with its own heading levels, which is a rendering divergence, not a
+content one.
+
+=== State carried by colour or shape gets words
+
+Two markers were sighted-only and both are now announced.
+
+The unsaved-draft dot was a coloured `<span>` with a `title`. It is now
+`aria-hidden` decoration beside a visually-hidden " (unsaved draft)".
+
+The archived state was `opacity:.55` plus italics — no text at all, and opacity
+additionally dims below AA and cannot be overridden by a high-contrast mode. It
+is now a real colour plus a visually-hidden " (archived)".
+
+=== Contrast is recorded by hand, not gated
+
+Colour contrast is a stylesheet property and needs CSS cascade resolution to
+compute; the audit reads one HTML document and deliberately does not claim it.
+The ratios below were computed by hand against the static `CSS` const, so they
+are a measurement at a date, not a gate.
+
+[cols="2,1,1,1"]
+|===
+| Selector | Was | Ratio | Now
+
+| `.context h2` | `#888` | 3.54 | `#6b6b6b` (~5.3)
+| `.commits .when` | `#888` | 3.54 | `#6b6b6b` (~5.3)
+| `.tree-item.archived a` | `opacity:.55` on `#333` | ~3.5 | `color:#6b6b6b` (~5.3)
+| `.field-hint` | `#666` | 5.74 | unchanged
+| `.hint`, `.editor-field label` | `#555` | ~7.5 | unchanged
+| `.status-strip` | `#444` | ~9 | unchanged
+| `.drafts-unavailable` | `#7a5b00` | ~6.4 | unchanged
+|===
+
+Dark mode overrode none of the muted tokens, so `#6b6b6b` alone would have
+failed there; the dark block now sets `#9a9a9a` on `#161616` (~6.1).
+
+Added alongside: a `.skip-link` off-screen until focused, a global
+`:focus-visible` outline so every focusable element has a visible indicator
+rather than only the styled ones, and the `.visually-hidden` utility the two
+state markers use.
+
+== Gates
+
+Every assertion was plant-tested, **one binary at a time**, because `cargo test`
+stops at the first failing binary and a plant visible to both lists would
+witness only the first.
+
+[cols="3,2,1"]
+|===
+| Plant | Gate | Fired
+
+| skip link removed from `layout_three` | unit sweep, `serve/src/lib.rs` | yes
+| skip link removed from `layout_three` | synced sweep, `serve/tests/sync.rs` | yes
+| `aria-label` removed from `<aside>` | unit sweep | yes
+| `id="berrywiki-main"` removed from `<main>` | unit sweep | yes
+| `normalise_headings` call removed | unit sweep | yes
+| `normalise_headings` call removed | synced sweep | yes
+| `disabled` removed from a task-list checkbox | `an_enabled_control_still_needs_a_label` | yes
+|===
+
+`crates/berrywiki-a11y/tests/audit.rs` holds a positive-control document
+asserted to produce zero findings, one mutation per rule proving that rule can
+fire, the allowed cases (`tabindex="-1"`, `alt=""`, an icon link named by its
+image alt, a disabled control), and four tokeniser cases: escaped markup is not
+read as a tag, a comment containing a tag is ignored, a nested link does not end
+its parent early, and unterminated tags neither hang nor panic.
+
+Each mutation asserts its anchor is still present before mutating, so a test
+that has drifted out of date fails as "test is stale" rather than passing
+vacuously. That guard fired during development and was worth having.
+
+`/page/<id>/delete` was added to the synced sweep. It routes to
+`editor::delete_confirm` and appeared in neither list, so it was an unswept
+rendered surface behind two green tests that both called themselves complete.
+
+Workspace total: 332 tests, from 293 at P4-attach.
+
+== Consequences
+
+=== [[blind]] The inherited blind spot is undiminished
+
+Riding `sweep_response` means the audit covers exactly the routes the
+script-free sweeps cover, and those are still **two hardcoded lists**. A route
+added to neither is now unswept for script *and* for accessibility. Closing this
+is P6-noscript-ci's job, which enumerates routes rather than listing them; until
+then, "every rendered surface" means "every surface in those two lists", and
+this ADR says so rather than letting the test names imply otherwise.
+
+=== [[walkthrough]] What was not done, and is not claimed
+
+The work package asks for a keyboard-only walkthrough and an NVDA smoke script
+as exit criteria. **Neither has been executed.** `docs/execution/a11y-walkthrough.adoc`
+records the script to run, with a Status line reading *not executed*; running it
+needs a human at a browser and a screen reader, which no agent here has.
+
+Nothing in this ADR, the crate docs, or the README may be read as evidence of
+screen-reader testing. The audit checks structure. It cannot check reading
+order, whether a label is *good* rather than merely present, whether a focus
+ring is visible against its background, or whether the page is usable. Those are
+the things the walkthrough exists to find, and they remain unfound.
+
+=== The tag scanner is sound for this input only
+
+`berrywiki-a11y` scans tags rather than building a DOM. That is sound here
+because the renderer escapes raw HTML (`raw_html_block_never_emits_a_live_script`),
+so every `<` in a BerryWiki response opens a real tag. Pointed at arbitrary
+HTML it would be a naive parser, and the crate's own documentation says so.
+
+== Deferred
+
+* Contrast is not gated, only recorded. A real gate needs cascade resolution.
+* No `aria-describedby` audit, no landmark-completeness rule beyond `<main>`,
+  no reading-order check.
+* The walkthrough and the NVDA smoke script are written but unrun; that is the
+  standing debt this package leaves behind, and it is the honest exit criterion
+  rather than a green test.
