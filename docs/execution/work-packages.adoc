@@ -339,10 +339,14 @@ one GFM table. The delimiter is sniffed from the first line and *named in a
 diagnostic*; `--delimiter` overrides; space-separated is accepted only when
 asked for, never guessed, because prose is space-separated too. |
 Escalate if a file needs more than one table or a quoting rule beyond RFC 4180.
-| P6-import-html | sonnet | Tier 1. Hand-rolled reader over the existing XML
-machinery; a lossiness table in the ADR-0014 form; raw HTML is never carried
+| P6-import-html | sonnet | Tier 1. A tolerant tag-soup tokenizer, *not* the
+XML reader. Real HTML is rarely well-formed: unclosed `<p>` and `<li>`, void
+`<br>`, bare entities and unquoted attributes are the normal case rather than
+the error case, and a strict XML parse would reject the first real file it
+met. A lossiness table in the ADR-0014 form; raw HTML is never carried
 through, since the renderer would drop it anyway. | Escalate on any construct
-needing raw HTML in the output.
+needing raw HTML in the output, and on any tolerance rule that is a judgement
+call rather than a reading of the spec.
 | P6-import-xml | sonnet | Tier 1. Generic XML with a stated element mapping,
 reusing `berrywiki-import`'s reader. | Escalate if the mapping needs to be
 configurable; that is a different package.

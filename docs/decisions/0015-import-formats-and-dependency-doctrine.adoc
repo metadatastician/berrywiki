@@ -63,7 +63,7 @@ asserting that its neutral model and Markdown writer are "a contract between
 two importers, not one command's internals". Exactly one importer currently
 makes that claim true. Zim is the second, and it is the one that tests it: it
 has a tree, assets and internal links, so it exercises every part of the model
-that CherryTree does. A plain-text reader would not — it would produce a flat
+that CherryTree does. A plain-text reader would not: it would produce a flat
 list of pages and prove nothing about the contract at all.
 
 === [[doctrine]] The dependency doctrine
@@ -90,7 +90,7 @@ carries three sub-rules and none of them is optional:
 . *A closed set with fixed argv.* `berrywiki-git` already establishes the
   pattern: a fixed literal set of invocations, audited by a source scan. Every
   shell-out here is written the same way. The file path is the only variable,
-  and the binary is resolved from `PATH` — never from a path the user supplies,
+  and the binary is resolved from `PATH` and never from a path the user supplies,
   because "point BerryWiki at your own `pandoc`" is a way to run anything.
 . *The environment is scrubbed.* A child process inherits the environment, and
   `BERRYWIKI_GITHUB_TOKEN` must reach nothing but git. Every invocation calls
@@ -134,7 +134,7 @@ statement that any of them may be assumed.
 
 `.ctx` stays refused. It is a 7-zip *encrypted* SQLite database, not a plain
 one, so no reader route exists that does not involve a password; the advice
-link:0014-cherrytree-import.adoc[ADR-0014] already gives — open it in CherryTree and save a copy — remains the
+link:0014-cherrytree-import.adoc[ADR-0014] already gives, which is to open it in CherryTree and save a copy, remains the
 correct answer.
 
 === [[txt]] What "txt" and "delimited" actually mean
@@ -156,8 +156,8 @@ by every reader.
 === [[deed]] The `.deed` sidecar is deferred, and it conflicts with a locked rule
 
 The request is that every page be saved in its primary format *and* as a
-`.deed` backup. Written the obvious way — one sidecar per page inside the
-wiki clone — it does three things:
+`.deed` backup. Written the obvious way, as one sidecar per page inside the
+wiki clone, it does three things:
 
 * it doubles the number of files in the repository, which is the thing a
   reader sees first on GitHub;
@@ -167,8 +167,10 @@ wiki clone — it does three things:
   currently moving.
 
 The last is a fact, not a worry. The rename from `a2ml` to `deed` has not
-landed: as of 2026-09-03 the string "deed" appears nowhere in
-`hyper-repos/a2ml-ecosystem`, whose `spec/` directory holds a single
+landed. The local checkout of `hyper-repos/a2ml-ecosystem` is behind its
+remote, so the claim was checked against the remote itself: the recursive
+tree of `hyperpolymath/a2ml-ecosystem` at `28473ea2e08e` on 2026-09-03
+contains no path matching `deed`, and its `spec/` directory holds a single
 `README.adoc`. Wiring a moving target into every save is how a rename becomes
 a migration.
 
@@ -257,7 +259,7 @@ no links. The import is still correct; the report says what was not there.
   existing XML reader and cost almost nothing. Against it: codeboxes, tables
   and images are believed to live in *separate* tables keyed by node id and
   offset, with the tree in a `children` table, which would make this
-  "reconstruct a `.ctd` from five tables" rather than "reuse the reader" — a
+  "reconstruct a `.ctd` from five tables" rather than "reuse the reader", which is a
   different and much larger job. Binary payloads would also need `hex()` to
   survive the CLI. *No effort estimate may be given and no code written until
   this is settled* by reading CherryTree's `ct_storage_sqlite.cc` or opening a
