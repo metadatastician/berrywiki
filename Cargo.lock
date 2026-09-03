@@ -52,6 +52,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "berrywiki-import"
+version = "0.0.1"
+dependencies = [
+ "berrywiki-core",
+]
+
+[[package]]
 name = "berrywiki-render"
 version = "0.0.1"
 dependencies = [

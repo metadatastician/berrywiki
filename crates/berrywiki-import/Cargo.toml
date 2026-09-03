@@ -1,0 +1,14 @@
+[package]
+name = "berrywiki-import"
+description = "Reads a foreign notebook (CherryTree today, Zim later) into a neutral import model of pages, Markdown bodies and assets. Pure and dependency-free: it never opens a file, never writes one, and never mutates the source."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+berrywiki-core = { path = "../berrywiki-core" }
+
+[lints.rust]
+unsafe_code = "forbid"
