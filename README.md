@@ -52,6 +52,21 @@ berrywiki serve ./my-wiki          # three-pane explorer + editor at :23779
   rewritten without changing anything, then **Move** to apply it as one
   commit. Retitling is done in the editor; the filename follows on the next
   move.
+* **Attachments, and history per page.** Files attach to a page and are stored
+  in the wiki repo like any other content; each page has a history view reading
+  real git history, so you can see what changed and when without leaving the
+  reader.
+* **Accessibility as a gate, not an aspiration.** `berrywiki-a11y` is a
+  dev-only crate of fourteen structural rules that runs over *every* rendered
+  route in the test suite: heading order, landmarks, a skip link, accessible
+  names, and text alternatives for anything that signals with colour or shape
+  alone. Contrast ratios are recorded by hand in
+  [ADR-0012](docs/decisions/0012-accessibility.adoc). Writing the gate found an
+  unswept route that two green "every route" tests had both missed.
+* **Backup and restore, and CherryTree import.** `berrywiki backup` writes a
+  git bundle of committed history plus drafts and the operation journal;
+  `berrywiki restore` rebuilds from it. `berrywiki import` reads a CherryTree
+  `.ctd` notebook and reports what it would become before writing anything.
 
 ## What does not work yet
 
@@ -63,6 +78,12 @@ Being explicit, because the difference matters:
   anything else is refused and left for you to settle in git.
 * **GitHub serving is read-only.** `serve --github` mirrors a wiki and renders
   no edit affordances.
+* **The accessibility walkthrough has not been run.** The *structural* half is
+  a gate and is enforced on every route (above). The *manual* half — driving
+  the reader and the editor with a screen reader — is written up in
+  [`docs/execution/a11y-walkthrough.adoc`](docs/execution/a11y-walkthrough.adoc)
+  and **has never been executed**. It needs a human at a browser with NVDA. No
+  screen-reader claim is made until it has been.
 * **Live GitHub behaviour is unverified.** Every GitHub Wiki behaviour BerryWiki
   relies on is recorded in [`docs/compatibility/github-wiki.adoc`](docs/compatibility/github-wiki.adoc)
   and, as of today, **none has been tested against a real wiki** — those spikes
@@ -76,7 +97,12 @@ Being explicit, because the difference matters:
   with the tests that witness it and a CI gate that keeps the list honest.
   They are tested, not proved.
 
-Current position: Phases 0–3 largely built, Phase 4–5 open. See
+Current position: **Phases 0–4 are built** — all five Phase 4 packages
+(tags, history, attachments, accessibility, backup/restore) are done, with the
+accessibility *walkthrough* the one explicit exception above. **Phase 5 is one
+of four**: CherryTree import is done; Zim import, Guix packaging and the SPARK
+proof work are open. The suite is **429 tests across 42 binaries, green**
+(measured 2026-09-15). See
 [`docs/execution/work-packages.adoc`](docs/execution/work-packages.adoc) for the
 package-by-package state and [`docs/execution/debt-register.adoc`](docs/execution/debt-register.adoc)
 for known debt.
