@@ -16,15 +16,22 @@ automatically.
 
 ## Before either variant can be posted
 
-Both drafts below are written to be *true on the day they are posted*. Two of
-those preconditions are not met yet, and the drafts are annotated where they
-depend on one.
+Both drafts below are written to be *true on the day they are posted*, and the
+drafts are annotated where they depend on a precondition.
+
+**Variant B is postable now.** Ruling R-H (2026-09-15) records that the two
+unmet preconditions gate **Variant A only**: Variant B neither mentions a
+release nor asserts a GitHub Wiki behaviour, so nothing it says depends on
+either. Under D-11(c) the template is the delivery and this post is only an
+amplifier, and under D-12(b) a teacher installs nothing — so `v0.1.0` is the
+*developer* door, not the teacher one. Cutting `v0.1.0` (and with it P5-guix,
+per R-C) remains required for Variant A and is tracked separately.
 
 | Precondition | State as of 2026-09-15 | Gates which variant |
 |---|---|---|
-| A `v0.1.0` release exists | **Not met.** Zero tags, zero releases on the repo | Both |
-| `P1-spike-read` has run against a real `.wiki.git` | **Not met.** Credential-gated; every GitHub Wiki behaviour is still reasoned from documentation, not measured | Both |
-| `metadatastician/berrywiki-course-template` exists | **Not met.** The repository has not been created | Variant B only |
+| A `v0.1.0` release exists | **Not met.** Zero tags, zero releases on the repo | **Variant A only.** Variant B makes no claim about a release, tag, version or download — it says there is nothing to install |
+| `P1-spike-read` has run against a real `.wiki.git` | **Not met.** Credential-gated; every GitHub Wiki behaviour is still reasoned from documentation, not measured | **Variant A only.** Variant B's sole GitHub-behaviour claim is that the template's pages render, which is a browser observation rather than the spike |
+| `metadatastician/berrywiki-course-template` exists | **Met, 2026-09-15.** Public, `isTemplate: true`, CC-BY-SA-4.0, and its `structure check` workflow is green at `9e83349` | Variant B only |
 
 The first two are why neither draft makes a single claim about how GitHub Wikis
 behave. That is a deliberate constraint from the roadmap: *the post must not
@@ -128,23 +135,32 @@ catch the things that break in yours. Happy to answer anything.
 > **Suggested title:** Course wiki starter — a pre-structured module wiki you
 > can "Use this template" and fill in
 
-<!-- DO NOT POST until metadatastician/berrywiki-course-template exists and its
-     README renders correctly on GitHub. Under ruling D-11(c) the template is
-     the delivery and this post is only an amplifier — the template must be
-     able to stand entirely on its own. -->
+<!-- CLEARED TO POST as of 2026-09-15 (ruling R-G + R-H).
+     metadatastician/berrywiki-course-template is public, isTemplate: true, and
+     its structure check is green at 9e83349. Under ruling D-11(c) the template
+     is the delivery and this post is only an amplifier — the template stands on
+     its own. Remaining owner steps: fill the OWNER markers below, read it once
+     against the two house rules (do not lead with AI; do not oversell
+     accessibility), and post. D-9: the owner posts, never an agent. -->
 
 Hello all,
 
-This is a **template repository for a module wiki**, not an application. You
-press *Use this template*, and you get a wiki tree already laid out the way a
-module actually runs:
+This is a **template repository for a module wiki**, not an application:
+
+<https://github.com/metadatastician/berrywiki-course-template>
+
+You press *Use this template*, and you get a wiki tree already laid out the way
+a module actually runs:
 
 * `Home`, `Syllabus`
 * `Weeks/` — Weeks 1 to 12
 * `Assignments/`, `Groups/`, `Resources/`
 * a `Staff/` subtree for answer keys and drafts
 
-Every page is plain Markdown and renders correctly in GitHub's own wiki reader.
+Every page is plain Markdown. Keep the tree as a folder in the repository, where
+it can be reviewed in a pull request, or publish it to the repository's GitHub
+Wiki with a single `git subtree push` — the README shows both.
+
 There is nothing to install and nothing to run — if you never touch the tooling,
 you still have a properly structured course wiki, which is the point.
 
