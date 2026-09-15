@@ -13,6 +13,7 @@ SPDX-PackageDownloadLocation = "https://github.com/metadatastician/berrywiki"
 path = [
   "docs/**",
   "ARCHITECTURE.md",
+  "CHANGELOG.md",
   "CODE_OF_CONDUCT.md",
   "CONTRIBUTING.md",
   "GOVERNANCE.md",
