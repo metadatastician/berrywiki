@@ -696,9 +696,9 @@ the owner supplies, and MVP-declare may not treat it as passed before then.
 | Medium
 | The closure is small and bounded — 24 crates, 1.4 MB compressed, pinned by
   the committed `Cargo.lock` — and there is no axum/tokio tree to package.
-  Two routes avoid hand-maintained crate packages: generate the definitions
-  with `guix import crate -r comrak`, or vendor the sources so `guix.scm`
-  needs no `#:cargo-inputs` at all. D-12(b)'s signed binary release and OCI
+  Ruled 2026-09-15 (`ENDGAME-R-3`): generate the definitions as a
+  `guix/crates.scm` module with `guix import crate -r comrak`. Vendoring the
+  sources is closed as an option. D-12(b)'s signed binary release and OCI
   image are produced from the same `guix.scm`, so one lane covers all three
   artefacts
 | The CI Guix lane going red. That lane is the verification of record: `guix`

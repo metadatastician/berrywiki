@@ -321,6 +321,14 @@ CI only builds Nix") described S5.4 of the implementation plan, not this
 repository, and that design was never built. Real constraint instead: the
 24-crate closure has no Guix packages upstream — see the risk row
 `risk-guix-closure` in `docs/architecture/implementation-plan.adoc`.
+Closure strategy *ruled* 2026-09-15 (`ENDGAME-R-3`): generate a
+`guix/crates.scm` module with `guix import crate -r comrak` — the canonical
+Guix idiom, keeping no vendored third-party source in this repository.
+Vendoring the 24 crates is *closed* as an option; do not re-open the fork.
+That route needs a working `guix` to generate, and the maintainer's WSL
+machine has none, so this row stays unstarted until Guix is installed there —
+which is also the single action that would cut iteration from a ~10-minute CI
+round trip to seconds.
 | P5-spark | opus | Differential SPARK proofs of the invariants ledger
 (`docs/proofs/invariants.adoc`, INV-1..6; metadata
 grammar → forest builder → move state machine); nothing labelled "proven"
