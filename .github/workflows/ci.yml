@@ -114,3 +114,58 @@ jobs:
       # means the gate was able to fail and did not.
       - name: AsciiDoc render gate
         run: scripts/check-adoc.sh
+
+  # End-to-end positive AND negative control for the composite Action itself.
+  # Reading action.yml proves nothing about `git ls-remote`, actions/cache or
+  # `cargo install --git` on a real runner; only running it does. `uses: ./`
+  # runs the action.yml in this very commit, so a PR that breaks the Action
+  # goes red here rather than in a teacher's repository.
+  action:
+    name: berrywiki check Action (self-test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # fixtures/test-wiki is a known-answer fixture: 10 pages, 0 errors and
+      # exactly 3 warnings (one broken link, two malformed metadata values).
+      # Asserting all three means a silent no-op cannot pass as a check.
+      # `uses: ./` leaves github.action_ref empty, so the Action falls back to
+      # building the CLI from `main`. That is the intended fallback and it is
+      # what this job exercises; it also means this job checks the PR's
+      # fixtures with main's CLI, which is correct while no PR touches both.
+      - name: Action over the known-answer fixture
+        id: control
+        uses: ./
+        with:
+          path: fixtures/test-wiki
+      - name: Assert the known answer
+        env:
+          PAGES: ${{ steps.control.outputs.pages }}
+          ERRORS: ${{ steps.control.outputs.errors }}
+          WARNINGS: ${{ steps.control.outputs.warnings }}
+        run: |
+          set -euo pipefail
+          printf 'pages=%s errors=%s warnings=%s\n' "$PAGES" "$ERRORS" "$WARNINGS"
+          [ "$PAGES" = "10" ] || { echo "::error::expected 10 pages"; exit 1; }
+          [ "$ERRORS" = "0" ] || { echo "::error::expected 0 errors"; exit 1; }
+          [ "$WARNINGS" = "3" ] || { echo "::error::expected 3 warnings"; exit 1; }
+      # The negative control. The same fixture carries three warnings, so
+      # strict: 'true' MUST fail. Without this, a strict mode that silently
+      # passed everything would look identical to one that works.
+      - name: Action in strict mode must fail on the same fixture
+        id: strict
+        continue-on-error: true
+        uses: ./
+        with:
+          path: fixtures/test-wiki
+          strict: 'true'
+      - name: Assert strict mode failed
+        env:
+          OUTCOME: ${{ steps.strict.outcome }}
+        run: |
+          set -euo pipefail
+          echo "strict outcome: $OUTCOME"
+          [ "$OUTCOME" = "failure" ] || {
+            echo "::error::strict mode passed a wiki with 3 warnings; the gate cannot fail"
+            exit 1
+          }

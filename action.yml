@@ -1,0 +1,197 @@
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+# SPDX-License-Identifier: MPL-2.0
+#
+# The `berrywiki check` composite Action (package P6-community, ruling
+# D-12(b)). D-12(b) defines the teacher path as "the template repo plus the
+# `berrywiki check` Action" — teachers install nothing on their own machine.
+# This is the half that runs in their repository's CI.
+#
+# It wraps one CLI verb, `berrywiki check <folder>`, whose contract is
+# exercised by the Rust test suite rather than asserted here:
+#   exit 0  no error-level diagnostics (warnings are allowed)
+#   exit 1  one or more error-level diagnostics
+#   exit 2  no folder given, or the folder cannot be opened
+#
+# Why it builds from source. There is no release yet: ruling R-C (2026-09-15)
+# holds `v0.1.0` until P5-guix is unblocked, so D-12(b)'s binary door does not
+# exist to download from. The build is therefore a Rust compile on the first
+# run. It is cached on the resolved commit, so subsequent runs in the same
+# repository restore a binary and skip the compile entirely. When `v0.1.0`
+# ships, the build step becomes a download and this comment should go with it.
+
+name: 'BerryWiki check'
+description: >-
+  Validate a wiki page tree — broken links, missing parents, cycles, duplicate
+  ids — and fail the build when the structure is wrong.
+author: 'Jonathan D.A. Jewell'
+
+branding:
+  icon: 'check-square'
+  color: 'purple'
+
+inputs:
+  path:
+    description: 'Folder holding the wiki pages to check.'
+    required: false
+    default: '.'
+  strict:
+    description: >-
+      Fail on warnings as well as errors. The CLI itself only fails on errors;
+      this is a policy choice that belongs to the repository using the Action,
+      not to the tool.
+    required: false
+    default: 'false'
+  ref:
+    description: >-
+      Git ref or full 40-character commit SHA of metadatastician/berrywiki to
+      build the CLI from. Leave it unset and the Action builds from the very
+      revision you pinned it at — `uses: metadatastician/berrywiki@<sha>`
+      builds `<sha>`. That keeps the cache key stable, so a teacher's repository
+      restores a cached binary instead of rebuilding every time berrywiki's
+      main branch moves. Only `uses: ...@main` (or a local `uses: ./`) leaves
+      the pin unresolvable, and then this falls back to `main`.
+    required: false
+    default: ''
+
+outputs:
+  errors:
+    description: 'Number of error-level diagnostics.'
+    value: ${{ steps.check.outputs.errors }}
+  warnings:
+    description: 'Number of warning-level diagnostics.'
+    value: ${{ steps.check.outputs.warnings }}
+  pages:
+    description: 'Number of pages found in the folder.'
+    value: ${{ steps.check.outputs.pages }}
+
+runs:
+  using: 'composite'
+  steps:
+    # Every input reaches the shell through the environment, never through
+    # ${{ }} interpolation into a run: block. Interpolation splices the value
+    # into the script before bash parses it, so a crafted branch name or path
+    # would execute as code. This Action is meant to run in other people's
+    # repositories, so that door stays shut.
+    - name: Resolve berrywiki revision
+      id: rev
+      shell: bash
+      env:
+        INPUT_REF: ${{ inputs.ref }}
+        # github.action_ref is the ref this Action was itself resolved at, so
+        # a caller who pinned `uses: ...@<sha>` gets that same <sha> built,
+        # with no second pin to keep in step. It is empty for a local
+        # `uses: ./`, which is why the fallback below exists.
+        ACTION_REF: ${{ github.action_ref }}
+      run: |
+        set -euo pipefail
+        url='https://github.com/metadatastician/berrywiki.git'
+        wanted="$INPUT_REF"
+        if [ -z "$wanted" ]; then wanted="$ACTION_REF"; fi
+        if [ -z "$wanted" ]; then wanted='main'; fi
+        INPUT_REF="$wanted"
+        if printf '%s' "$INPUT_REF" | grep -Eq '^[0-9a-f]{40}$'; then
+          sha="$INPUT_REF"
+          echo "berrywiki: using pinned commit $sha"
+        else
+          # git ls-remote, not the REST API: no token, no rate limit.
+          sha="$(git ls-remote "$url" "$INPUT_REF" | awk 'NR==1 {print $1}')"
+          if [ -z "$sha" ]; then
+            echo "::error::cannot resolve berrywiki ref '${INPUT_REF}'"
+            exit 1
+          fi
+          echo "berrywiki: ref '${INPUT_REF}' resolves to $sha"
+        fi
+        echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+    - name: Restore cached berrywiki binary
+      id: cache
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ~/.cargo/bin/berrywiki
+        # Keyed on the exact commit, so a moved ref rebuilds rather than
+        # silently checking with the previous build. No restore-keys for the
+        # same reason: a near-miss must not be served as a hit.
+        key: berrywiki-cli-${{ runner.os }}-${{ steps.rev.outputs.sha }}
+
+    - name: Build berrywiki
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        BERRYWIKI_SHA: ${{ steps.rev.outputs.sha }}
+      run: |
+        set -euo pipefail
+        # The runner's preinstalled Rust is newer than the 1.89 MSRV, which is
+        # a floor and not a ceiling, so no toolchain is installed here.
+        # --locked uses the committed Cargo.lock. berrywiki-cli has no
+        # third-party dependencies, so this compiles the workspace and nothing
+        # from the wider ecosystem.
+        cargo install \
+          --git 'https://github.com/metadatastician/berrywiki.git' \
+          --rev "$BERRYWIKI_SHA" \
+          --locked \
+          berrywiki-cli
+
+    - name: berrywiki check
+      id: check
+      shell: bash
+      env:
+        WIKI_PATH: ${{ inputs.path }}
+        STRICT: ${{ inputs.strict }}
+      run: |
+        set -uo pipefail
+
+        if [ ! -d "$WIKI_PATH" ]; then
+          echo "::error::path not found: ${WIKI_PATH}"
+          exit 1
+        fi
+
+        set +e
+        out="$(berrywiki check "$WIKI_PATH" 2>&1)"
+        rc=$?
+        set -e
+
+        printf '%s\n' "$out"
+
+        {
+          echo '### BerryWiki check'
+          echo
+          echo '```'
+          printf '%s\n' "$out"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        if [ "$rc" -eq 2 ]; then
+          echo "::error::berrywiki could not read '${WIKI_PATH}' (exit 2)"
+          exit 2
+        fi
+
+        # The tool's last line is "N error(s), M warning(s)". Parsing it is how
+        # the counts become outputs. If that line is absent the tool's output
+        # shape has changed, and the honest response is to fail: a check that
+        # cannot find its own result must not report success.
+        summary="$(printf '%s\n' "$out" \
+          | grep -E '^[0-9]+ error\(s\), [0-9]+ warning\(s\)$' | tail -1)"
+        if [ -z "$summary" ]; then
+          echo "::error::could not parse berrywiki check output; refusing to report a pass"
+          exit 1
+        fi
+
+        errors="$(printf '%s' "$summary" | awk '{print $1}')"
+        warnings="$(printf '%s' "$summary" | awk '{print $3}')"
+        pages="$(printf '%s\n' "$out" | sed -n 's/^\([0-9]\+\) page(s) in .*/\1/p' | head -1)"
+
+        echo "errors=$errors"     >> "$GITHUB_OUTPUT"
+        echo "warnings=$warnings" >> "$GITHUB_OUTPUT"
+        echo "pages=${pages:-0}"  >> "$GITHUB_OUTPUT"
+
+        if [ "$rc" -ne 0 ]; then
+          echo "::error::${errors} error(s) in the wiki tree"
+          exit "$rc"
+        fi
+
+        if [ "$STRICT" = 'true' ] && [ "$warnings" -gt 0 ]; then
+          echo "::error::${warnings} warning(s) and strict mode is on"
+          exit 1
+        fi
+
+        echo "berrywiki check: ${errors} error(s), ${warnings} warning(s)"
