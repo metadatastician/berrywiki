@@ -201,21 +201,27 @@ legible; they will be deleted at the next revision.
   `scripts/check-launcher.sh` runs in CI with a fake binary and asserts the
   exact argv.
 
-| L
-| The launcher pair is now hand-maintained. `berrywiki-launcher.sh` still
-  says "GENERATED"; its header lists the four properties a future
-  `launch-scaffolder realign` must preserve, but nothing enforces that
-  beyond `scripts/check-launcher.sh` catching a regression after the fact.
-
-| L
-| The desktop entry `--integ` writes runs through
-  `/var/mnt/eclipse/repos/.desktop-tools/keepopen.sh`, an estate-absolute
-  path from the launcher standard that does not exist on this host, and a
-  menu entry does not see the shell environment that carries
-  `BERRYWIKI_WIKI`. Both are stated in the README; the `--start`/`--stop`/
-  `--status` arms work from a terminal. Clearing it: a launcher-standard
-  ruling on the fallback ladder, and a per-user config file for the wiki
-  folder (not built; the environment variable is the whole mechanism today).
+| *CLEARED*
+| Two rows of launcher debt — the pair being hand-maintained while still
+  labelled "GENERATED" with nothing enforcing the four properties a future
+  `launch-scaffolder realign` must preserve, and the `--integ` desktop entry
+  routing through an estate-absolute `keepopen.sh` path absent on this host
+  while a menu entry cannot see the shell environment carrying
+  `BERRYWIKI_WIKI` — are **cleared by deletion**, not by repair.
+  Decision *D-16* ruled 2026-09-15: delete the launcher pair. Under *D-12(b)*
+  the install story is Guix for developers and, for teachers, the course
+  template plus the `berrywiki check` Action with nothing installed at all;
+  the launcher was a fourth path serving neither audience. Removed:
+  `berrywiki-launcher.sh`, `berrywiki.launcher.a2ml`,
+  `scripts/check-launcher.sh`, the README section, and the `launcher smoke`
+  CI job.
++
+NOTE: `scripts/check-launcher.sh` also ran `bash -n` and `shellcheck -S style`
+over every shell script in the repository as a side effect. That half was
+*kept*, as the standalone `shell script gate` job in `ci.yml`, so deleting a
+dead feature did not silently drop a live gate. The replacement is
+fail-closed where the original was not: the old script skipped shellcheck on
+request and still exited 0.
 |===
 
 == Code debt

@@ -74,18 +74,29 @@ jobs:
         run: |
           cargo test --workspace --locked -- --list > "$RUNNER_TEMP/test-list.txt"
           scripts/check-invariants-ledger.sh "$RUNNER_TEMP/test-list.txt"
-  launcher:
-    name: launcher smoke
+  shell:
+    name: shell script gate
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # No Rust here on purpose: the gate drives berrywiki-launcher.sh with
-      # a fake `berrywiki` binary and asserts the exact argv it is started
-      # with, the refusal when BERRYWIKI_WIKI is unset, and shellcheck on
-      # every shell script in the repo. shellcheck ships on ubuntu-latest.
-      - name: shellcheck + launcher smoke
-        run: scripts/check-launcher.sh
+      # No Rust here on purpose. Until D-16 deleted the launcher pair this
+      # gate was carried by scripts/check-launcher.sh, which ran bash -n and
+      # shellcheck over every shell script as a side effect of smoke-testing
+      # the launcher. The launcher is gone; the shellcheck half is kept on
+      # its own rather than deleted along with it.
+      #
+      # Fail-closed by design: the old script could be told to skip
+      # shellcheck with an environment variable, so a runner without it
+      # produced a warning and a green job. Here a missing shellcheck fails
+      # the step, and an empty scripts/ leaves the glob unexpanded and also
+      # fails, rather than passing vacuously.
+      - name: bash -n + shellcheck
+        run: |
+          set -eu
+          shellcheck --version
+          for s in scripts/*.sh; do bash -n "$s"; done
+          shellcheck -S style scripts/*.sh
   docs:
     name: AsciiDoc render gate
     runs-on: ubuntu-latest
