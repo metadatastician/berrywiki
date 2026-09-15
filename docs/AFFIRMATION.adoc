@@ -1,0 +1,391 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= AFFIRMATION — BerryWiki, as of 2026-09-15
+:toc: macro
+:toclevels: 2
+:std-docs: https://github.com/hyperpolymath/standards/blob/main/docs
+
+_the No-Bullshit file: what we affirm was true and checkable at this moment._
+
+[NOTE]
+====
+This file conforms to *profile A (evidential)* of the
+link:{std-docs}/AFFIRMATION-STANDARD.adoc[AFFIRMATION authoring standard].
+
+An *affirmation* is a solemn declaration of the truth of a statement, made by
+someone who _declines to swear an oath_ — our truth-as-best-believed at a
+stamped instant, binding on our honesty, not a claim of infallibility.
+
+This file is *optional*. Delete it rather than carry an affirmation you have not
+re-verified — a stale affirmation is worse than none.
+====
+
+toc::[]
+
+== What this is, and how it works
+
+*What it is.* A short, dated, signed snapshot of what the owner can honestly and
+verifiably claim about *BerryWiki* at one exact commit. Nothing here is
+marketing and nothing is a promise about the future — those live in the README.
+This file is the receipt.
+
+*What the project is.* A companion authoring, navigation, indexing and
+synchronisation layer for GitHub.com Wikis that gives them a CherryTree/Zim-style
+hierarchical notebook experience, while keeping the content as plain,
+GitHub-compatible Markdown in an ordinary wiki git repository. It is a Rust
+workspace of 13 crates with a CLI and a local server.
+
+*How it stays trustworthy.* Three moving parts:
+
+. *Ground truth, not memory.* Every claim below was produced by running the
+  project's own checks in the session that wrote this file. Where a status
+  document or memory said otherwise, the live run won and the contradiction is
+  flagged here.
+. *A frozen anchor.* The file names the exact commit SHA, branch, UTC timestamp,
+  working-tree delta and toolchain (see <<verifiable-anchor>>), so "true" always
+  means "true _at this point_". Move the SHA and this file is a draft until it
+  is re-run.
+. *A real signature.* It is landed by a *signed git commit*; that signature over
+  this content at the anchored SHA is what makes the affirmation tamper-evident
+  and attributable — not the prose alone.
+
+*We are fallible.* This is our best honest belief, not a proof of its own
+correctness. Treat it as a falsifiable claim, not gospel.
+
+== The epistemic contract (read this before you trust _or_ attack)
+
+This document records the owner's *best belief* at the timestamp below. It is
+*not a guarantee of correctness.* The only guarantee is *no intentional
+overclaim*. An honest claim that later turns out false is an *error to be fixed*
+— not a lie.
+
+What you may conclude from this file:
+
+* Every claim in <<solid>> was produced by *running the tool* in the session that
+  wrote this file — not from memory, not copied forward from a previous
+  affirmation, and not read off a status document.
+
+What you may *not* conclude:
+
+* That anything is true *now*. This file describes the commit in
+  <<verifiable-anchor>> and nothing else.
+* That unlisted things pass. *Silence is not a claim.*
+* That CI was green at this anchor. *No CI run was observed* — see
+  <<outstanding>>.
+
+*Standing invitation to refute.* You are invited to bulldoze any claim in this
+file. Bring a counter-example, a failing run, or a contradicting source.
+
+[#verifiable-anchor]
+== Verifiable anchor
+
+[cols="1,3",options="header"]
+|===
+| Field | Value
+
+| Project
+| BerryWiki
+
+| Repo
+| `metadatastician/berrywiki`
+
+| Branch
+| `main`
+
+| Commit (HEAD)
+| `0b49e2b2a378ccb2fed76a66908e50f1e9524184`
+
+| Permalink
+| https://github.com/metadatastician/berrywiki/tree/0b49e2b2a378ccb2fed76a66908e50f1e9524184
+
+| Verified (UTC)
+| `2026-09-15T03:36:35Z`
+
+| Working-tree delta at verification
+| `git status --porcelain` returned *no rows*. The only content present that is
+  not in the anchor commit is this affirmation file itself, which no build or
+  test target reads; it therefore cannot affect any result below.
+
+| Toolchain
+| `rustc 1.97.1 (8bab26f4f 2026-07-14)`, `cargo 1.97.1 (c980f4866 2026-06-30)`.
+  ⚠ This is *not* the MSRV the manifest declares — see <<outstanding>>.
+
+| Affirmed by
+| Jonathan D.A. Jewell <6759885+hyperpolymath@users.noreply.github.com>
+|===
+
+[IMPORTANT]
+====
+*Never anchor to a tag.* Tags move, and a moved tag silently invalidates every
+claim in this file.
+
+If you are reading this at a later commit, the claims may have drifted. Re-run
+<<reproduce>> and write a fresh affirmation; do not trust a stale one.
+====
+
+[#anchor-moved]
+=== The anchor moved while this file was being written (disclosed, not hidden)
+
+A first draft of this affirmation was signed against
+`0ecc5a87a5a9adb3e3fa1905b3858e1c1aca355d`. Between gathering that evidence and
+landing it, three pull requests merged to `main` (#51, #52, #53), making
+`0b49e2b2` the new head. *That first draft was therefore invalid by this file's
+own rule* and was not pushed.
+
+Rather than re-point the SHA and keep the old numbers, every check was re-run at
+`0b49e2b2` and the prose corrected — one cited artefact (`berrywiki.launcher.a2ml`)
+had been *deleted* by #51, and the licensing claim had *changed* under #52.
+
+The test figures are unchanged, and that is a measured result rather than an
+assumption: `git diff 0ecc5a87 0b49e2b2 -- crates Cargo.toml Cargo.lock` is
+*empty*, so the three commits touched no compilation input.
+
+This section exists because an affirmation that quietly re-anchored would be
+exactly the failure the genre is designed to catch.
+
+== Companion documents and repo metadata (cross-check)
+
+The files a sceptic should read against this one — *including any that
+contradict it*.
+
+* `README.md` — the aspirational claims this file is measured against.
+  ⚠ It is Markdown, not AsciiDoc; the estate standard requires `README.adoc`.
+* `ARCHITECTURE.md`, `docs/architecture/` — the mechanism, in place of the
+  `docs/EXPLAINME.adoc` the standard asks for.
+* `docs/compatibility/github-wiki.adoc` — carries its own
+  ✅Verified / 🟡Assumption / ❓Unverified / 📌Decision legend, and *contradicts
+  any reading of this repo as wiki-proven*: it states that `gh` is not installed
+  on the development host and that no disposable wiki has been exercised. *That
+  document wins* over any impression the README gives.
+* `docs/execution/debt-register.adoc` — the standing debt list, itself amended
+  by #51 at this anchor.
+* `action.yml` — the "BerryWiki check" composite Action, added by #53 at this
+  anchor. Its *existence* is affirmed below; its behaviour is *not*, because it
+  has not been executed in this session.
+
+*Absent, and named rather than glossed:* there is no `docs/EXPLAINME.adoc`, no
+`docs/AUDIT.adoc`, and no root `0-AI-MANIFEST.a2ml`. The standard's companion
+trio is therefore *incomplete* in this repo. The only `.a2ml` files remaining
+anywhere are two `0.2-AI-MANIFEST.a2ml` under `.github/DISCUSSION_TEMPLATE/` and
+`.github/ISSUE_TEMPLATE/`; `.machine_readable/` contains only `root-allow.txt`.
+
+== The honest state (one breath)
+
+BerryWiki is a 13-crate Rust workspace that builds clean and whose own test
+suite passes in full (429 assertions across 42 suites, zero failures, zero
+ignored) on a current stable toolchain; what it does *not* yet have is any
+evidence that it works against a real GitHub Wiki, because no live wiki has ever
+been exercised, and its declared minimum supported Rust version has never been
+built.
+
+[#solid]
+=== What is solid (and how we checked)
+
+[cols="2,1,3",options="header"]
+|===
+| Claim | Status | Evidence (command, and what it printed)
+
+| The whole workspace compiles, including every test and bench target
+| affirmed
+| `cargo build --workspace --all-targets` at the anchor — *exit 0*,
+  `2026-09-15T03:36:19Z`. ⚠ Completed in 0.09s from a *warm* `target/`; the
+  same command on a colder tree earlier in the session took 7.80s and also
+  exited 0. Neither run was a cold build from an empty `target/`.
+
+| The whole test suite passes
+| affirmed
+| `cargo test --workspace` at the anchor — *exit 0*; every `test result:` line
+  summed: *42 suites, 429 passed, 0 failed, 0 ignored*,
+  `2026-09-15T03:36:31Z` → `2026-09-15T03:36:35Z`
+
+| No test is silently skipped
+| affirmed
+| the same aggregate — `ignored = 0` across all 42 suites, so the 429 figure is
+  not inflated by a disabled population
+
+| The three commits merged during authoring changed no compilation input
+| affirmed
+| `git diff --stat 0ecc5a87 0b49e2b2 -- crates Cargo.toml Cargo.lock` — *empty*
+
+| The workspace is 13 crates
+| affirmed
+| `ls crates` — `berrywiki-{a11y,appstate,cli,core,draft,git,git-compat,github,
+  import,render,serve,store,sync}`
+
+| The root LICENSE is verbatim MPL-2.0, and the docs licence is present
+| affirmed
+| `head -4 LICENSE` — "Mozilla Public License Version 2.0"; `LICENSES/` holds
+  `MPL-2.0.txt` and `CC-BY-SA-4.0.txt`; `REUSE.toml` present. This matches the
+  estate rule (MPL-2.0 code, CC-BY-SA-4.0 docs).
+
+| Six CI workflows and one composite Action are present
+| affirmed
+| `ls .github/workflows/` — `ci.yml labels.yml label-triage.yml pages.yml
+  scorecard.yml secret-scanner.yml`; `action.yml` at root declares
+  `name: 'BerryWiki check'`. *Presence only* — no run was observed.
+
+| Wiki round-tripping works against a live GitHub Wiki
+| *not checked*
+| README aspiration. `docs/compatibility/github-wiki.adoc` explicitly says no
+  wiki has been exercised. Do not read as affirmed.
+|===
+
+=== The honest nuance you must not lose
+
+Where a true claim above is easily over-read. This section is what separates an
+affirmation from marketing.
+
+* *"429 tests pass" is 429 test FUNCTIONS, not 429 verified behaviours.* The
+  figure is the sum of the `passed` field of each suite's `test result:` line.
+  It says nothing about coverage, and nothing about whether the tests assert the
+  right thing.
+* *The 29 test binaries exercise the project's own fixtures, not GitHub.* Names
+  like `fixture_wiki`, `sync`, `conflicts` and `import` describe local
+  round-trips against checked-in fixtures. A green `sync` suite is *not*
+  evidence that synchronisation against github.com works.
+* *"Builds clean" was measured on a warm `target/`.* It is not a claim about a
+  cold build, about portability, about other platforms, or about the MSRV.
+* *A workflow file is a mechanism, not a result.* Six workflows and a composite
+  Action exist; nothing here says any of them passed.
+* *This affirmation was assembled by an AI session using the owner's signing
+  key on the owner's host.* The signature is cryptographically the owner's; the
+  measurements were run by the session. See <<attestation>> — do not read
+  "Affirmed by" as "the owner personally re-ran these commands".
+
+=== Known-incomplete but honestly fenced
+
+Gaps that fail *loudly* rather than silently.
+
+* *GitHub Wiki compatibility is unproven* — fenced by
+  `docs/compatibility/github-wiki.adoc`, which carries an explicit
+  ❓Unverified legend and states the limitation in its own text rather than
+  leaving the reader to infer it.
+* *Secret leakage* — fenced by `.github/workflows/secret-scanner.yml`, which
+  runs in CI rather than relying on developer discipline.
+* *Known debt* — fenced by `docs/execution/debt-register.adoc`, which is
+  maintained rather than allowed to rot silently.
+
+[#outstanding]
+=== Outstanding / weak / refuted (no spin)
+
+[IMPORTANT]
+====
+Never delete a refuted claim. Deleting it is exactly the spin this genre exists
+to prevent — mark it refuted and say what refuted it.
+====
+
+* *REFUTED during authoring:* an earlier draft of this file claimed
+  `berrywiki.launcher.a2ml` was "the only machine-readable manifest at root".
+  *That is false at this anchor* — PR #51 deleted the launcher pair
+  (`berrywiki.launcher.a2ml`, `berrywiki-launcher.sh`) together with
+  `scripts/check-launcher.sh`. Refuted by `ls` at `0b49e2b2`. See
+  <<anchor-moved>>.
+* *The declared MSRV is UNVERIFIED.* `Cargo.toml` declares
+  `rust-version = "1.89"`. Every check recorded above ran on *1.97.1*. A pass on
+  1.97.1 is *not* evidence that the crate builds on 1.89 — newer compilers
+  accept strictly more. The MSRV claim is carried by the manifest alone and has
+  no run behind it in this session.
+* *No CI run was observed at this anchor.* The six workflows' *existence* is
+  affirmed; their *results* are not, because the GitHub REST API was
+  rate-limited throughout this session. Likewise the new `action.yml` composite
+  Action was never executed here.
+* *This repository has NO git hooks whatsoever.* Measured:
+  `git config core.hooksPath` is unset, there is no `.githooks/` directory, and
+  the hooks directory contains only `.sample` files. The canonical affirmation
+  template's warning — _"Do not use `--no-verify`. The pre-commit hook enforces
+  the SPDX header"_ — is therefore *vacuous here*: there is no local gate to
+  bypass or to satisfy. The CI workflows are the only gates this repository has,
+  and they run after the fact. This is recorded because carrying the template's
+  warning unchanged would have asserted a protection that does not exist.
+* *The README/EXPLAINME/AFFIRMATION trio is incomplete.* `README.md` is
+  Markdown where the standard requires AsciiDoc, and there is no
+  `docs/EXPLAINME.adoc`. Not fixed in this commit: converting them is a
+  substantive documentation change, not part of affirming current state.
+* *No `Justfile`*, contrary to the estate convention, so there is no `just build`
+  / `just audit` entry point; the commands in <<reproduce>> are raw `cargo`.
+* *No root `0-AI-MANIFEST.a2ml`*, and `.machine_readable/` holds only
+  `root-allow.txt`.
+* *Lint and format were not run.* No `cargo clippy` and no `cargo fmt --check`
+  in this session. Their absence from <<solid>> is deliberate: silence is not a
+  claim.
+* *No security audit was run.* No `cargo audit` / `cargo deny` in this session.
+
+[#reproduce]
+== Reproduce it yourself
+
+[source,bash]
+----
+git clone https://github.com/metadatastician/berrywiki
+cd berrywiki
+git checkout 0b49e2b2a378ccb2fed76a66908e50f1e9524184
+
+git status --porcelain          # expect: no output (clean tree)
+rustc --version                 # observed: rustc 1.97.1 (8bab26f4f 2026-07-14)
+cargo --version                 # observed: cargo 1.97.1 (c980f4866 2026-06-30)
+
+cargo build --workspace --all-targets   # expect: exit 0
+cargo test  --workspace                 # expect: exit 0, 0 failed
+----
+
+To re-derive the 429 figure rather than trusting it, sum the suite lines
+directly — do not read a truncated tail, which reports only the last suite:
+
+[source,bash]
+----
+cargo test --workspace 2>&1 | tee test.log
+awk '/^test result:/ {s++; for (i=1;i<=NF;i++) {
+       if ($i=="passed;")  p+=$(i-1);
+       if ($i=="failed;")  f+=$(i-1);
+       if ($i=="ignored;") g+=$(i-1) }}
+     END { print "suites="s, "passed="p, "failed="f, "ignored="g }' test.log
+# observed: suites=42 passed=429 failed=0 ignored=0
+----
+
+== One-line characterisation (quote this)
+
+> BerryWiki builds clean and passes all 429 of its own tests at
+> `0b49e2b2`, and has never once been run against a real GitHub Wiki.
+
+[#attestation]
+== Joint attestation
+
+We, the undersigned, assert that *to the best of our joint belief at the
+timestamp above, every claim in this file is true and was checked as described*
+— with no intentional overclaim, and with the open gaps stated rather than
+hidden.
+
+* *Engineering party (AI):* `claude-opus-5` (Claude Code session) — ran the
+  checks recorded here at `2026-09-15T03:36:19Z` → `2026-09-15T03:36:35Z`,
+  assembled this document, and stands behind the wording above as a faithful
+  report of those runs.
+* *Owner / maintainer:* Jonathan D.A. Jewell
+  <6759885+hyperpolymath@users.noreply.github.com> — _signs by committing this
+  file with `-S`; the git commit signature over this content, at the commit SHA
+  recorded above, is the cryptographic form of this affirmation._
+
+[NOTE]
+====
+*Division of labour, stated plainly.* The measurements were performed by the AI
+session on the owner's host, and the commit is signed with the owner's SSH key
+resident there. "Affirmed by" above therefore means _the owner's key attests to
+this content_, not _the owner personally re-executed each command_. A reader who
+wants owner-executed evidence should run <<reproduce>>.
+====
+
+[source,bash]
+----
+git log --show-signature -1 -- docs/AFFIRMATION.adoc
+git rev-parse HEAD^     # must equal 0b49e2b2a378ccb2fed76a66908e50f1e9524184
+----
+
+[WARNING]
+====
+This repository has *no pre-commit hook* (see <<outstanding>>), so `--no-verify`
+would be a no-op here rather than a bypass. It was not used. The absence of a
+local gate is itself recorded above rather than quietly enjoyed.
+====
+
+_Landed by a signed git commit. Verify with `git log --show-signature` that the
+anchor SHA above matches the parent of the commit that introduced this
+affirmation. If they do not match, this file is a *draft* and must be read as
+one._
