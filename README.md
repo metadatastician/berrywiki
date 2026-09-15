@@ -236,3 +236,12 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md). Security reports:
 Code is licensed under **MPL-2.0**; documentation under **CC-BY-SA-4.0**.
 Full texts in [`LICENSES/`](LICENSES/); machine-readable mapping in
 [`REUSE.toml`](REUSE.toml).
+
+The root `LICENSE` file is the **verbatim, unmodified** MPL-2.0 text, and must
+stay that way. It carried a short dual-licence preamble until 2026-09-15, which
+read correctly to a human but dropped GitHub's `licensee` below its match
+threshold, so the repository reported its licence as *"other"* and showed no
+licence in the sidebar. The dual-licence statement lives here and in
+`REUSE.toml` instead, which are the normative record; `LICENSE` is only the
+copy GitHub reads. Adding anything above the MPL text — even a comment — breaks
+detection again.
