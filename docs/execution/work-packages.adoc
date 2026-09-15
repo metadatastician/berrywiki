@@ -421,7 +421,9 @@ not verified, is a stop-and-report.
 | P8-packaging | opus | The *developer* door, as against the teacher door
 P6-edu-template already opens: a `v0.1.0` tag and release with a verified
 build. | *Blocked-by* P5-guix (R-C: unblock Guix first, then cut the release).
-P5-guix is presently unowned -- no guix file exists anywhere in the tree.
+P5-guix has a lane but no implementation: branch `p5-guix/packaging-lane` is
+pushed (`fc34450`) and carries only documentation commits recording the ruled
+crate-closure strategy. No `.scm` or other guix file exists on it or on `main`.
 | MVP-declare | opus | Declare the MVP against the roadmap's own criteria, with
 the measurement that supports each one. The test baseline as of `0cf0066` is
 42 suites, 429 passed, 0 failed, 0 ignored on `cargo test --workspace`. MSRV 1.89 is
