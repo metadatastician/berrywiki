@@ -198,8 +198,12 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: metadatastician/berrywiki@main   # pin to a SHA in real use
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # Pin this to a commit SHA rather than @main. The Action builds the CLI
+      # from whatever revision you pinned it at and caches the binary on that
+      # commit, so a pinned workflow restores a cached binary while @main
+      # rebuilds every time this repository moves.
+      - uses: metadatastician/berrywiki@main
         with:
           path: .          # folder holding the wiki pages
           strict: 'false'  # 'true' also fails the build on warnings

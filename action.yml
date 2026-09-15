@@ -44,10 +44,14 @@ inputs:
   ref:
     description: >-
       Git ref or full 40-character commit SHA of metadatastician/berrywiki to
-      build the CLI from. Pin this to a SHA for a reproducible check; the
-      default tracks main and can change under you.
+      build the CLI from. Leave it unset and the Action builds from the very
+      revision you pinned it at — `uses: metadatastician/berrywiki@<sha>`
+      builds `<sha>`. That keeps the cache key stable, so a teacher's repository
+      restores a cached binary instead of rebuilding every time berrywiki's
+      main branch moves. Only `uses: ...@main` (or a local `uses: ./`) leaves
+      the pin unresolvable, and then this falls back to `main`.
     required: false
-    default: 'main'
+    default: ''
 
 outputs:
   errors:
@@ -73,9 +77,18 @@ runs:
       shell: bash
       env:
         INPUT_REF: ${{ inputs.ref }}
+        # github.action_ref is the ref this Action was itself resolved at, so
+        # a caller who pinned `uses: ...@<sha>` gets that same <sha> built,
+        # with no second pin to keep in step. It is empty for a local
+        # `uses: ./`, which is why the fallback below exists.
+        ACTION_REF: ${{ github.action_ref }}
       run: |
         set -euo pipefail
         url='https://github.com/metadatastician/berrywiki.git'
+        wanted="$INPUT_REF"
+        if [ -z "$wanted" ]; then wanted="$ACTION_REF"; fi
+        if [ -z "$wanted" ]; then wanted='main'; fi
+        INPUT_REF="$wanted"
         if printf '%s' "$INPUT_REF" | grep -Eq '^[0-9a-f]{40}$'; then
           sha="$INPUT_REF"
           echo "berrywiki: using pinned commit $sha"
