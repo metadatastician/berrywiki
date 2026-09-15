@@ -49,10 +49,14 @@ Two further house rules are baked in:
 
 Hello all,
 
-I teach with GitHub, and I kept running into the same wall: a GitHub Wiki is a
-*flat* list of pages. Once a module wiki passes twenty or thirty pages —
-syllabus, weekly notes, lab sheets, reading, assessment briefs — students cannot
-find anything, and neither can I.
+<!-- OWNER: open in your own words and with your own experience — how you came to
+     the problem, and in what teaching context. Everything below this line is a
+     measured property of the code; this opening is the one part only you can
+     write, and it is the part readers weigh most. -->
+
+A GitHub Wiki is a *flat* list of pages. Once a module wiki passes twenty or
+thirty pages — syllabus, weekly notes, lab sheets, reading, assessment briefs —
+nobody can find anything in it.
 
 The tools that solve this well (CherryTree, Zim, Obsidian) all solve it by
 owning the storage. That is exactly what I did not want for course material,
@@ -78,8 +82,10 @@ project tomorrow, you would be left with a wiki — not with an export problem.
   asserts that over every route rather than trusting me to remember.
 * Saves that refuse rather than clobber: if a page changed since you opened the
   editor, the save is rejected with your text preserved both in the form and as
-  a draft. I am told this matters more than anything else on the list when a
-  teaching assistant and a lecturer are editing the same week's page.
+  a draft.
+  <!-- OWNER: if this has actually mattered in your own teaching — two people
+       editing the same week's page — say so here in your own words. Leave the
+       line out rather than assert it secondhand. -->
 * Commit-on-save: one save is one commit, sidebar included. It never
   force-pushes, never starts a merge, and never merges two authored sides on
   your behalf.
