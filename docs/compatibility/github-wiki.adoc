@@ -87,7 +87,7 @@ Each row below is a concrete test to run against a disposable
 | Is an attachment inside `assets/` reachable by URL from the wiki's own web UI? | ❓ | 🟡 Only through the repository's blob view, not as a bare asset URL. Relevant to §3.8: a read lock is enforceable only where BerryWiki is the read path.
 | How does `_Sidebar.md` behave / is it honoured? | ✅ | *Confirmed 2026-09-15.* The generated sidebar renders on every page fetched, not only `Home`. This is what carries BerryWiki's hierarchy into the native reader — see the filename row below, which is why it matters more than expected.
 | How do concurrent pushes fail (non-fast-forward)? | ❓ | 🟡 Rejected; must fetch-before-push.
-| Does the default wiki branch have special behaviour? | ✅ | *Confirmed 2026-09-15.* A fresh clone of `<repo>.wiki.git` checks out **`master`**, not `main`, on a repository whose own default branch is `main`. Any tooling that assumes `main` for the wiki remote is wrong.
+| Does the default wiki branch have special behaviour? | ✅ | *Confirmed 2026-09-15.* A fresh clone of `<repo>.wiki.git` checks out **`master`**, not `main`, on a repository whose own default branch is `main`. This wiki's first commit ("Initial Home page", 2026-07-20) predates any tooling in this project, so `master` was not chosen here. Whether GitHub *always* creates wiki remotes on `master` is not established by this single observation — but tooling that assumes `main` is wrong at least here.
 |===
 
 == Link-format matrix (to populate during the spike)
@@ -142,7 +142,7 @@ and none affecting the canonical source:
 | Aspect | BerryWiki policy
 | Raw inline/block HTML | *Escaped/omitted*, never emitted (comrak `unsafe_=false` + `tagfilter`). GitHub renders a *sanitised subset* of inline HTML, so some GitHub-rendered HTML will not appear in BerryWiki's preview. ✅ tested.
 | `javascript:` / `vbscript:` / non-image `data:` link URLs | Rewritten to `#` at the AST level. ✅ tested.
-| Syntax highlighting of code blocks | Not applied (comrak default features off to stay buildable on rustc 1.85). May return behind a feature.
+| Syntax highlighting of code blocks | Not applied (comrak default features off, to keep the dependency surface small). The original rustc-1.85 reason is retired — the workspace MSRV is 1.89 — but re-enabling is unmeasured. May return behind a feature.
 | Exact GFM parity (tables, task lists, autolinks, footnotes) | comrak GFM; *parity with GitHub's exact output is UNVERIFIED* until the live spike (❓).
 |===
 

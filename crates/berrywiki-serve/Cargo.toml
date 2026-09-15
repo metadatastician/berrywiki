@@ -1,6 +1,6 @@
 [package]
 name = "berrywiki-serve"
-description = "Zero-JavaScript server-side-rendered explorer and editor for BerryWiki (ADR-0005): a testable route()/handle() core plus a small std::net blocking server. Editor mutations go through berrywiki-sync (commit-on-save) unless the caller opts out. No async runtime, no web framework — deliberately buildable on the host's rustc 1.85."
+description = "Zero-JavaScript server-side-rendered explorer and editor for BerryWiki (ADR-0005): a testable route()/handle() core plus a small std::net blocking server. Editor mutations go through berrywiki-sync (commit-on-save) unless the caller opts out. No async runtime, no web framework — a deliberately minimal dependency surface."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,8 +8,9 @@ license.workspace = true
 repository.workspace = true
 
 # No third-party dependencies: the HTTP server is hand-rolled on std::net for a
-# single-user localhost tool. This keeps it buildable on the offline rustc-1.85
-# host and avoids betting the async (axum/tokio) tree on that toolchain. The
+# single-user localhost tool, avoiding a bet on the async (axum/tokio) tree.
+# (Originally this also cleared an offline rustc-1.85 host; the workspace MSRV
+# is now 1.89 — see ADR-0008 — so the toolchain reason no longer applies.) The
 # HTTP surface is the stable seam; the library can be swapped later without
 # touching engine/store/render (ADR-0005 stack amendment).
 [dependencies]
