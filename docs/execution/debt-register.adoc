@@ -32,7 +32,7 @@ legible; they will be deleted at the next revision.
 
 | *CLEARED*
 | `Cargo.toml` declared `license = "MIT OR Apache-2.0"` while `LICENSE` and
-  `README` said MPL-2.0 + CC-BY-SA-4.0. All eleven crates inherit
+  `README` said MPL-2.0 + CC-BY-SA-4.0. All thirteen crates inherit
   `license.workspace = true`, so every crate would have published under the
   wrong terms. Ruled 2026-08-07: **MPL-2.0 for code, CC-BY-SA-4.0 for docs**.
   `berrywiki.launcher.a2ml` carried the same wrong claim and was corrected.
@@ -71,7 +71,7 @@ legible; they will be deleted at the next revision.
   "BerryBlocks" presentation layer in **JS/WASM** — banned by ADR-0003 — plus
   a Semantic Knowledge Graph, a Broken Link Auto-Healer, an Obsidian-style
   graph view and `git-seo` SEO hooks. None of those exist. Rewritten to
-  describe the real eleven-crate system. `scaffold/` repeated the same
+  describe the real thirteen-crate system. `scaffold/` repeated the same
   fiction and was deleted.
 
 | *CLEARED*
@@ -88,7 +88,7 @@ legible; they will be deleted at the next revision.
 
 | *CLEARED*
 | `README.md` claimed "Phase 0", "no rich editor yet", and listed one crate of
-  eleven — roughly three phases behind the code.
+  eleven at the time (thirteen today) — roughly three phases behind the code.
 
 | *CLEARED*
 | **ADR-0007 was referenced eight times and did not exist.** ADR-0005 and
