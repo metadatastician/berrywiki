@@ -6,13 +6,20 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # Changelog
 
 All notable changes to this project are recorded here, in the spirit of
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 **There is no released version yet.** The repository carries no tags and no
 releases, so there is no version heading below and no comparison links — adding
 either would assert a release that does not exist. The first version heading
 appears when `v0.1.0` is cut, which is package `P8-packaging` and is blocked on
 `P5-guix` under ruling R-C.
+
+Under ruling D-12(b) that release ships as one packaging system with two
+artefacts — a Guix package, and a signed binary (`SHA256SUMS` + a `minisign`
+signature) alongside the OCI image produced by `guix pack`. Work package
+`P5-guix` is the gate on all three. Zero tags and zero releases exist on
+`origin` as of 2026-09-15.
 
 ## [Unreleased]
 
@@ -32,6 +39,16 @@ appears when `v0.1.0` is cut, which is package `P8-packaging` and is blocked on
   the delivery: a teacher presses *Use this template* and installs nothing.
 - **Community drafts** under `docs/community/`, including the GitHub Global
   Campus Teachers post. These are owner-posted, never agent-posted (D-9).
+- Read-only SSR explorer over a GitHub Wiki clone, zero-JS by doctrine.
+- In-app editing with drafts held outside the clone, and in-app sync
+  (commit / pull / push) with conflict classification.
+- Tags, per-page history from real `git log`, and attachments stored at
+  `assets/<page-id>/<filename>`.
+- `berrywiki check`: validates a wiki and exits non-zero on error-level
+  diagnostics (the composite Action above builds on this verb).
+- `berrywiki import`: CherryTree notebook import with a lossiness table and a
+  per-construct diagnostic tally printed before `--apply` writes anything.
+- An accessibility gate in CI.
 
 ### Changed
 
@@ -57,3 +74,12 @@ appears when `v0.1.0` is cut, which is package `P8-packaging` and is blocked on
 - The accessibility walkthrough (`docs/execution/a11y-walkthrough.adoc`) is
   written and **has never been executed**; it needs a human with a screen
   reader. The structural gate is real; the walkthrough half is not claimed.
+  It is declared unrun in the README and in the published wiki.
+- `P1-spike-read` has never run, so every GitHub Wiki behaviour the project
+  relies on is reasoned from documentation rather than tested against a real
+  wiki.
+- GitHub reports the licence as `other`: a six-line preamble precedes the
+  MPL-2.0 text in `LICENSE`, which drops GitHub's detector below its match
+  threshold. `REUSE.toml` and `LICENSES/` are correct and remain normative.
+
+[Unreleased]: https://github.com/metadatastician/berrywiki/commits/main
