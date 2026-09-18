@@ -36,7 +36,7 @@ Two consequences follow, and they explain most of the code:
 
 ## The crates
 
-Eleven crates, layered so that the parts which must be provably correct have no
+Thirteen crates, layered so that the parts which must be provably correct have no
 I/O to be wrong about.
 
 ### Engine — no I/O at all

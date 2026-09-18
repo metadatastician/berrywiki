@@ -10,9 +10,11 @@ repository.workspace = true
 [dependencies]
 # GFM-compatible Markdown → HTML. `default-features = false` drops syntect
 # syntax-highlighting, emoji shortcodes and the CLI — none of which the preview
-# needs — and, crucially, their transitive `darling`/`onig`/`clap` subtrees,
-# keeping the crate buildable on the host's rustc 1.85 (comrak's default tree
-# pulls darling 0.23, which demands rustc 1.88). Source stays canonical; this
+# needs — and, crucially, their transitive `darling`/`onig`/`clap` subtrees.
+# The original reason was a rustc-1.85 host (comrak's default tree pulls darling
+# 0.23, which demands rustc 1.88); the workspace MSRV is now 1.89, so that
+# specific blocker is retired and only the dependency-surface reason stands —
+# re-enabling has not been attempted or measured. Source stays canonical; this
 # produces a *preview*. Syntax highlighting can return later behind a feature.
 comrak = { version = "0.54", default-features = false }
 

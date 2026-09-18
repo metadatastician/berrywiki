@@ -134,32 +134,6 @@ command-line argument, so it stays out of shell history and process listings.
 
 `fixtures/test-wiki/` is a small notebook you can point any of these at.
 
-### Desktop launcher (Linux)
-
-`berrywiki-launcher.sh` starts and stops `berrywiki serve` as a background
-process and can add BerryWiki to the desktop menu. It is optional; the CLI
-above is the product. The folder to serve comes from `BERRYWIKI_WIKI` and has
-no default, because `serve` commits into whatever folder it is given.
-
-```sh
-export BERRYWIKI_WIKI=$HOME/notes.wiki
-./berrywiki-launcher.sh --start     # runs `berrywiki serve $BERRYWIKI_WIKI`, logs to $XDG_STATE_HOME
-./berrywiki-launcher.sh --browser   # opens http://127.0.0.1:23779
-./berrywiki-launcher.sh --status
-./berrywiki-launcher.sh --stop
-./berrywiki-launcher.sh --integ     # menu entry + ~/.local/bin/berrywiki-launcher; --disinteg undoes it
-```
-
-It looks for a built binary under the checkout (`target/release`, then
-`target/debug`), then for `berrywiki` on `PATH`. The copy that `--integ`
-installs has the checkout path stamped into it, so it keeps working from
-outside the repository. Two limits are worth knowing: a menu entry does not
-see your shell's environment, so `BERRYWIKI_WIKI` must be set where the
-desktop session can see it (for example in `~/.config/environment.d/`), and
-the menu entry expects the estate's `keepopen.sh` terminal wrapper, which is
-not part of this repository. `scripts/check-launcher.sh` is the CI gate for
-the launcher: it runs with a fake binary and asserts exactly what is started.
-
 ## How a page looks on disk
 
 Ordinary Markdown, preceded by a comment GitHub does not render:
@@ -182,9 +156,49 @@ Ordinary Markdown from here on.
 Delete the comment and the page is still a perfectly good wiki page — it simply
 stops being part of the tree. That is the point.
 
+## Checking a wiki in CI (for teachers, and anyone else)
+
+`berrywiki check` validates a wiki tree — broken links, missing parents, cycles,
+duplicate ids — and **exits non-zero on error-level diagnostics**, so it works as
+a CI gate over a course wiki. You do not have to install anything: this
+repository ships a composite Action at its root.
+
+```yaml
+# .github/workflows/wiki.yml in your own course repository
+name: wiki
+on: [push, pull_request]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # Pin this to a commit SHA rather than @main. The Action builds the CLI
+      # from whatever revision you pinned it at and caches the binary on that
+      # commit, so a pinned workflow restores a cached binary while @main
+      # rebuilds every time this repository moves.
+      - uses: metadatastician/berrywiki@main
+        with:
+          path: .          # folder holding the wiki pages
+          strict: 'false'  # 'true' also fails the build on warnings
+```
+
+The Action writes a summary to the job page and exposes `errors`, `warnings` and
+`pages` as step outputs. **Warnings do not fail the build by default** —
+a missing parent or a broken link is a warning, and a duplicate page id is an
+error — which is usually what you want on a wiki that is still being written.
+Set `strict: 'true'` once your tree is clean and you want it to stay that way.
+
+The point, for a module wiki, is finding out that Week 7 links to a page you
+deleted *before* a student does.
+
+> The Action currently builds `berrywiki` from source and caches the binary by
+> commit, because there is no tagged release yet. That is a deliberate hold, not
+> an oversight — see the note in [`action.yml`](action.yml).
+
 ## Architecture
 
-Eleven crates, layered so the parts that must be provably correct have no I/O
+Thirteen crates, layered so the parts that must be provably correct have no I/O
 to be wrong about — see [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 * **Engine:** Rust. No hand-written JavaScript or TypeScript (ADR-0003); the UI
@@ -211,8 +225,7 @@ docs/compatibility/         GitHub Wiki compatibility findings (unverified)
 docs/decisions/             architecture decision records
 docs/execution/             work packages + debt register
 docs/proofs/                invariants ledger INV-1..6 (tested, proof scheduled)
-scripts/                    CI gates (invariants-ledger check, launcher smoke)
-berrywiki-launcher.sh       optional desktop launcher (+ berrywiki.launcher.a2ml)
+scripts/                    CI gates (invariants-ledger check, AsciiDoc render)
 ```
 
 ## Build & test
@@ -236,3 +249,12 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md). Security reports:
 Code is licensed under **MPL-2.0**; documentation under **CC-BY-SA-4.0**.
 Full texts in [`LICENSES/`](LICENSES/); machine-readable mapping in
 [`REUSE.toml`](REUSE.toml).
+
+The root `LICENSE` file is the **verbatim, unmodified** MPL-2.0 text, and must
+stay that way. It carried a short dual-licence preamble until 2026-09-15, which
+read correctly to a human but dropped GitHub's `licensee` below its match
+threshold, so the repository reported its licence as *"other"* and showed no
+licence in the sidebar. The dual-licence statement lives here and in
+`REUSE.toml` instead, which are the normative record; `LICENSE` is only the
+copy GitHub reads. Adding anything above the MPL text — even a comment — breaks
+detection again.

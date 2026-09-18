@@ -3,9 +3,14 @@
 
 == Status
 
-*Proposed* (provisional). To be confirmed or revised after the live GitHub Wiki
-compatibility spike. Depends on evidence tracked in
+*Accepted* 2026-09-15, after the live GitHub Wiki compatibility spike this ADR
+was blocked on. Evidence is recorded in
 link:../compatibility/github-wiki.adoc[the compatibility report].
+
+The spike *confirmed the premise*: the native GitHub wiki UI renders no
+directory hierarchy, so a flat scheme was the right call. It also *measured a
+cost this ADR did not anticipate*, recorded under <<_consequences>> — the
+decision is accepted with that cost stated, not in spite of it.
 
 == Context
 
@@ -18,7 +23,7 @@ The tree must be derived from stable page ids + `parent` metadata, never
 inferred from filenames. Filenames therefore only need to be stable, unique,
 GitHub-renderable and rename-tolerant.
 
-== Decision (provisional)
+== Decision
 
 Use *flat, `--`-separated filenames* that encode the logical path for human
 legibility, e.g.:
@@ -35,9 +40,14 @@ Teaching--Course-A--Assessment-Plan.md
 == Alternatives considered
 
 . *True nested directories* (`Teaching/Course-A/Assessment-Plan.md`) — rejected
-  provisionally because the native GitHub wiki UI does not present them as
-  navigable hierarchy, and `[[WikiLink]]` resolution appears to be title-global.
-  Revisit if the spike proves nested dirs render acceptably.
+  because the native GitHub wiki UI does not present them as navigable
+  hierarchy, and `[[WikiLink]]` resolution appears to be title-global.
++
+NOTE: The 2026-09-15 spike confirmed the *sidebar* is what produces navigable
+hierarchy in the native UI, which holds regardless of on-disk layout. It did
+*not* directly test whether nested directories render acceptably — that
+specific alternative remains unmeasured, and this rejection still rests on the
+original reasoning.
 . *Opaque id filenames* (`0195f6ec….md`) — maximally rename-safe but unreadable
   in a plain checkout and in GitHub's page list; violates "usable without the
   app". Rejected.
@@ -50,4 +60,18 @@ Teaching--Course-A--Assessment-Plan.md
   *text* rewriting is a separate, configurable operation.
 * The `--` separator must be escaped/normalised in titles that literally contain
   `--`.
-* Final confirmation is blocked on the live spike; treat as provisional.
+* *Measured 2026-09-15 — the github.com title cost.* GitHub substitutes
+  *each* `-` in a filename with a space when deriving the page title. It
+  attaches no special meaning to a doubled hyphen. So `Editing--Attachments.md`
+  is titled *"Editing␣␣Attachments"* on github.com — a literal double space —
+  and every additional path segment adds another. Control:
+  `Getting-Started.md` titles as "Getting Started", exactly as expected.
++
+The navigable hierarchy a reader sees in the native UI comes *only* from the
+generated `_Sidebar.md`, never from the `--` in the filename. BerryWiki readers
+see a clean tree; someone reading the same wiki on github.com sees a title with
+doubled spaces in it.
++
+This does not reopen the decision — the alternatives were rejected for reasons
+the spike did not disturb — but it is a real, visible cost that the original
+ADR assumed away, and any future scheme change should be measured against it.

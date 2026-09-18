@@ -396,7 +396,12 @@ Deferred text tooling, recorded so it is not lost and deliberately not designed:
 hunspell/aspell belong to the editor (Phase 6+), agrep to `P9-search-measure`,
 i18n to serve, and nickel is an estate validation tool BerryWiki does not call.
 
-== Launch packages (Phase 6 / Phase 8)
+
+== Phase 6 — Launch package (community, education, MVP) / Phase 8
+
+The packages that carry the project from "the code works" to "someone outside
+this repository can use it". Tracked from 2026-09-15; before that date this
+work was being done without a row, which is why its state was hard to answer.
 
 Recorded 2026-09-15. These five packages are named in the roadmap and ruled on
 in the handover, and until now appeared in no row of this register — so the
@@ -406,49 +411,87 @@ the Phase 5 heading above but had no row of its own.
 [cols="1,1,4,3", options="header"]
 |===
 | ID | Tier | Contract | Escalation triggers
-| P6-community | haiku | Shop-window completeness. `CONTRIBUTING`,
-`CODE_OF_CONDUCT`, `SECURITY`, `GOVERNANCE`, issue templates and `FUNDING.yml`
-are present (measured 2026-09-15). Remaining: `CHANGELOG.md`,
-`.github/PULL_REQUEST_TEMPLATE.md`, and the repository `homepageUrl`, which is
-empty while the published wiki is the project's strongest demo asset. | The
-`LICENSE` presentation fix is *not* in this package: GitHub reports
+| P6-community | sonnet | Community health files that are true: a `CHANGELOG.md`
+kept from the first entry (no version heading until a tag exists), a pull
+request template that asks for the measurement rather than asserting gates that
+do not exist, and the `docs/community/` drafts. Nothing here may claim a
+release, a CI gate or an accessibility property that has not been measured.
+`CONTRIBUTING`, `CODE_OF_CONDUCT`, `SECURITY`, `GOVERNANCE`, issue templates
+and `FUNDING.yml` are present (measured 2026-09-15). The `homepageUrl`, which
+is empty while the published wiki is the project's strongest demo asset,
+remains, and the `LICENSE` presentation fix (GitHub reports
 `licenseInfo.key == "other"` because a six-line preamble precedes the MPL-2.0
-text, and any change to a licence file is an owner decision.
-| P6-edu-template | opus | The primary education deliverable under ruling
-D-11(c): the `metadatastician/berrywiki-course-template` repository, where
-"Use this template" *is* the whole delivery, plus the `berrywiki check`
-composite Action that lets the template validate itself in CI so teachers
-install nothing (D-12(b)). The `berrywiki check` verb already exits non-zero on
-error-level diagnostics, which is the contract an Action needs. | Must never be
-described as access control: the `Staff/` subtree's `access:` key is preserved
-as unknown metadata until `P7-access-model` lands, which is correct behaviour
-and not a permission boundary.
-| P6-edu-post | opus | The GitHub Global Campus Teachers post. Drafted at
-`docs/community/global-campus-post.md` in two variants with a preconditions
-table. Owner-written and owner-posted under ruling D-9; the invented-biography
-and social-proof sentences are now `<!-- OWNER: ... -->` placeholders. Ruling
-D-11(c) demotes this to an optional amplifier that the template does not wait
-on. | The post must claim no GitHub Wiki behaviour that `P1-spike-read` has not
-verified against a real wiki. That spike has never run, so the claim teachers
-most want to hear cannot yet be made.
-| P8-packaging | opus | Ruling D-12(b), two doors, one packaging system.
-Developers: Guix, plus a signed binary release (SHA256SUMS + minisign) and the
-OCI image from `guix pack`. Teachers: install nothing. Delivery is `P5-guix`
-above; this row exists so the release artefacts are tracked as launch work and
-not as a packaging detail. | `minisign` is absent from the maintainer's
-machine, as is `guix`. Signing keys are owner-held and must never reach a
-workflow except as a secret; a release workflow fails closed when the secret is
-unset, per the estate precedent requiring an owner-run dispatch dry-run before
-any `release.yml` merges.
-| P6-llm-onboarding | sonnet | Ruling D-13's onboarding path for LLM-assisted
-users. Had no ID until now. | Unspecified beyond the ruling; needs a contract
-before it is scheduled.
-| MVP-declare | opus | Declare the MVP. Gated on `v0.1.0` existing, which is
-gated on `P5-guix`, and on the accessibility walkthrough having been run by a
-human with a screen reader. | Zero tags and zero releases exist on `origin` as
-of 2026-09-15. The walkthrough needs a human at a browser with NVDA; no agent
-can close it, and it is now honestly declared unrun in both the README and the
-published wiki.
+text) is *not* in this package: any change to a licence file is an owner
+decision. |
+Any file that states a guarantee -> it becomes an owner decision, not a docs
+change.
+| P6-edu-template | sonnet | *DONE* -- **Done 2026-09-15.**
+`metadatastician/berrywiki-course-template`: a public template repository
+(`isTemplate: true`, CC-BY-SA-4.0) carrying 24 stub pages under `wiki/` --
+Home, Syllabus, Weeks 1-12, a Talk page, two Assignments, Groups, Resources and
+a `Staff` subtree -- plus a generated `_Sidebar.md`. The tree lives under
+`wiki/` and not at the repository root because a root `README.md` is itself
+read as a wiki page, which was measured rather than assumed. Under ruling
+D-11(c) this template *is* the delivery: a teacher presses *Use this template*
+and installs nothing (D-12(b)). `.github/workflows/wiki.yml` runs the
+`berrywiki check` composite Action pinned to commit `0b49e2b`, not a branch, so
+the built CLI stays cache-stable per caller; `structure check` is green at
+`9e83349`. The README documents both ways to use the tree -- keep it as a
+reviewable folder, or `git subtree push --prefix wiki` to the repository's
+`.wiki.git` -- and states plainly that the `Staff` subtree *is not access
+control*. The `berrywiki check` verb already exits non-zero on error-level
+diagnostics, which is the contract an Action needs. | Any claim that the
+`access:` key enforces anything -> stop; P7 is unbuilt and the claim would be
+false. Must never be described as access control: the `Staff/` subtree's
+`access:` key is preserved as unknown metadata until `P7-access-model` lands.
+| P6-edu-post | owner | Variant B of `docs/community/global-campus-post.md`,
+posted to GitHub Global Campus Teachers. *Owner-written and owner-posted --
+never by an agent (D-9).* Ruling R-H (2026-09-15) records that the unmet
+`v0.1.0` and `P1-spike-read` preconditions gate **Variant A only**: Variant B
+makes no release claim and asserts no GitHub Wiki behaviour, so it is postable
+against the public template alone. House rules: do not lead with AI; do not
+oversell accessibility. Drafted at `docs/community/global-campus-post.md` in
+two variants with a preconditions table; the invented-biography and social-proof
+sentences are now `<!-- OWNER: ... -->` placeholders. Ruling D-11(c) demotes
+this to an optional amplifier that the template does not wait on. | An agent
+posting, or drafting a claim the spikes have not verified, is a
+stop-and-report. The post must claim no GitHub Wiki behaviour that
+`P1-spike-read` has not verified against a real wiki. That spike has never run,
+so the claim teachers most want to hear cannot yet be made.
+| P8-packaging | opus | The *developer* door, as against the teacher door
+P6-edu-template already opens: a `v0.1.0` tag and release with a verified
+build. Ruling D-12(b), two doors, one packaging system. Developers: Guix, plus
+a signed binary release (SHA256SUMS + minisign) and the OCI image from `guix
+pack`. Teachers: install nothing. Delivery is `P5-guix` above; this row exists
+so the release artefacts are tracked as launch work and not as a packaging
+detail. | *Blocked-by* P5-guix (R-C: unblock Guix first, then cut the
+release). P5-guix has a lane but no implementation: branch
+`p5-guix/packaging-lane` is pushed (`fc34450`) and carries only documentation
+commits recording the ruled crate-closure strategy. No `.scm` or other guix file
+exists on it or on `main`. `minisign` is absent from the maintainer's machine,
+as is `guix`. Signing keys are owner-held and must never reach a workflow
+except as a secret; a release workflow fails closed when the secret is unset,
+per the estate precedent requiring an owner-run dispatch dry-run before any
+`release.yml` merges.
+| MVP-declare | opus | Declare the MVP against the roadmap's own criteria, with
+the measurement that supports each one. The test baseline as of `0cf0066` is
+42 suites, 429 passed, 0 failed, 0 ignored on `cargo test --workspace`. MSRV
+1.89 is verified by the `test (rust 1.89.0)` CI lane, green at that anchor,
+alongside all twelve checks. Not yet supported: no cold-build claim exists, and
+the accessibility walkthrough has never been executed. Gated on `v0.1.0`
+existing, which is gated on `P5-guix`, and on the accessibility walkthrough
+having been run by a human with a screen reader. Zero tags and zero releases
+exist on `origin` as of 2026-09-15. The walkthrough needs a human at a browser
+with NVDA; no agent can close it, and it is now honestly declared unrun in
+both the README and the published wiki. | Declaring the MVP on a warm
+`target/`, or on a grep count of `#[test]` rather than a run, is a
+stop-and-report.
+| P6-llm-onboarding | sonnet | Onboarding files behind a doc-lint gate, per
+ruling D-13(b). The gate is the package: files that drift are worse than no
+files. Ruling D-13's onboarding path for LLM-assisted users (had no ID until
+now) — the gate is the package, so needs a contract before it is scheduled. |
+The gate must exist before the files do; shipping the files first inverts the
+ruling. Unspecified beyond the ruling; needs a contract before it is scheduled.
 |===
 
 == Cross-cutting standing packages
