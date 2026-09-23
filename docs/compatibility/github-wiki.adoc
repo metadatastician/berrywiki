@@ -8,10 +8,15 @@ toc::[]
 [IMPORTANT]
 ====
 This report strictly separates *Verified*, *Assumption*, *Unverified* and
-*Decision*. Do not treat an assumption as a fact. Nothing in the "live GitHub"
-column has been tested yet: `gh` is not installed on the development host and no
-disposable wiki has been exercised. See
-link:../decisions/0002-authentication-strategy.adoc[ADR-0002].
+*Decision*. Do not treat an assumption as a fact.
+
+*Updated 2026-09-15: the live-GitHub column is no longer entirely untested.*
+Publishing `metadatastician/berrywiki.wiki` and fetching the rendered pages
+settled four rows below — three confirming the hypothesis and *one refuting
+it*. The great majority of the column is still ❓, and the authentication row
+in particular is untouched: that wiki is pushed over SSH, not with a token, so
+link:../decisions/0002-authentication-strategy.adoc[ADR-0002] remains Proposed
+on no evidence.
 ====
 
 == Status legend
@@ -69,7 +74,7 @@ Each row below is a concrete test to run against a disposable
 |===
 | Question | Tag | Expected / hypothesis (to confirm or refute)
 
-| Does a leading `<!-- berrywiki ... -->` comment stay invisible in the rendered wiki page? | ❓ | 🟡 Yes — GitHub strips HTML comments from rendered Markdown.
+| Does a leading `<!-- berrywiki ... -->` comment stay invisible in the rendered wiki page? | ✅ | *Confirmed 2026-09-15.* Neither `<!-- berrywiki` nor `archived: false` occurs anywhere in the raw HTML of three sampled live pages. Positive control: the string `0197a1c0-0000-7000-8000` *is* present on the Attachments page, because that page quotes an id in its body — so the search could find the metadata had it leaked.
 | Do nested subdirectories render as navigable hierarchy in the native wiki UI? | ❓ | 🟡 No — the native UI is effectively flat; hierarchy will live only in BerryWiki + `_Sidebar.md`.
 | Are `[[WikiLinks]]` resolved by global page title, ignoring path? | ❓ | 🟡 Yes.
 | Do `[[Page#heading]]` anchor links work? | ❓ | 🟡 Partial.
@@ -80,9 +85,9 @@ Each row below is a concrete test to run against a disposable
 | Does GitHub enforce a size limit on a `.wiki.git` repository, and what is the failure shape when it is hit? | ❓ | 🟡 A limit exists and a push over it is rejected with a server-side message. BerryWiki's 1 MiB per-file cap bounds the rate of growth, never the total.
 | Does Git LFS work on a `.wiki.git` remote at all? | ❓ | 🟡 No. If it does, it is still not adopted: an LFS pointer file is unreadable in the native reader, which the locked constraints forbid.
 | Is an attachment inside `assets/` reachable by URL from the wiki's own web UI? | ❓ | 🟡 Only through the repository's blob view, not as a bare asset URL. Relevant to §3.8: a read lock is enforceable only where BerryWiki is the read path.
-| How does `_Sidebar.md` behave / is it honoured? | ❓ | 🟡 Honoured as the sidebar.
+| How does `_Sidebar.md` behave / is it honoured? | ✅ | *Confirmed 2026-09-15.* The generated sidebar renders on every page fetched, not only `Home`. This is what carries BerryWiki's hierarchy into the native reader — see the filename row below, which is why it matters more than expected.
 | How do concurrent pushes fail (non-fast-forward)? | ❓ | 🟡 Rejected; must fetch-before-push.
-| Does the default wiki branch have special behaviour? | ❓ | 🟡 `master` historically; confirm.
+| Does the default wiki branch have special behaviour? | ✅ | *Confirmed 2026-09-15.* A fresh clone of `<repo>.wiki.git` checks out **`master`**, not `main`, on a repository whose own default branch is `main`. This wiki's first commit ("Initial Home page", 2026-07-20) predates any tooling in this project, so `master` was not chosen here. Whether GitHub *always* creates wiki remotes on `master` is not established by this single observation — but tooling that assumes `main` is wrong at least here.
 |===
 
 == Link-format matrix (to populate during the spike)
@@ -95,8 +100,36 @@ a rename. _Rows pending live evidence._
 See link:../decisions/0001-page-filename-strategy.adoc[ADR-0001]. Working
 hypothesis given "native reader must work": flat `--`-separated filenames
 (`Teaching--Course-A--Assessment-Plan.md`), because the native wiki UI does not
-present real directory hierarchy. *Unverified* until the nested-directory test
-runs.
+present real directory hierarchy.
+
+=== Measured 2026-09-15: GitHub substitutes every `-` with a space
+
+The premise survives; the *presentation* does not, and this was never checked.
+GitHub derives a page's displayed title from its filename by replacing **each**
+hyphen with a space. It attaches no meaning to a doubled hyphen. So:
+
+[cols="2,2,1", options="header"]
+|===
+| Filename | Title shown on github.com | Tag
+
+| `Getting-Started.md` | `Getting Started` | ✅ control — behaves as expected
+| `Editing--Attachments.md` | `Editing␣␣Attachments` (a literal double space) | ⚠ cost
+|===
+
+Verified by reading `<title>` out of the raw HTML of both live pages; the double
+space is present in the bytes (`cat -A`), not a rendering artefact.
+
+*What this does and does not mean.* It does not reopen ADR-0001's decision: the
+native UI still cannot show real hierarchy, which is the reason the flat scheme
+was chosen, and nested directories remain untested (❓ above). What it means is
+that the scheme carries a cosmetic cost on github.com that ADR-0001 does not
+record — every nested page gets a visibly malformed title in the native reader.
+Readers using BerryWiki, or following the generated `_Sidebar.md`, see the clean
+tree and never encounter this.
+
+This is worth stating plainly because it is precisely the class of thing that
+only a live wiki could reveal, and it was found within minutes of exercising
+one. It is an argument for finishing the Phase 0 spike, not a defect.
 
 == Rendering fidelity (BerryWiki preview vs GitHub)
 
@@ -109,7 +142,7 @@ and none affecting the canonical source:
 | Aspect | BerryWiki policy
 | Raw inline/block HTML | *Escaped/omitted*, never emitted (comrak `unsafe_=false` + `tagfilter`). GitHub renders a *sanitised subset* of inline HTML, so some GitHub-rendered HTML will not appear in BerryWiki's preview. ✅ tested.
 | `javascript:` / `vbscript:` / non-image `data:` link URLs | Rewritten to `#` at the AST level. ✅ tested.
-| Syntax highlighting of code blocks | Not applied (comrak default features off to stay buildable on rustc 1.85). May return behind a feature.
+| Syntax highlighting of code blocks | Not applied (comrak default features off, to keep the dependency surface small). The original rustc-1.85 reason is retired — the workspace MSRV is 1.89 — but re-enabling is unmeasured. May return behind a feature.
 | Exact GFM parity (tables, task lists, autolinks, footnotes) | comrak GFM; *parity with GitHub's exact output is UNVERIFIED* until the live spike (❓).
 |===
 

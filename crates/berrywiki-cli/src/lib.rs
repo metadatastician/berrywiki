@@ -915,9 +915,14 @@ mod tests {
         // A backup directory gets copied to other machines, so an origin URL
         // with an embedded password would turn "keep a copy" into "publish the
         // password".
+        // Generate synthetic userinfo for this local test; it is never used to
+        // authenticate, and the reserved .invalid host is never contacted.
+        let fixture_password = format!("test-fixture-only-{}", std::process::id());
+        let origin =
+            format!("https://fixture-user:{fixture_password}@example.invalid/o/r.wiki.git");
         assert_eq!(
-            strip_userinfo("https://user:s3cret@github.com/o/r.wiki.git"),
-            "https://github.com/o/r.wiki.git"
+            strip_userinfo(&origin),
+            "https://example.invalid/o/r.wiki.git"
         );
         assert_eq!(
             strip_userinfo("https://token@github.com/o/r.wiki.git"),

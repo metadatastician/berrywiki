@@ -1,0 +1,189 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Repository settings — BerryWiki, measured 2026-09-15
+:toc: macro
+:toclevels: 2
+
+_What this repository's GitHub settings actually are, what the estate canon says
+they should be, and the exact difference between the two._
+
+[IMPORTANT]
+====
+**Nothing in this document has been applied.** It is a measurement and a
+recommendation. Every change listed under <<delta>> is proposed, not made. The
+commands that would make them are given so the decision is a one-line action
+rather than a research task.
+====
+
+toc::[]
+
+== Method
+
+Canon: `hyperpolymath/standards`, `config/settings/repo.json` (version 1),
+`config/settings/actions-allowlist.json`, and `config/rulesets/base.json`.
+
+Live values read `2026-09-15` from five REST endpoints, read-only:
+
+[source,sh]
+----
+gh api repos/metadatastician/berrywiki
+gh api repos/metadatastician/berrywiki/actions/permissions
+gh api repos/metadatastician/berrywiki/actions/permissions/selected-actions
+gh api repos/metadatastician/berrywiki/actions/permissions/workflow
+gh api repos/metadatastician/berrywiki/rulesets
+----
+
+== What already matches
+
+Nineteen of the twenty canonical keys are already correct. Recording them
+matters as much as recording the gaps, because it says which of the findings
+below are isolated rather than symptoms of an unmanaged repository.
+
+[cols="3,2",options="header"]
+|===
+| Setting | Value (canon and live agree)
+
+| `allow_squash_merge` | `true`
+| `allow_merge_commit` | `false`
+| `delete_branch_on_merge` | `true`
+| `allow_auto_merge` | `true`
+| `allow_update_branch` | `true`
+| `web_commit_signoff_required` | `true`
+| `squash_merge_commit_title` | `PR_TITLE`
+| `squash_merge_commit_message` | `PR_BODY`
+| `secret_scanning` | `enabled`
+| `secret_scanning_push_protection` | `enabled`
+| `dependabot_security_updates` | `enabled`
+| Actions `enabled` | `true`
+| `allowed_actions` | `selected`
+| `patterns_allowed` | non-empty (118 patterns)
+| `sha_pinning_required` | `true`
+| `default_workflow_permissions` | `read`
+| `can_approve_pull_request_reviews` | `false`
+| `vulnerability_alerts` | enabled (HTTP 204)
+| `automated_security_fixes` | `enabled`, not paused
+|===
+
+`has_wiki: true` is **not** drift. `has_wiki` is one of the eight keys listed in
+the canon's own `per_repo_deltas_allowed`, alongside `description`, `homepage`,
+`topics`, `has_projects`, `has_discussions`, `has_pages` and `visibility`.
+
+[#delta]
+== The delta — three findings
+
+=== Finding 1 — `main` has no branch protection at all (highest severity)
+
+[source,sh]
+----
+$ gh api repos/metadatastician/berrywiki/branches/main/protection
+{"message":"Branch not protected","status":"404"}
+
+$ gh api repos/metadatastician/berrywiki/rulesets --jq '.[] | {name,target}'
+{"name":"immutable-tags","target":"tag"}
+----
+
+One ruleset exists and it targets **tags**. There is no ruleset targeting
+branches, so `config/rulesets/base.json` is entirely unapplied. Canon's `Base`
+ruleset carries five rules, none of which are in force here:
+
+`deletion` · `non_fast_forward` · `required_signatures` · `pull_request` ·
+`required_status_checks`
+
+Concretely, today: `main` can be deleted, can be force-pushed, accepts unsigned
+commits, needs no pull request, and needs no green check.
+
+NOTE: This is verifiable from this repository's own history rather than only
+from the API — `docs/AFFIRMATION.adoc` was landed by a direct signed push to
+`main`. That push succeeded because nothing stopped it, not because anything
+approved it.
+
+=== Finding 2 — `allow_rebase_merge` is `true`; canon says `false`
+
+This is the only key in `repo.json` whose live value contradicts the canon.
+Canon is squash-only: squash `true`, merge-commit `false`, rebase `false`.
+
+It interacts with an open owner decision already recorded in the canon itself,
+`open_owner_decisions.O8`, which asks whether the estate keeps merge commits.
+O8 is about `allow_merge_commit`; rebase is the third method it does not name.
+So this needs a decision, not just an edit — and the decision is one line:
+**squash-only, or squash-plus-rebase?**
+
+=== Finding 3 — the Actions allow-list is a strict superset of canon
+
+Canon lists 92 patterns; this repository allows 118. The set difference runs
+one way only:
+
+* canon-only (allowed by canon, missing here): **none**
+* live-only (allowed here, absent from canon): **26**
+
+Of those 26, **20 are redundant rather than permissive** — every
+`hyperpolymath/...` entry is already covered by the `hyperpolymath/*` wildcard,
+which is in both lists. They cost nothing but noise.
+
+Six are genuine third-party additions:
+
+[cols="2,3",options="header"]
+|===
+| Pattern | Assessment
+
+| `denoland/setup-deno@*`
+| **Remove.** Deno is banned estate-wide under the bun-only doctrine. An
+  allow-list entry for a banned runtime is an invitation.
+
+| `returntocorp/semgrep-action@*`
+| **Review.** `returntocorp` is the organisation's former name. A pattern
+  pinned to a renamed org is a supply-chain question, not a style one.
+
+| `snyk/actions@*`, `snyk/actions/node@*`
+| Review — the second is subsumed by the first.
+
+| `codecov/codecov-action@*`
+| Judgement call. Widely used; not in canon.
+
+| `dawidd6/action-send-mail@*`
+| Judgement call. Grants outbound mail from CI.
+|===
+
+WARNING: Narrowing an allow-list is not a safe no-op. An **empty**
+`patterns_allowed` refuses every third-party action, including transitively
+through a reusable workflow, because actions are judged against the *caller*
+repository's list. Runs then die at startup with `jobs.total_count == 0` and
+emit no check run at all — so a required context never reports and the
+repository looks *greener* than a healthy one. Remove entries one at a time and
+confirm a real run still starts.
+
+== What applying this would look like
+
+Not run. Listed so the decision is cheap.
+
+[source,sh]
+----
+# Finding 1 — apply the Base branch ruleset
+gh api -X POST repos/metadatastician/berrywiki/rulesets \
+  --input /path/to/standards/config/rulesets/base.json
+
+# Finding 2 — only if the answer to O8 is squash-only
+gh api -X PATCH repos/metadatastician/berrywiki -f allow_rebase_merge=false
+
+# Finding 3 — drop the banned runtime first, then re-measure
+#   (edit patterns_allowed, PUT it back, then confirm a run still starts)
+gh api repos/metadatastician/berrywiki/actions/permissions/selected-actions
+----
+
+== Ordering
+
+Finding 1 first and alone. It is the only one that changes what can happen to
+the repository rather than what is merely declared about it, and it is the one
+whose absence is invisible — an unprotected branch looks exactly like a
+protected one until something goes wrong.
+
+Findings 2 and 3 are tidying. Finding 2 is blocked on an owner decision that is
+already written down; Finding 3 should be done in small steps with a live run
+checked after each.
+
+== Provenance
+
+Measured `2026-09-15` against `metadatastician/berrywiki` at the then-current
+`origin/main`. Canon read from a local checkout of `hyperpolymath/standards`.
+All reads were `GET`; no `PATCH`, `PUT` or `POST` was issued against any
+endpoint named in this document.

@@ -552,11 +552,15 @@ reproducibly installable, complete hardening, and formally declare the MVP.
   idempotency marker preventing accidental double-import (import twice ==
   import once, proven by test). Acceptance: import one of the user's *real*
   CherryTree notebooks.
-. *S5.4 Packaging.* `guix.scm` (primary; cargo-build-system; git as
-  propagated input) building `berrywiki-app`; `flake.nix` fallback; CI gets
-  a `nix flake check` lane as the pragmatic verifier while `guix shell -f
-  guix.scm -- cargo test` is exercised locally; README quickstart;
-  `cargo install --path crates/berrywiki-app` documented as the plain path.
+. *S5.4 Packaging.* `guix.scm` (cargo-build-system; `git` as a regular input,
+  wrapped onto `PATH` with `wrap-program` — *not* a propagated input) building
+  the `berrywiki` binary from `crates/berrywiki-cli`; a CI Guix lane as the
+  verification of record; the D-12(b) release artefacts (SHA256SUMS +
+  minisign signature, OCI image from `guix pack`); README quickstart; `cargo
+  install --path crates/berrywiki-cli` documented as the plain path. There is
+  *no* `flake.nix` and no `nix flake check` lane: ruling D-12(b) makes Guix
+  the sole packaging system, retiring the Nix fallback this slice originally
+  specified.
 . *S5.5 Hardening + perf.* cargo-deny/cargo-audit lane; security pass
   re-running path-traversal and redaction suites plus a review of the upload
   path; performance sanity run on a synthetic 2,000-page wiki — only if
@@ -683,6 +687,23 @@ the owner supplies, and MVP-declare may not treat it as passed before then.
   compromise; templates thin; all behaviour behind HTTP endpoints so the
   sunk cost of a later swap stays near zero
 | n/a — tolerated
+
+| [[risk-guix-closure]]The Guix build cannot resolve its crate closure offline. `comrak` and its 23
+  transitive crates have no Guix packages (measured 2026-09-15: Guix carries
+  no `comrak` at any version), so a `guix.scm` written against
+  `(gnu packages crates-io)` fails for want of inputs
+| High
+| Medium
+| The closure is small and bounded — 24 crates, 1.4 MB compressed, pinned by
+  the committed `Cargo.lock` — and there is no axum/tokio tree to package.
+  Ruled 2026-09-15 (`ENDGAME-R-3`): generate the definitions as a
+  `guix/crates.scm` module with `guix import crate -r comrak`. Vendoring the
+  sources is closed as an option. D-12(b)'s signed binary release and OCI
+  image are produced from the same `guix.scm`, so one lane covers all three
+  artefacts
+| The CI Guix lane going red. That lane is the verification of record: `guix`
+  is absent from the maintainer's machine, so nothing about this package can
+  be confirmed locally — "it parses" and "it builds" are different assertions
 |===
 
 [#spike]
@@ -805,12 +826,19 @@ only on evidence; the report remains the single ledger of verified-vs-assumed.
 * Post-MVP: gnatprove lane (see <<spark>>); scheduled fuzz/mutants lanes if
   adopted.
 
-*Packaging (estate doctrine: Guix primary, Nix flake fallback):* `guix.scm`
-at the repo root (cargo-build-system; git as a propagated input) building
-`berrywiki-app`; `flake.nix` mirroring it; local verification via
-`guix shell -f guix.scm -- cargo test` in WSL, with a `nix flake check` CI
-lane as the pragmatic remote verifier (Guix-on-Actions is slow). `cargo
-install --path crates/berrywiki-app` documented as the undoctored path.
+*Packaging (estate doctrine as amended by ruling D-12(b): Guix is the sole
+packaging system and the Nix fallback is retired, not deferred):* `guix.scm`
+at the repo root (cargo-build-system) building the `berrywiki` binary from
+`crates/berrywiki-cli`. `git` is a *regular* input and the binary is wrapped
+with `wrap-program` so that `git` is on its `PATH`; a propagated input would
+push `git` into the profile of everyone who installs BerryWiki, which is why
+the earlier "propagated input" wording here was wrong. Because a Guix build
+has no network, the third-party closure must resolve entirely from inputs: it
+is *24 crates* — `comrak` and its transitive tree, 1.4 MB of compressed
+sources, pinned by the committed `Cargo.lock`. Verification of record is the
+CI Guix lane, since `guix` is not installed on the maintainer's WSL machine
+and a `guix.scm` that has never been built is an untested assertion. `cargo
+install --path crates/berrywiki-cli` is documented as the undoctored path.
 Dependency additions are per-slice and deliberately minimal; if FTS5 lands,
 rusqlite uses the `bundled` feature so packaging stays hermetic (with a
 system-sqlite variant considered for the Guix package).
@@ -980,6 +1008,35 @@ slice is executed.
   full axum+tokio crate tree under `cargo-build-system` is a real cost with no
   risk-register row — while CI only ever builds the Nix fallback. Give Guix
   its own slice + risk row, and add a Guix build lane to CI.
++
+[NOTE]
+====
+*Response, measured at `origin/main` 2026-09-15.* One of the three clauses
+holds; two describe states that never existed.
+
+* *Upheld — the `git` mechanism.* A propagated input leaks `git` into every
+  profile that installs BerryWiki. P5-guix now specifies a regular input plus
+  `wrap-program`. The dependency itself is real: `Command::new("git")` appears
+  in `berrywiki-git`, `berrywiki-git-compat`, `berrywiki-github` and
+  `berrywiki-git/tests/engine.rs`.
+* *Refuted — "the full axum+tokio crate tree".* The locked third-party closure
+  is *24 crates*: `comrak` and its transitive tree. `Cargo.lock` contains no
+  `axum`, no `tokio` and no `hyper`, and `comrak` is the only direct
+  third-party dependency in the workspace. The packaging cost is real but an
+  order of magnitude smaller than stated. It is not zero, though, and not
+  shortcuttable by reusing Guix's own crate packages: Guix packages no
+  `comrak` at any version as of 2026-09-15. Hence the risk row below.
+* *Refuted — "CI only ever builds the Nix fallback".* CI has never built
+  either one. The repository contains no `guix.scm`, no `flake.nix`, no Nix
+  lane and no packaging file of any kind; `ci.yml` runs lint, test, launcher
+  and docs only. This clause described S5.4 of *this document* rather than the
+  repository, and P5-guix was recorded as "blocked" on it when the package was
+  simply never started.
+
+*Accepted in full:* Guix has its own slice and its own risk row
+(<<risk-guix-closure>>), and a Guix build lane is specified as the
+verification of record.
+====
 . *Silently dropped spec items.* Backup/export (upstream Phase 4), the
   controlled rich editor, and the command palette appear in no phase and no
   non-goals list. Record each explicitly as either a scheduled slice, a
