@@ -1,10 +1,38 @@
 # SPDX-License-Identifier: MPL-2.0
-# Dependabot configuration. Only ecosystems that exist in this repo are
-# listed — stub entries make Dependabot spawn failing update jobs.
+# Dependabot configuration.
+#
+# Scope, stated because "Dependabot keeps the pins current" is only true of
+# part of the tree, and the untrue half is where drift accumulates:
+#
+#   * GitHub Actions (`ci.yml`, `pages.yml`, `scorecard.yml`,
+#     `secret-scanner.yml` and the root `action.yml`) — managed here. Weekly,
+#     grouped into one PR, capped at 2.
+#   * Cargo — version updates are OFF by policy, security updates only. See
+#     the cargo block below; the reason is a security one, not an oversight.
+#   * The two reusable-workflow pins
+#     (`hyperpolymath/standards/.github/workflows/{scorecard,secret-scanner}-reusable.yml`)
+#     — NOT managed here, and cannot be. Both pin a commit that carries no
+#     tag, so there is no released version for Dependabot to compare against.
+#     They are hand-bumped under the rule in `docs/development/ci.adoc`; they
+#     fell a month behind and one pin in this repository (in `pages.yml`) named
+#     a commit that exists nowhere, which is what a manual-only pin rots into.
+#
+# Only ecosystems that exist in this repo are listed — stub entries make
+# Dependabot spawn failing update jobs. Four of them (`npm_and_yarn`, `pip`,
+# `nix`, `hex`) did exactly that here until 2026-07-31, on a Rust-only
+# repository.
+#
+# Estate policy for major bumps: `hyperpolymath/standards`,
+# `docs/DEPENDABOT-POLICY.adoc` (standards#297) — dependabot must not open
+# semver-major bumps unattended.
 
 version: 2
 updates:
-  # GitHub Actions - always include
+  # GitHub Actions - always include.
+  #
+  # Major bumps are not held back here, unlike Cargo: the SHA pin is the real
+  # version, so a major bump arrives as a one-line, revertible diff, and the
+  # `test` and `lint` jobs run on the same PR.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -15,14 +43,32 @@ updates:
           - "*"
     open-pull-requests-limit: 2
 
-  # Rust/Cargo
+  # Rust/Cargo — SECURITY UPDATES ONLY.
+  #
+  # `open-pull-requests-limit: 0` suppresses routine version-update PRs while
+  # leaving Dependabot SECURITY PRs flowing. That is deliberate, and it is the
+  # narrower of two bad options: the previous rule here was
+  # `ignore: dependency-name: "*", update-types: [version-update:semver-patch]`,
+  # and under GitHub's current Dependabot behaviour `ignore` rules apply to
+  # *security* updates too — so it silenced patch-level security PRs
+  # estate-wide, which surfaced on 007 as three CVEs sitting open for weeks
+  # with no fix PR. See rsr-template-repo commit 78b050e.
+  #
+  # The consequence, recorded so it is not mistaken for a bug: a routine Cargo
+  # bump is never proposed automatically. As measured 2026-09-25 the only one
+  # outstanding is `comrak` 0.54.0 -> 0.55.0; `Cargo.lock` freezes the
+  # rustc-1.89-compatible resolution deliberately. A routine bump therefore
+  # takes the author-supplied path (estate policy §4: issue -> branch with the
+  # call-site update -> normal CI -> squash-merge), or this limit is raised
+  # from 0 to 2 when the maintainer decides routine bumps are wanted again.
+  # Flipping it is a policy change, so it is a reviewable one-line edit, not a
+  # silent side effect of anything else.
+  #
+  # Do NOT add `ignore: update-types: [version-update:semver-major]` here:
+  # estate policy asks for it, but on this repository it would re-open exactly
+  # the hole 78b050e closed, for major security updates.
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "weekly"
-    # `open-pull-requests-limit: 0` suppresses routine version-update PRs
-    # while leaving Dependabot SECURITY PRs flowing. The previous
-    # `ignore: "*" patch` rule also silenced security PRs under GitHub\'s
-    # current Dependabot behaviour. See rsr-template-repo commit 78b050e
-    # and 007-lang/audits/audit-dependabot-automation-gap-2026-04-17.md.
     open-pull-requests-limit: 0

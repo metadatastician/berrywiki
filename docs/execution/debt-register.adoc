@@ -355,13 +355,52 @@ request and still exited 0.
 | `dependabot.yml` declared mix, npm, pip and nix ecosystems with no matching
   manifests, producing failing update jobs on a Rust-only repository.
 
+| *CLEARED*
+| **`pages.yml` pinned an action to a commit that exists nowhere.**
+  `actions/upload-pages-artifact@3788795898…` answers 422 at
+  `/repos/{owner}/{repo}/commits/3788795898…` and 404 at
+  `compare/3788795898…...v5`; tag `v5` is `fc324d354710…`. Repointed
+  2026-09-25. Third occurrence of the class in this repository (two in
+  `ci.yml`, cleared 2026-08-07), and the reason `pins` is now a CI job rather
+  than a habit. The other two blockers found alongside it are recorded below.
+
+| *CLEARED*
+| **Both estate reusable-workflow pins were a month behind**, and neither had
+  a bump rule or an owner — the only pins here Dependabot cannot move, since
+  each targets a commit that carries no tag. Scorecard `a63b2761` →
+  `7b931ef7` (newest commit touching `scorecard-reusable.yml`; the callee now
+  refuses to let a failed reconciler skip the SARIF upload, and requires
+  `actions: read`, which this caller already grants); secret-scanner
+  `c51fb976` → `e13e2ea3` (newest commit touching
+  `secret-scanner-reusable.yml`; it now fetches its own config at
+  `job.workflow_sha` instead of the moving `main`, and adds a gating
+  full-history pass). Both verified reachable from `standards@main` and
+  compatible with this caller's permissions. The bump rule is now written down
+  in `docs/development/ci.adoc` § Pins, which is what the absence of a rule
+  cost.
+
+| M
+| Nothing verified that a SHA-pinned `uses:` names a commit that exists. A
+  fabricated hash is still forty hex characters, so the pin looks pinned; the
+  failure only appears at run time, and an unresolvable ref emits no check run
+  at all — the job never ran while the board stayed green. Clearing it: the
+  `pins` job added to `ci.yml` on 2026-09-25, which asks the API. It fails on
+  a determinate negative and reports UNVERIFIED (without failing) when the API
+  cannot answer. The class is worth the two paragraphs above it only because
+  this is the third time it has been found by hand.
+
 | H
-| **`pages.yml` has never succeeded.** Its only run — 2026-07-19 — was a
-  `startup_failure` at 0 seconds, and it has not been triggered since. GitHub
-  Pages is enabled and publishing from a workflow, so the site is
-  permanently empty. Its canonical base URL also named the wrong owner
-  (`hyperpolymath.github.io` for a repo in `metadatastician`); that is fixed,
-  but the workflow itself remains unproven.
+| **`pages.yml` has never succeeded, and Pages publishes nothing.** Its only
+  run — 2026-07-19 — was a `startup_failure` at 0 seconds with zero jobs, and
+  it is `disabled_manually` on GitHub. Three independent blockers have been
+  found and two cleared: the canonical base URL named the wrong owner
+  (`hyperpolymath.github.io` for a repo in `metadatastician`) — fixed; the run
+  itself died because the file then pinned `@v4`/`@v3` and the repository sets
+  `sha_pinning_required: true`, which rejects a tag-pinned action at startup —
+  fixed, the file is SHA-pinned; and the pin it was SHA-pinned *to* named no
+  commit — fixed 2026-09-25. What remains is a decision, not a repair: the
+  workflow is still disabled, so re-enabling it is the maintainer's call, and
+  the site it would publish is the README (next entry).
 
 | M
 | `pages.yml` builds `src/index.md`, falling back to a copy of `README.md`.
@@ -392,11 +431,25 @@ request and still exited 0.
 | Sev | Item
 
 | M
-| `main` now carries rulesets, but their required contexts do not match the
-  job names `ci.yml` actually reports, so every merge is made with
-  `gh pr merge --admin` and a red CI run still blocks nothing. Clearing it:
-  P6-branch-protect re-cuts the ruleset to the real job names and drops
-  the bypass.
+| **No rule in force requires a green CI run.** The rulesets that govern
+  `main` are org-level — `Branch-Floor` (`deletion`, `non_fast_forward`) and
+  `EstateBranching` (`deletion`, `required_signatures`, `pull_request`,
+  `code_scanning`, `copilot_code_review`), measured 2026-09-25. Neither
+  carries `required_status_checks`, and the repo-level `Optimus-Branch`
+  ruleset, which does not either, is disabled. Merges are therefore gated on
+  a signed commit and a pull request, not on `ci.yml`: a red run still blocks
+  nothing. `.github/settings.yml` is a separate, unapplied layer —
+  probot/settings is not installed here (its label set — `ci/cd`, `rsr`,
+  `hypatia` — is absent from the repository) — and its four hand-typed
+  contexts are stale anyway: `Cargo check + clippy + fmt` and `Cargo test`
+  are the estate's `rust-ci-reusable` job names, `openssf-compliance` no
+  longer exists anywhere, and `analyze (javascript-typescript, none)` names
+  an advanced-CodeQL run while this repository uses default setup, which
+  reports `Analyze (rust)` and `Analyze (actions)`. Applying that file as
+  written would block every merge permanently. Clearing it:
+  P6-branch-protect, re-cutting the contexts to the names the workflows
+  actually report, derived from check runs and never typed by hand — the
+  estate's own rule (`standards/config/rulesets/gates.json`).
 
 | L
 | `SECURITY.md` offers a PGP key whose fingerprint was `TBD` while telling
