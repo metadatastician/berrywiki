@@ -49,6 +49,14 @@ signature) alongside the OCI image produced by `guix pack`. Work package
 - `berrywiki import`: CherryTree notebook import with a lossiness table and a
   per-construct diagnostic tally printed before `--apply` writes anything.
 - An accessibility gate in CI.
+- **A `pins` job in CI** (`action pins resolve`) that asks the GitHub API
+  whether every SHA-pinned `uses:` in `.github/workflows/`, `.github/actions/`
+  and the root `action.yml` names a commit that exists, and — for
+  reusable-workflow pins only — whether that commit is reachable from the
+  callee's default branch. A determinate negative fails the job; an
+  indeterminate answer is reported as UNVERIFIED rather than failed, so a
+  GitHub incident cannot redden every run. It closes the class of bug that
+  produced the `pages.yml` pin under *Fixed* below.
 
 ### Changed
 
@@ -58,6 +66,33 @@ signature) alongside the OCI image produced by `guix pack`. Work package
   far enough that the repository reports its licence as `other`.
 - Documentation that described an eleven-crate system now says thirteen, which
   is what `crates/` contains.
+- **Every action pin now carries the exact release it is** — `checkout@v7.0.1`
+  and `deploy-pages@v5.0.1`, not the `# v7` / `# v5` they said — and the two
+  refs Dependabot cannot move were brought up to date: the scorecard reusable
+  `a63b2761` → `7b931ef7` (it no longer lets a failed reconciler skip the SARIF
+  upload, and it requires `actions: read`, which this caller already granted)
+  and the secret scanner `c51fb976` → `e13e2ea3` (it fetches its own config at
+  `job.workflow_sha` instead of the moving `main`, and adds a gating
+  full-history pass). Each pin's comment records why the bump is safe, and
+  `docs/development/ci.adoc` now writes down the bump rule — a reusable pin
+  targets a commit with no tag, so it has no version for Dependabot to compare
+  and nothing was watching it.
+- `docs/development/ci.adoc` said `actions/checkout@v5` and
+  `Swatinem/rust-cache@v2` long after the pins had moved, and still listed
+  "SHA-pin actions once the action-trust-layers policy is applied estate-wide"
+  as a follow-up. Both corrected, along with a statement of what Dependabot
+  does and does not keep current here.
+
+### Fixed
+
+- **`pages.yml` pinned `actions/upload-pages-artifact` to a commit that exists
+  nowhere.** `3788795898…` answers 422 from the commits endpoint; tag `v5` is
+  `fc324d354710…`. A pin naming no commit is still forty hex characters, so
+  nothing local could catch it, and GitHub resolves a `uses:` ref only at run
+  time — an unresolvable one emits no check run at all, so the job never ran
+  while the board stayed green. Third occurrence of the class in this
+  repository (two in `ci.yml`, cleared 2026-08-07), which is why the `pins` job
+  above now exists.
 
 ### Removed
 
@@ -81,5 +116,13 @@ signature) alongside the OCI image produced by `guix pack`. Work package
 - GitHub reports the licence as `other`: a six-line preamble precedes the
   MPL-2.0 text in `LICENSE`, which drops GitHub's detector below its match
   threshold. `REUSE.toml` and `LICENSES/` are correct and remain normative.
+- **Dependabot does not raise routine Cargo bumps here, on purpose.** The cargo
+  block is `open-pull-requests-limit: 0` (security updates only), because
+  `ignore` rules apply to security updates too and that mistake silenced
+  patch-level security PRs estate-wide. As of 2026-09-25 the one bump this
+  leaves outstanding is `comrak` 0.54.0 → 0.55.0; it has **not** been applied
+  here, since `Cargo.lock` freezes the rustc-1.89-compatible resolution and
+  nothing in this change set was built against a Rust toolchain. Raising the
+  limit to `2` is the one-line way to have Dependabot propose it.
 
 [Unreleased]: https://github.com/metadatastician/berrywiki/commits/main

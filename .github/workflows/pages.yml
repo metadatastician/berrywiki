@@ -1,5 +1,15 @@
 # SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
 # SPDX-License-Identifier: MPL-2.0
+#
+# Every `uses:` in this file MUST be a full 40-character commit SHA. The
+# repository sets `sha_pinning_required: true`, and GitHub rejects a workflow
+# that pins an action by tag at *startup* — `startup_failure`, zero jobs, no
+# check run, nothing in REST or GraphQL naming the cause. That is exactly what
+# happened to this workflow's only run (2026-07-19, `startup_failure` at 0
+# seconds, `jobs.total_count == 0`), because it then pinned `@v4`/`@v3`.
+#
+# The current file is also `disabled_manually` on GitHub, so it will not run
+# until that is cleared. See `docs/execution/debt-register.adoc` (CI/CD debt).
 
 name: GitHub Pages (Ddraig SSG)
 on:
@@ -26,9 +36,9 @@ jobs:
       image: ghcr.io/stefan-hoeck/idris2-pack@sha256:f0758996a931fb35d9ecb1de273c4d59dabe2a09b433afc7e357f65a08b7e1ff
     steps:
       - name: Checkout Site
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Checkout Ddraig SSG
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/ddraig-ssg
           path: .ddraig-ssg
@@ -49,7 +59,14 @@ jobs:
           # produced canonical links to a site that does not exist.
           ./.ddraig-ssg/build/exec/ddraig build src _site "https://${GITHUB_REPOSITORY%%/*}.github.io/${GITHUB_REPOSITORY#*/}"
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@37887958984318f2416549b205437f2699699998 # v5
+        # `fc324d35` is tag `v5` == `v5.0.0`, the latest release of
+        # actions/upload-pages-artifact (2026-04-10). The previous pin,
+        # 3788795898…, does not exist in that repository at all: `GET
+        # /repos/actions/upload-pages-artifact/commits/3788795898…` answers 422,
+        # and `compare/3788795898…...v5` answers 404. A pin that names no
+        # commit is well formed, so nothing local catches it — the run dies at
+        # action download instead. Repointed 2026-09-25.
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: '_site'
   deploy:
@@ -66,4 +83,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

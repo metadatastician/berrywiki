@@ -22,8 +22,33 @@ permissions:
 
 jobs:
   scorecard:
-    # Pinned to standards a63b2761 (2026-08-26, "fix(ci): restore the Scorecard
-    # SARIF upload deleted in June", #642). Earlier pins run Scorecard but never
-    # upload results, so a green run there proves nothing. Bump only after
-    # checking scorecard-reusable.yml still uploads to code scanning.
-    uses: hyperpolymath/standards/.github/workflows/scorecard-reusable.yml@a63b2761ba0b97575c4f964ffc0833afb4d39986
+    # Pinned to standards `7b931ef7`, the newest commit that modifies
+    # `.github/workflows/scorecard-reusable.yml` (2026-09-22, "fix(ci): re-pin
+    # codeql-action to v4.38.0 SHA"). The bytes at that commit are identical to
+    # `main` as measured 2026-09-25, so this is "current", not "newest of a set".
+    #
+    # Bumped from `a63b2761` (2026-08-26) after checking the two things the
+    # old comment said to check:
+    #
+    #   1. It still uploads to code scanning — more so. The upload is now
+    #      unconditional: a reconciliation step that fails can no longer skip
+    #      it, and a final step fails the run *after* the SARIF is published.
+    #      That reconciliation is a no-op here (it removes Scorecard's inline
+    #      pin findings only for workflows covered by an
+    #      `.github/workflows/actions.lock`, which this repository does not
+    #      carry), so the step succeeds and the run stays green.
+    #   2. The callee's permissions still fit this caller. It now declares
+    #      actions: read, contents: read, security-events: write and
+    #      id-token: write on the JOB, and this caller grants exactly those
+    #      four at workflow level, which is what the job inherits. `actions:
+    #      read` is required by Scorecard's Packaging check, and omitting it
+    #      is a known estate-wide startup failure.
+    #
+    # Note this is a PERIODIC check on the repository, never a required
+    # context: it runs on `push`/schedule, not on pull requests, so requiring
+    # it would block every PR forever.
+    #
+    # A reusable-workflow pin is NOT Dependabot-managed — the ref is a commit
+    # that carries no tag, so there is no version for Dependabot to compare
+    # against. It is hand-bumped under the rule in docs/development/ci.adoc.
+    uses: hyperpolymath/standards/.github/workflows/scorecard-reusable.yml@7b931ef7f9dbb8d2386fc9170895708c0acae95c

@@ -13,7 +13,7 @@ expected green before every commit.
 
 == Workflow: `.github/workflows/ci.yml`
 
-Two jobs, least-privilege (`permissions: contents: read`):
+Six jobs, least-privilege (`permissions: contents: read`):
 
 * *lint* (stable): `cargo fmt --all -- --check` and
   `cargo clippy --workspace --all-targets --locked -- -D warnings`. clippy runs
@@ -22,15 +22,94 @@ Two jobs, least-privilege (`permissions: contents: read`):
   no-data-loss harness run under *test*, so `cargo test` is the security/safety
   gate.
 * *test* (matrix `1.89.0` + `stable`): `cargo build --locked` and
-  `cargo test --workspace --locked`. `1.89.0` pins the declared MSRV
-  (`rust-version` in the workspace); `stable` catches what the pinned toolchain
-  misses. `--locked` fails on `Cargo.lock` drift (the lock freezes the
-  rustc-1.89-compatible comrak resolution). The MSRV is 1.89 because the
-  repository lock uses `std::fs::File::try_lock` (ADR-0008).
+  `cargo test --workspace --locked`, then the invariants-ledger check that
+  every `INV-n` in `docs/proofs/invariants.adoc` still names a registered test.
+  `1.89.0` pins the declared MSRV (`rust-version` in the workspace); `stable`
+  catches what the pinned toolchain misses. `--locked` fails on `Cargo.lock`
+  drift (the lock freezes the rustc-1.89-compatible comrak resolution). The
+  MSRV is 1.89 because the repository lock uses `std::fs::File::try_lock`
+  (ADR-0008).
+* *shell* (`shell script gate`): `bash -n` plus `shellcheck -S style` over
+  `scripts/*.sh`. Fail-closed: a missing `shellcheck` fails the step, and an
+  empty `scripts/` leaves the glob unexpanded and also fails.
+* *pins* (`action pins resolve`, added 2026-09-25): asks the GitHub API
+  whether every SHA-pinned `uses:` in `.github/workflows/`,
+  `.github/actions/` and `action.yml` names a commit that actually exists,
+  and — for reusable-workflow pins only — whether that commit is reachable
+  from the callee's default branch. It exists because a pin that names no
+  commit is *well formed* and fails silently: Actions resolves a `uses:` ref
+  only at run time, and an unresolvable ref emits no check run at all, so the
+  board stays green while the job never ran. That class has hit this
+  repository three times (twice in `ci.yml`, cleared 2026-08-07; once in
+  `pages.yml`, cleared 2026-09-25). Failure semantics: a determinate negative
+  (404/422) fails the job; an indeterminate answer (rate limit, 5xx, network)
+  is reported as UNVERIFIED and does not, so a GitHub incident cannot redden
+  every run — an announced fail-open, not a hidden one.
+* *docs* (`AsciiDoc render gate`): `scripts/check-adoc.sh`, which reads
+  asciidoctor's stderr rather than its exit code, after first proving the gate
+  can fail.
+* *action* (`berrywiki check Action (self-test)`): runs the root `action.yml`
+  over `fixtures/test-wiki` and asserts the known answer (10 pages, 0 errors,
+  3 warnings), then asserts `strict: 'true'` *fails* on the same fixture — a
+  positive and a negative control, so a no-op cannot pass as a check.
 
-Actions: `actions/checkout@v5`, `dtolnay/rust-toolchain@{stable,master}`,
-`Swatinem/rust-cache@v2`. Dependabot (`.github/dependabot.yml`) keeps these and
-the Cargo deps current.
+== Pins
+
+Every `uses:` here is a full 40-character commit SHA with a trailing version
+comment, because the repository sets `sha_pinning_required: true`: GitHub
+rejects a tag-pinned action at *startup*, with zero jobs and nothing naming the
+cause. The pinned set, verified against upstream on 2026-09-25:
+
+[cols="3,2,4",options="header"]
+|===
+| Pin | Version | Moved by
+
+| `actions/checkout` | `v7.0.1` | Dependabot
+| `actions/cache` (`action.yml`) | `v6.1.0` | Dependabot
+| `actions/upload-pages-artifact` | `v5.0.0` | Dependabot
+| `actions/deploy-pages` | `v5.0.1` | Dependabot
+| `Swatinem/rust-cache` | `v2.9.2` | Dependabot
+| `dtolnay/rust-toolchain` | `master` tip | Dependabot; the action publishes no
+  release newer than `v1` (2022), so the branch tip is the version
+| `hyperpolymath/standards` scorecard reusable | `7b931ef7` | hand
+| `hyperpolymath/standards` secret-scanner reusable | `e13e2ea3` | hand
+|===
+
+The two reusable-workflow pins cannot be Dependabot's: each targets a commit
+that carries no tag, so there is no released version to compare against.
+They are hand-bumped, and the rule is short enough to follow exactly:
+
+. Find the newest commit that modifies the callee file:
+  `gh api "repos/hyperpolymath/standards/commits?path=.github/workflows/<file>&per_page=1"`.
+  Pinning to that commit rather than to `main` keeps the pin to the change you
+  reviewed.
+. Read the callee at that commit and confirm it still fits this caller:
+  which permissions it declares (a called workflow cannot exceed the caller's
+  grants), whether it wants `secrets: inherit`, and what inputs it requires.
+. Confirm the commit is reachable from the callee's default branch, or GitHub
+  cannot resolve the called workflow at all:
+  `gh api repos/hyperpolymath/standards/compare/main...<sha> --jq .status` must
+  print `behind` or `identical`.
+. Update the pin *and* the comment above it, saying what changed and why the
+  bump is safe. An uncommented pin is a pin nobody dares move.
+
+== What Dependabot does and does not keep current
+
+`.github/dependabot.yml` manages the GitHub Actions pins above (weekly, one
+grouped PR, cap 2). It deliberately does *not* raise routine Cargo bumps:
+`open-pull-requests-limit: 0` on the cargo block keeps security updates flowing
+while suppressing version updates, which is the narrower of two bad options —
+`ignore` rules apply to security updates too, and that mistake silenced
+patch-level security PRs estate-wide (`rsr-template-repo` commit `78b050e`).
+The consequence is that a Cargo bump is never proposed automatically; as of
+2026-09-25 the only one outstanding is `comrak` 0.54.0 → 0.55.0. Routine bumps
+therefore take the author-supplied path, or the maintainer raises that limit
+from `0` to `2` as a deliberate, reviewable one-line change.
+
+Estate policy for major bumps is `hyperpolymath/standards`,
+`docs/DEPENDABOT-POLICY.adoc` (standards#297): semver-major bumps must not land
+unattended. On this repository that is achieved by the cargo limit rather than
+by an `ignore` rule, for the reason in the paragraph above.
 
 == Before the first push to a remote
 
@@ -45,6 +124,16 @@ the Cargo deps current.
   documented CI step (currently enforced via the serve test suite).
 * Two-git-version matrix (min git 2.30 + latest) for `berrywiki-git-compat`,
   per the plan's verification-first graft — not yet wired.
-* SHA-pin actions once the action-trust-layers policy is applied estate-wide.
+* `pages.yml` is `disabled_manually` on GitHub and GitHub Pages publishes
+  nothing, so the site is empty. The phantom action pin is fixed; the workflow
+  still has to be re-enabled and proven, which is tracked as CI/CD debt in
+  `docs/execution/debt-register.adoc`.
 * Guix build lane (estate-primary packaging) — belongs with work package
   P5-guix, not P1.
+
+SHA-pinning every action is done (it has been since 2026-08-07, and
+`sha_pinning_required: true` leaves no alternative); what was missing was a
+check that a pin names a commit, which is the *pins* job above. Its body is
+plain `bash` + `curl` + `jq` and can be run locally by extracting the step's
+`run:` block with `GH_TOKEN` set — that is how its three failure paths were
+exercised before it landed.
