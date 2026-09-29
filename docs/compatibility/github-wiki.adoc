@@ -74,7 +74,7 @@ Each row below is a concrete test to run against a disposable
 |===
 | Question | Tag | Expected / hypothesis (to confirm or refute)
 
-| Does a leading `<!-- berrywiki ... -->` comment stay invisible in the rendered wiki page? | ✅ | *Confirmed 2026-09-15.* Neither `<!-- berrywiki` nor `archived: false` occurs anywhere in the raw HTML of three sampled live pages. Positive control: the string `0197a1c0-0000-7000-8000` *is* present on the Attachments page, because that page quotes an id in its body — so the search could find the metadata had it leaked.
+| Does a leading `<!-- berrywiki ... -->` comment stay invisible in the rendered wiki page? | ✅ | *Confirmed 2026-09-15; independently observed 2026-09-29 on a second consumer.* The original test found neither `<!-- berrywiki` nor `archived: false` anywhere in the raw HTML of three sampled live pages. On [blocky-writer's Home page](https://github.com/hyperpolymath/blocky-writer/wiki), the rendered page contains the content following the leading metadata comment but not the comment or metadata values. The page source and its metadata are maintained in [`wiki/`](https://github.com/hyperpolymath/blocky-writer/tree/main/wiki). This is an independent live rendering observation, not a BerryWiki validation: `berrywiki check` was not run against that repository (the reporter lacked Rust and crates.io access).
 | Do nested subdirectories render as navigable hierarchy in the native wiki UI? | ❓ | 🟡 No — the native UI is effectively flat; hierarchy will live only in BerryWiki + `_Sidebar.md`.
 | Are `[[WikiLinks]]` resolved by global page title, ignoring path? | ❓ | 🟡 Yes.
 | Do `[[Page#heading]]` anchor links work? | ❓ | 🟡 Partial.
@@ -163,5 +163,5 @@ Source remains canonical regardless; the preview is advisory.
 . Persist links in GitHub-native Markdown; accept `[[…]]` only as *authoring*
   input, serialised on save.
 . Use flat `--` filenames; keep the tree in metadata, never infer it from paths.
-. Keep the metadata HTML comment, but verify invisibility on a live page before
-  relying on it.
+. Keep the metadata HTML comment; its invisibility has now been observed on live
+  GitHub Wiki pages in two repositories. Recheck if GitHub changes its renderer.
