@@ -1,0 +1,6 @@
+<cherrytree>
+<node name="Recipes" unique_id="1"><rich_text>Things to cook.</rich_text>
+<node name="Cafe cr&#232;me" unique_id="2"><rich_text>Coffee, milk.</rich_text></node>
+</node>
+<node name="Shopping" unique_id="3"><rich_text>Beans.</rich_text></node>
+</cherrytree>

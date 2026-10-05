@@ -1,0 +1,96 @@
+= Fuzzing
+:toc: preamble
+
+BerryWiki parses input it does not control: Markdown and metadata pulled
+through git, CherryTree notebooks, browser uploads, and raw HTTP. Every one of
+those parsers has a fuzz target, and most targets check an invariant on every
+input rather than only "did not crash". This is v1 criterion S6
+(link:../execution/v1-criteria.adoc[v1 criteria]).
+
+== Layout and the dependency rule
+
+The harness is the `fuzz/` package, which has its own `[workspace]` and is
+excluded from the product workspace. Its one third-party crate,
+`libfuzzer-sys`, therefore never enters the product's dependency tree, and
+ADR-0015's rule ("the workspace keeps exactly one third-party crate", checked
+with `cargo tree -e normal`) holds unchanged.
+
+Two private parsers are reached through `berrywiki_serve::fuzz_entry`, a
+`#[doc(hidden)]` module that exists only for the harness.
+
+Inputs live in three places:
+
+* `fuzz/seeds/<target>/`: the small committed starting set (fixture pages,
+  the notebooks embedded in the import tests, sample requests).
+* `fuzz/regressions/<target>/`: every input that has ever failed, committed
+  and never minimised, so every run replays every past crash.
+* `fuzz/corpus/<target>/`: the working corpus each run grows. Git-ignored:
+  it reaches megabytes quickly and is regenerable from the seeds.
+
+== Targets and their oracles
+
+[cols="1,2,3", options="header"]
+|===
+| Target | Parser | What every input must satisfy
+
+| `metadata_roundtrip` | `berrywiki-core` metadata block | INV-1: one parse-then-serialise pass reaches a fixed point that a second pass does not move.
+| `render_no_script` | `berrywiki-render` Markdown to HTML | The output carries no route to script: no script, iframe, object, embed, frame, base, meta, link, style, form, svg or math element; no `on*` attribute; no `style` attribute; no `javascript:`, `vbscript:` or non-image `data:` URL, after entity decoding. The oracle is itself tested against planted routes (`fuzz/src/lib.rs`).
+| `page_parse` | headings, links, slugs, titles | Never panics; a slug never contains whitespace.
+| `xml_reader` | the hand-rolled XML reader | Always terminates: events are bounded by input length.
+| `import_ctd` | whole-notebook import | Never panics, under every name the importer dispatches on.
+| `multipart` | upload parsing | Never panics; an accepted filename has no path separator or NUL.
+| `request_head` | the request guard's head parser | Never panics; never accepts a line over its 8 KiB limit.
+|===
+
+== Running
+
+Needs a nightly toolchain and `cargo-fuzz` (both installed on the maintainer's
+machine; CI pins `nightly-2026-07-27` and `cargo-fuzz 0.13.2`).
+
+----
+cd fuzz
+cargo +nightly test --lib                         # the oracle's own tests
+cargo +nightly fuzz list
+cargo +nightly fuzz run render_no_script corpus/render_no_script seeds/render_no_script -- -max_total_time=600
+----
+
+CI (`.github/workflows/fuzz.yml`) runs every target for 30 seconds on each
+pull request and push, 20 minutes each on a weekly schedule, and for any
+number of seconds on manual dispatch. A crash input is uploaded as the
+`fuzz-artifacts` artefact.
+
+== When a target fails
+
+. Reproduce: `cargo +nightly fuzz run <target> artifacts/<target>/crash-…`.
+. Fix the parser, never the oracle, unless the oracle is provably wrong.
+. Add a regression test *in the crate* (it must run under plain `cargo test`
+  on stable) and show it fails with the fix reverted.
+. Copy the crash input into `fuzz/regressions/<target>/` so every later run
+  replays it.
+
+== Findings
+
+[cols="1,1,3,1", options="header"]
+|===
+| Date | Target | Defect | Fixed by
+
+| 2026-10-05 | `metadata_roundtrip` | A metadata value carrying a control character (for example a `parent:` id containing `\u{1}`) was parsed verbatim but written back with spaces, so saving an untouched page could silently re-parent it (INV-1). Values are now normalised at parse time, exactly as a save would write them, with a `metadata.normalised-value` warning. | `a_value_with_control_characters_round_trips_with_a_warning`
+| 2026-10-05 | `metadata_roundtrip` | Second and third sweeps: an unknown field's line containing `-->` was kept raw but saved defused (`-- >`), and when the `-->` sat inside the line's *key* the defused key gained a space, so the next read dropped the line and the second save differed from the first. A `-->` in a value or continuation line is now defused on read; a `-->` inside a key makes the line unparseable on read, as it would be after a save. | `an_unknown_line_containing_a_close_marker_round_trips`, `a_close_marker_inside_an_unknown_key_is_dropped_consistently`
+| 2026-10-05 | `metadata_roundtrip` | Fourth sweep: the page body was rebuilt from `lines()` instead of sliced from the file, so a Windows (CRLF) page had *every* line ending rewritten to LF on its first save, a `\r\r\n` ending lost one `\r` per save, and a file without a final newline gained one. The body is now the file's own bytes. Also: a `parent:` value that became `null` or empty only after normalisation was stored as a real id; normalisation now runs first. | `a_crlf_body_survives_a_save_byte_for_byte`, `a_body_without_a_final_newline_is_not_given_one`, `a_parent_that_normalises_to_null_means_no_parent`
+| 2026-10-05 | `import_ctd` | A formatted text run of nothing but spaces (bold, italic or strikethrough) panicked: its leading and trailing spaces overlapped and the slice between them crossed over. | `a_formatted_run_of_only_spaces_does_not_panic`
+|===
+
+== Campaign hours
+
+S6 asks for at least 24 CPU-hours per target with no unexplained crash. Hours
+are recorded here as they accumulate; the smoke runs in CI do not count
+towards them.
+
+[cols="1,1,2", options="header"]
+|===
+| Target | CPU-hours | Note
+
+| `metadata_roundtrip` | ~2.1 | 2026-10-05: four failing sweeps (five defects, all fixed), then 10 min x 4 workers clean (12.3 M runs) and a final 3 min clean
+| `import_ctd` | ~0.15 | 2026-10-05: one defect fixed; then 5 min and 3 min clean
+| `render_no_script`, `page_parse`, `xml_reader`, `multipart`, `request_head` | ~0.18 each | 2026-10-05: 3 + 5 + 3 min, all clean
+|===

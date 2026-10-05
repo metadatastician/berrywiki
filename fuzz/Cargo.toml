@@ -1,0 +1,81 @@
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+# SPDX-License-Identifier: MPL-2.0
+#
+# Fuzz harness for every parser of untrusted input (v1 criterion S6).
+#
+# This is deliberately its own package with its own `[workspace]`, outside the
+# product workspace: `libfuzzer-sys` never enters the product's dependency
+# tree, so ADR-0015's "exactly one third-party crate" rule (checked with
+# `cargo tree -e normal`) is untouched. Requires nightly and cargo-fuzz:
+#
+#   cargo +nightly fuzz run <target> -- -max_total_time=60
+#
+# See docs/development/fuzzing.adoc.
+
+[package]
+name = "berrywiki-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+berrywiki-core = { path = "../crates/berrywiki-core" }
+berrywiki-render = { path = "../crates/berrywiki-render" }
+berrywiki-import = { path = "../crates/berrywiki-import" }
+berrywiki-serve = { path = "../crates/berrywiki-serve" }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "metadata_roundtrip"
+path = "fuzz_targets/metadata_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "render_no_script"
+path = "fuzz_targets/render_no_script.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "page_parse"
+path = "fuzz_targets/page_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "xml_reader"
+path = "fuzz_targets/xml_reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "import_ctd"
+path = "fuzz_targets/import_ctd.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "multipart"
+path = "fuzz_targets/multipart.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "request_head"
+path = "fuzz_targets/request_head.rs"
+test = false
+doc = false
+bench = false

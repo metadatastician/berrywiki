@@ -63,7 +63,7 @@ Ordered by the project's charter priorities.
 | S3 | No single client can stall the server. | Read and header timeouts, and a size limit on header lines, each with a test that holds a slow or short connection open. | ✅ `a_stalled_client_does_not_block_the_next_one`, `an_oversized_head_is_refused_with_431`; mutation-checked
 | S4 | Credentials never leave their intended destination. | The token is sent only to `https://github.com`; the askpass helper is created exclusively in a private directory; tests cover a non-GitHub remote, an `http://` remote, a pre-planted helper path, and an HTTP redirect from GitHub to another host, scheme or port, showing that the token is not sent to the redirect target. | ✅ `berrywiki-github` tests, including a two-server redirect test whose positive control shows the leak when redirects are followed; mutation-checked
 | S5 | No command can destroy work outside BerryWiki's own state. | `berrywiki-github` refuses a cache directory it did not create; the destructive-command audit covers every crate; the audit tests carry a planted negative. | 🟡 mirror ownership check and its audit (with planted violations) done; the audit does not yet cover every crate
-| S6 | Every untrusted-input parser is fuzzed. | A `fuzz/` target per parser in S1; at least _(proposed)_ 24 CPU-hours cumulative per target with zero unexplained crashes; committed corpora; a short fuzz run on every pull request. | ❌
+| S6 | Every untrusted-input parser is fuzzed. | A `fuzz/` target per parser in S1; at least _(proposed)_ 24 CPU-hours cumulative per target with zero unexplained crashes; committed corpora; a short fuzz run on every pull request. | 🟡 harness of 7 targets with invariant oracles, CI smoke run on every PR and weekly 20-minute runs (`.github/workflows/fuzz.yml`, `docs/development/fuzzing.adoc`); three defects found and fixed; the 24 CPU-hour budget per target is not yet accumulated
 | S7 | Dependencies are audited. | `cargo-deny` (advisories, licences, bans, sources) and `cargo-audit` in CI, both clean, each with a planted negative. | ❌
 | S8 | No open High or Medium security finding. | The debt register and `dev-notes` findings list contain none, unless an owner ruling waives one. | ❌
 |===
@@ -151,6 +151,9 @@ plain Markdown, it stays usable without BerryWiki, and no script is served.
   packages already plan Pandoc; ADR-0015 governs the shell-out cost).
 * *OCR:* text extracted from attached images and PDFs for search, never
   replacing the attachment.
+* *Encrypted CherryTree notebooks* (`.ctz`/`.ctx`, 7-Zip AES-256): import with
+  the password read from the terminal, decrypted in memory, no plaintext on
+  disk. Refused in v1 by owner ruling (2026-10-05).
 * *Multilingual corpora:* `hyperpolymath/lol` as a source of language data,
   for example dictionaries and language detection.
 
@@ -160,6 +163,7 @@ plain Markdown, it stays usable without BerryWiki, and no script is served.
 . The bar is adopted as written, including the _(proposed)_ thresholds.
 . Packaging (P2): install Guix; D-12(b) stands.
 . Multi-user (M1): collaborators and teams, the ADR-0016 Team profile, are in v1.
+. Encrypted CherryTree notebooks stay refused in v1; 7-Zip import is post-v1.
 
 Still with the owner, and no agent can close them: supply a real CherryTree
 notebook (R1), and run the screen-reader walkthrough (A1).

@@ -1,0 +1,4 @@
+<cherrytree><node name="Script" unique_id="1" prog_lang="python">
+<rich_text>x = 2 * 3
+print(x)</rich_text>
+</node></cherrytree>

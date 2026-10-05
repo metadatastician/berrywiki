@@ -25,6 +25,13 @@ signature) alongside the OCI image produced by `guix pack`. Work package
 
 ### Added
 
+- **Fuzzing for every parser of untrusted input** (v1 criterion S6): seven
+  `cargo-fuzz` targets in a separate `fuzz/` package (outside the product
+  workspace, so the one-crate dependency rule holds), most checking an
+  invariant on every input (idempotent metadata, no route to script in
+  rendered HTML, bounded XML parsing). CI runs each briefly on every pull
+  request and for 20 minutes weekly. See `docs/development/fuzzing.adoc`.
+
 - **A `berrywiki check` composite Action** at the repository root
   (`action.yml`), so a course wiki can be structure-checked in GitHub Actions
   with `uses: metadatastician/berrywiki@<sha>`. It builds the CLI from the
@@ -84,6 +91,20 @@ signature) alongside the OCI image produced by `guix pack`. Work package
   does and does not keep current here.
 
 ### Fixed
+
+- **Saving a page could silently change its metadata** when a value held a
+  control character or an unknown field's line held `-->`: the parser kept
+  the raw value but the serialiser wrote a cleaned one. Values are now
+  normalised on read, exactly as a save writes them, with a
+  `metadata.normalised-value` warning; an unknown line whose key contains
+  `-->` is dropped on read with a warning, as a save would drop it (found by
+  fuzzing; INV-1).
+- **Saving a page rewrote its line endings.** A page with Windows (CRLF) line
+  endings had every line changed to LF on its first BerryWiki save, and a
+  page without a final newline gained one. The page body is now kept byte for
+  byte (found by fuzzing).
+- **Importing a CherryTree notebook could panic** on a bold, italic or
+  struck-through run made only of spaces (found by fuzzing).
 
 - **`pages.yml` pinned `actions/upload-pages-artifact` to a commit that exists
   nowhere.** `3788795898…` answers 422 from the commits endpoint; tag `v5` is
