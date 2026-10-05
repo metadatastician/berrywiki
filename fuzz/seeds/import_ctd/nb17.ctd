@@ -1,0 +1,4 @@
+<cherrytree>
+<node name="Notes" unique_id="1"><rich_text>a</rich_text></node>
+<node name="Notes" unique_id="2"><rich_text>b</rich_text></node>
+</cherrytree>

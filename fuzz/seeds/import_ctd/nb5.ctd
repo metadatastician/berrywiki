@@ -1,0 +1,10 @@
+<cherrytree><node name="S" unique_id="1">
+<rich_text>plain </rich_text>
+<rich_text weight="heavy">bold</rich_text>
+<rich_text> </rich_text>
+<rich_text style="italic">italic</rich_text>
+<rich_text> </rich_text>
+<rich_text strikethrough="true">gone</rich_text>
+<rich_text> </rich_text>
+<rich_text family="monospace">code</rich_text>
+</node></cherrytree>

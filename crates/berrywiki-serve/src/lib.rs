@@ -34,6 +34,26 @@ mod ids;
 
 pub use guard::{AllowedHosts, ServerConfig, DEFAULT_CONNECTION_DEADLINE, DEFAULT_READ_TIMEOUT};
 
+/// Entry points for the out-of-workspace fuzz harness (`fuzz/`), so it can
+/// reach parsers that are otherwise private. Not part of the API: hidden from
+/// docs, and free to change with the harness.
+#[doc(hidden)]
+pub mod fuzz_entry {
+    /// Parse a raw request head; `Some((method, target))` when accepted.
+    pub fn request_head(bytes: &[u8]) -> Option<(String, String)> {
+        crate::guard::read_head(&mut &bytes[..])
+            .ok()
+            .map(|h| (h.method, h.target))
+    }
+
+    /// Parse a multipart upload; `Some(filename)` when a file part was found.
+    pub fn multipart(content_type: &str, body: &[u8]) -> Option<String> {
+        crate::attach::parse_upload(content_type, body)
+            .ok()
+            .map(|p| p.filename)
+    }
+}
+
 /// A minimal HTTP response.
 ///
 /// `body` is the text payload and is what every HTML assertion reads. A

@@ -1,0 +1,98 @@
+---
+# SPDX-License-Identifier: MPL-2.0
+#
+# Fuzz every parser of untrusted input (v1 criterion S6). Authored as KYAML.
+#
+# On pull requests and pushes: a short smoke run of each target from the
+# committed corpus, so a parser change that crashes, hangs, or breaks an
+# oracle (no script in rendered HTML, idempotent metadata, bounded XML events)
+# fails here. Long campaigns (the S6 24 CPU-hour budget) run on a schedule or
+# by hand; see docs/development/fuzzing.adoc.
+#
+# The harness lives in fuzz/, a separate package outside the product
+# workspace, so libfuzzer-sys never joins the product's dependency tree
+# (ADR-0015). The nightly is pinned by date for reproducible instrumentation.
+{
+  name: "Fuzz",
+  on: {
+    push: {
+      branches: [
+        "main",
+      ],
+    },
+    pull_request: {},
+    schedule: [
+      {
+        cron: "17 3 * * 1",
+      },
+    ],
+    workflow_dispatch: {
+      inputs: {
+        seconds: {
+          description: "Seconds per target",
+          required: false,
+          default: "600",
+        },
+      },
+    },
+  },
+  permissions: {
+    contents: "read",
+  },
+  concurrency: {
+    group: "fuzz-${{ github.ref }}",
+    cancel-in-progress: true,
+  },
+  jobs: {
+    fuzz: {
+      name: "fuzz untrusted parsers",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 90,
+      env: {
+        # PR/push: 30 s per target. Weekly schedule: 20 min. Manual: as asked.
+        SECONDS_PER_TARGET: "${{ github.event_name == 'schedule' && '1200' || inputs.seconds || '30' }}",
+      },
+      steps: [
+        {
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        }, # v7.0.1
+        {
+          uses: "dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067", # master
+          with: {
+            toolchain: "nightly-2026-07-27",
+          },
+        },
+        {
+          uses: "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6", # v2.9.2
+          with: {
+            workspaces: "fuzz -> target",
+          },
+        },
+        {
+          name: "Install cargo-fuzz",
+          run: "cargo install cargo-fuzz --version 0.13.2 --locked",
+        },
+        {
+          name: "Oracle self-test (it must catch planted script routes)",
+          working-directory: "fuzz",
+          run: "cargo +nightly-2026-07-27 test --lib",
+        },
+        {
+          name: "Run every target",
+          working-directory: "fuzz",
+          run: "set -euo pipefail\nfor t in $(cargo +nightly-2026-07-27 fuzz list); do\n  echo \"::group::$t\"\n  mkdir -p \"corpus/$t\"\n  # corpus/ (writable, grown this run) + committed seeds + every past crash.\n  dirs=(\"corpus/$t\" \"seeds/$t\")\n  if [ -d \"regressions/$t\" ]; then dirs+=(\"regressions/$t\"); fi\n  cargo +nightly-2026-07-27 fuzz run \"$t\" \"${dirs[@]}\" -- \\\n    -max_total_time=\"$SECONDS_PER_TARGET\" -rss_limit_mb=2048 -timeout=10\n  echo \"::endgroup::\"\ndone\n",
+        },
+        {
+          name: "Keep any crash input",
+          if: "${{ failure() }}",
+          uses: "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", # v4.6.2
+          with: {
+            name: "fuzz-artifacts",
+            path: "fuzz/artifacts/",
+            if-no-files-found: "ignore",
+          },
+        },
+      ],
+    },
+  },
+}

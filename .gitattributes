@@ -87,3 +87,8 @@ Dockerfile eol=lf
 *.clj linguist-language=Clojure
 *.cljs linguist-language=Clojure
 *.cljc linguist-language=Clojure
+
+# Fuzz inputs are exact bytes: line-ending normalisation would destroy the
+# CRLF and control-character cases they exist to reproduce.
+fuzz/seeds/** -text
+fuzz/regressions/** -text

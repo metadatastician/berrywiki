@@ -1,5 +1,8 @@
 [workspace]
 resolver = "2"
+# The fuzz harness is its own package (and workspace) so libfuzzer-sys never
+# joins the product dependency tree (ADR-0015). See fuzz/Cargo.toml.
+exclude = ["fuzz"]
 members = [
     "crates/berrywiki-a11y",
     "crates/berrywiki-appstate",

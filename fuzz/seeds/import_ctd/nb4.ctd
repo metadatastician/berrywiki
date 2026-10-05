@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<cherrytree>
+  <node name="Parent" unique_id="1" prog_lang="custom-colors">
+    <rich_text>Top level text.</rich_text>
+    <node name="Child" unique_id="2" prog_lang="custom-colors">
+      <rich_text>Nested text.</rich_text>
+    </node>
+  </node>
+</cherrytree>

@@ -1,0 +1,6 @@
+<cherrytree>
+<node name="First" unique_id="1">
+<rich_text link="node 2">see the other one</rich_text>
+</node>
+<node name="Second" unique_id="2"><rich_text>hi</rich_text></node>
+</cherrytree>

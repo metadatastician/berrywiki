@@ -1,0 +1,6 @@
+--X
+Content-Disposition: form-data; name="file"; filename="a.png"
+Content-Type: image/png
+
+PNGDATA
+--X--

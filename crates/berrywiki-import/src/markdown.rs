@@ -121,6 +121,12 @@ pub fn emit_run(text: &str, marks: &Marks) -> String {
     // Emphasis must hug the text: `** bold **` is not bold in CommonMark.
     // Leading and trailing spaces are lifted outside the markers.
     if marks.bold || marks.italic || marks.strike {
+        // A run of nothing but spaces has no text to emphasise. Checked first:
+        // its leading and trailing spaces are the same spaces, and slicing
+        // between them would cross over (a fuzz-found panic).
+        if body.trim_matches(' ').is_empty() {
+            return body;
+        }
         let lead: String = body.chars().take_while(|c| *c == ' ').collect();
         let trail: String = body
             .chars()
@@ -128,9 +134,6 @@ pub fn emit_run(text: &str, marks: &Marks) -> String {
             .take_while(|c| *c == ' ')
             .collect::<String>();
         let core = &body[lead.len()..body.len() - trail.len()];
-        if core.is_empty() {
-            return body;
-        }
         let mut wrapped = core.to_string();
         if marks.strike {
             wrapped = format!("~~{wrapped}~~");
