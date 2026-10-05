@@ -1,25 +1,14 @@
-name: 'Panic Attack & Pons Gate'
-description: 'Validates that code has been run through the panic-attack and pons tools.'
-runs:
-  using: 'composite'
-  steps:
-    - name: Run Custom Tools Check
-      shell: bash
-      run: |
-        echo "Validating Panic Attack and Pons execution..."
-        # In a real execution, this would check logs, invoke the tools, or check for a generated `.pons` lockfile.
-        # Check for Pons
-        if command -v pons &> /dev/null; then
-          pons verify .
-        else
-          echo "Pons tool not found in PATH, assuming it needs to run via standard caller."
-        fi
-        
-        # Check for Panic Attack
-        if command -v panic-attack &> /dev/null; then
-          panic-attack scan .
-        else
-          echo "Panic Attack tool not found in PATH, assuming it needs to run via standard caller."
-        fi
-        
-        echo "Custom tools validation passed."
+{
+  name: "Panic Attack & Pons Gate",
+  description: "Validates that code has been run through the panic-attack and pons tools.",
+  runs: {
+    using: "composite",
+    steps: [
+      {
+        name: "Run Custom Tools Check",
+        shell: "bash",
+        run: "echo \"Validating Panic Attack and Pons execution...\"\n# In a real execution, this would check logs, invoke the tools, or check for a generated `.pons` lockfile.\n# Check for Pons\nif command -v pons &> /dev/null; then\n  pons verify .\nelse\n  echo \"Pons tool not found in PATH, assuming it needs to run via standard caller.\"\nfi\n\n# Check for Panic Attack\nif command -v panic-attack &> /dev/null; then\n  panic-attack scan .\nelse\n  echo \"Panic Attack tool not found in PATH, assuming it needs to run via standard caller.\"\nfi\n\necho \"Custom tools validation passed.\"\n",
+      },
+    ],
+  },
+}

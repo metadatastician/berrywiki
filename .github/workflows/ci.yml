@@ -1,205 +1,261 @@
 # SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
 # SPDX-License-Identifier: MPL-2.0
 
-name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-
-# Minimal permissions (spec: least privilege).
-permissions:
-  actions: read
-  contents: read
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  CARGO_TERM_COLOR: always
-
-jobs:
-  lint:
-    name: rustfmt + clippy
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Pinned to a SHA, dtolnay/rust-toolchain cannot infer the toolchain
-      # from the ref, so `toolchain:` must be explicit.
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
-        with:
-          toolchain: stable
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      # NOTE: rustfmt/clippy cannot run on the dev host (distro Rust, no rustup),
-      # so this is the first place the code is normalised. Before the first push
-      # to a remote, run `cargo fmt --all` on a rustfmt-capable machine — the
-      # initial run may otherwise fail on formatting. clippy runs rustc lints
-      # too, so it also enforces the warning-free build for workspace crates.
-      - name: rustfmt (check)
-        run: cargo fmt --all -- --check
-      - name: clippy (deny warnings)
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-  test:
-    name: test (rust ${{ matrix.rust }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        # 1.89.0 enforces the declared MSRV (workspace rust-version); stable
-        # catches issues the pinned toolchain would miss.
-        rust: ["1.89.0", "stable"]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
-        with:
-          toolchain: ${{ matrix.rust }}
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: build (locked)
-        run: cargo build --workspace --locked
-      # The full suite includes the no-<script> SSR assertions and the git
-      # conflict / no-data-loss harness, so `cargo test` IS the security and
-      # safety gate.
-      - name: test (locked)
-        run: cargo test --workspace --locked
-      # docs/proofs/invariants.adoc names the test that witnesses each
-      # INV-n. This gate fails when a named test no longer exists or is not
-      # registered, so the ledger cannot rot silently. The list is written
-      # to a file, never piped, so the exit status is cargo's own.
-      - name: invariants ledger (witnesses registered)
-        run: |
-          cargo test --workspace --locked -- --list > "$RUNNER_TEMP/test-list.txt"
-          scripts/check-invariants-ledger.sh "$RUNNER_TEMP/test-list.txt"
-  shell:
-    name: shell script gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # No Rust here on purpose. Until D-16 deleted the launcher pair this
-      # gate was carried by scripts/check-launcher.sh, which ran bash -n and
-      # shellcheck over every shell script as a side effect of smoke-testing
-      # the launcher. The launcher is gone; the shellcheck half is kept on
-      # its own rather than deleted along with it.
-      #
-      # Fail-closed by design: the old script could be told to skip
-      # shellcheck with an environment variable, so a runner without it
-      # produced a warning and a green job. Here a missing shellcheck fails
-      # the step, and an empty scripts/ leaves the glob unexpanded and also
-      # fails, rather than passing vacuously.
-      - name: bash -n + shellcheck
-        run: |
-          set -eu
-          shellcheck --version
-          for s in scripts/*.sh; do bash -n "$s"; done
-          shellcheck -S style scripts/*.sh
-  # Every `uses:` in this repository is pinned to a full commit SHA, and the
-  # repository sets `sha_pinning_required: true`, so it cannot be otherwise.
-  # Nothing checked that a pinned SHA names a commit that EXISTS: `@` plus 40
-  # hex characters is well formed whether or not the commit is real. That class
-  # has now bitten this repository three times — twice in `ci.yml`, where every
-  # run died at action download for eight days (cleared 2026-08-07), and once
-  # in `pages.yml` (cleared 2026-09-25).
-  #
-  # It is invisible by construction. Actions resolves a `uses:` ref only at run
-  # time, and an unresolvable ref produces NO check run at all — not a red one.
-  # So the board looks green while the job never ran, and `gh pr checks` shows
-  # nothing to look at. Only asking GitHub the question catches it.
-  #
-  # The estate ships the same gate as `scripts/check-action-pins-resolve.sh`
-  # (hyperpolymath/standards), which measured 112 unresolvable pins out of 613
-  # estate-wide on 2026-07-28. This is that gate, inline, so it adds no file
-  # under `scripts/` and needs no Rust toolchain.
-  #
-  # Failure semantics are deliberate. A DETERMINATE negative fails the job:
-  # GitHub answered, and the answer was "that does not exist". An INDETERMINATE
-  # answer — rate limiting, 5xx, network loss — says nothing about the pin, so
-  # it does not fail: it is counted and reported loudly as UNVERIFIED. A
-  # fail-open that announces itself is not a fake gate; one that hides is.
-  pins:
-    name: action pins resolve
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: 'Every SHA-pinned uses: must resolve upstream'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash scripts/check-action-pins.sh
-
-  docs:
-    name: AsciiDoc render gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Pinned: the gate's verdict is "asciidoctor wrote nothing to stderr", so
-      # an unpinned upgrade that adds one diagnostic would redden files the
-      # host renders clean. A version bump here is a deliberate, reviewable act.
-      - name: Install asciidoctor
-        run: sudo gem install --no-document asciidoctor -v 2.0.26
-      # asciidoctor's default failure level is FATAL, so a malformed table
-      # emits ERROR on stderr and still exits 0. This gate reads stderr, not
-      # the exit code, and plants a known-bad fixture first so a green run
-      # means the gate was able to fail and did not.
-      - name: AsciiDoc render gate
-        run: scripts/check-adoc.sh
-
-  # End-to-end positive AND negative control for the composite Action itself.
-  # Reading action.yml proves nothing about `git ls-remote`, actions/cache or
-  # `cargo install --git` on a real runner; only running it does. `uses: ./`
-  # runs the action.yml in this very commit, so a PR that breaks the Action
-  # goes red here rather than in a teacher's repository.
-  action:
-    name: berrywiki check Action (self-test)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # fixtures/test-wiki is a known-answer fixture: 10 pages, 0 errors and
-      # exactly 3 warnings (one broken link, two malformed metadata values).
-      # Asserting all three means a silent no-op cannot pass as a check.
-      # `uses: ./` leaves github.action_ref empty, so the Action falls back to
-      # building the CLI from `main`. That is the intended fallback and it is
-      # what this job exercises; it also means this job checks the PR's
-      # fixtures with main's CLI, which is correct while no PR touches both.
-      - name: Action over the known-answer fixture
-        id: control
-        uses: ./
-        with:
-          path: fixtures/test-wiki
-      - name: Assert the known answer
-        env:
-          PAGES: ${{ steps.control.outputs.pages }}
-          ERRORS: ${{ steps.control.outputs.errors }}
-          WARNINGS: ${{ steps.control.outputs.warnings }}
-        run: |
-          set -euo pipefail
-          printf 'pages=%s errors=%s warnings=%s\n' "$PAGES" "$ERRORS" "$WARNINGS"
-          [ "$PAGES" = "10" ] || { echo "::error::expected 10 pages"; exit 1; }
-          [ "$ERRORS" = "0" ] || { echo "::error::expected 0 errors"; exit 1; }
-          [ "$WARNINGS" = "3" ] || { echo "::error::expected 3 warnings"; exit 1; }
-      # The negative control. The same fixture carries three warnings, so
-      # strict: 'true' MUST fail. Without this, a strict mode that silently
-      # passed everything would look identical to one that works.
-      - name: Action in strict mode must fail on the same fixture
-        id: strict
-        continue-on-error: true
-        uses: ./
-        with:
-          path: fixtures/test-wiki
-          strict: 'true'
-      - name: Assert strict mode failed
-        env:
-          OUTCOME: ${{ steps.strict.outcome }}
-        run: |
-          set -euo pipefail
-          echo "strict outcome: $OUTCOME"
-          [ "$OUTCOME" = "failure" ] || {
-            echo "::error::strict mode passed a wiki with 3 warnings; the gate cannot fail"
-            exit 1
-          }
+{
+  name: "CI",
+  on: {
+    push: {
+      branches: [
+        "main",
+      ],
+    },
+    pull_request: null,
+  },
+  # Minimal permissions (spec: least privilege).
+  permissions: {
+    actions: "read",
+    contents: "read",
+  },
+  concurrency: {
+    group: "ci-${{ github.ref }}",
+    cancel-in-progress: true,
+  },
+  env: {
+    CARGO_TERM_COLOR: "always",
+  },
+  jobs: {
+    lint: {
+      name: "rustfmt + clippy",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 20,
+      steps: [
+        {
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+        },
+        # Pinned to a SHA, dtolnay/rust-toolchain cannot infer the toolchain
+        # from the ref, so `toolchain:` must be explicit.
+        {
+          uses: "dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de", # master
+          with: {
+            toolchain: "stable",
+            components: "rustfmt, clippy",
+          },
+        },
+        {
+          uses: "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6", # v2.9.2
+        },
+        # NOTE: rustfmt/clippy cannot run on the dev host (distro Rust, no rustup),
+        # so this is the first place the code is normalised. Before the first push
+        # to a remote, run `cargo fmt --all` on a rustfmt-capable machine — the
+        # initial run may otherwise fail on formatting. clippy runs rustc lints
+        # too, so it also enforces the warning-free build for workspace crates.
+        {
+          name: "rustfmt (check)",
+          run: "cargo fmt --all -- --check",
+        },
+        {
+          name: "clippy (deny warnings)",
+          run: "cargo clippy --workspace --all-targets --locked -- -D warnings",
+        },
+      ],
+    },
+    test: {
+      name: "test (rust ${{ matrix.rust }})",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 20,
+      strategy: {
+        fail-fast: false,
+        matrix: {
+          # 1.89.0 enforces the declared MSRV (workspace rust-version); stable
+          # catches issues the pinned toolchain would miss.
+          rust: [
+            "1.89.0",
+            "stable",
+          ],
+        },
+      },
+      steps: [
+        {
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+        },
+        {
+          uses: "dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de", # master
+          with: {
+            toolchain: "${{ matrix.rust }}",
+          },
+        },
+        {
+          uses: "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6", # v2.9.2
+        },
+        {
+          name: "build (locked)",
+          run: "cargo build --workspace --locked",
+        },
+        # The full suite includes the no-<script> SSR assertions and the git
+        # conflict / no-data-loss harness, so `cargo test` IS the security and
+        # safety gate.
+        {
+          name: "test (locked)",
+          run: "cargo test --workspace --locked",
+        },
+        # docs/proofs/invariants.adoc names the test that witnesses each
+        # INV-n. This gate fails when a named test no longer exists or is not
+        # registered, so the ledger cannot rot silently. The list is written
+        # to a file, never piped, so the exit status is cargo's own.
+        {
+          name: "invariants ledger (witnesses registered)",
+          run: "cargo test --workspace --locked -- --list > \"$RUNNER_TEMP/test-list.txt\"\nscripts/check-invariants-ledger.sh \"$RUNNER_TEMP/test-list.txt\"\n",
+        },
+      ],
+    },
+    shell: {
+      name: "shell script gate",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 5,
+      steps: [
+        {
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+        },
+        # No Rust here on purpose. Until D-16 deleted the launcher pair this
+        # gate was carried by scripts/check-launcher.sh, which ran bash -n and
+        # shellcheck over every shell script as a side effect of smoke-testing
+        # the launcher. The launcher is gone; the shellcheck half is kept on
+        # its own rather than deleted along with it.
+        #
+        # Fail-closed by design: the old script could be told to skip
+        # shellcheck with an environment variable, so a runner without it
+        # produced a warning and a green job. Here a missing shellcheck fails
+        # the step, and an empty scripts/ leaves the glob unexpanded and also
+        # fails, rather than passing vacuously.
+        {
+          name: "bash -n + shellcheck",
+          run: "set -eu\nshellcheck --version\nfor s in scripts/*.sh; do bash -n \"$s\"; done\nshellcheck -S style scripts/*.sh\n",
+        },
+      ],
+    },
+    # Every `uses:` in this repository is pinned to a full commit SHA, and the
+    # repository sets `sha_pinning_required: true`, so it cannot be otherwise.
+    # Nothing checked that a pinned SHA names a commit that EXISTS: `@` plus 40
+    # hex characters is well formed whether or not the commit is real. That class
+    # has now bitten this repository three times — twice in `ci.yml`, where every
+    # run died at action download for eight days (cleared 2026-08-07), and once
+    # in `pages.yml` (cleared 2026-09-25).
+    #
+    # It is invisible by construction. Actions resolves a `uses:` ref only at run
+    # time, and an unresolvable ref produces NO check run at all — not a red one.
+    # So the board looks green while the job never ran, and `gh pr checks` shows
+    # nothing to look at. Only asking GitHub the question catches it.
+    #
+    # The estate ships the same gate as `scripts/check-action-pins-resolve.sh`
+    # (hyperpolymath/standards), which measured 112 unresolvable pins out of 613
+    # estate-wide on 2026-07-28. This is that gate, inline, so it adds no file
+    # under `scripts/` and needs no Rust toolchain.
+    #
+    # Failure semantics are deliberate. A DETERMINATE negative fails the job:
+    # GitHub answered, and the answer was "that does not exist". An INDETERMINATE
+    # answer — rate limiting, 5xx, network loss — says nothing about the pin, so
+    # it does not fail: it is counted and reported loudly as UNVERIFIED. A
+    # fail-open that announces itself is not a fake gate; one that hides is.
+    pins: {
+      name: "action pins resolve",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 5,
+      steps: [
+        {
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+        },
+        {
+          name: "Every SHA-pinned uses: must resolve upstream",
+          env: {
+            GH_TOKEN: "${{ github.token }}",
+          },
+          run: "bash scripts/check-action-pins.sh",
+        },
+      ],
+    },
+    docs: {
+      name: "AsciiDoc render gate",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 10,
+      steps: [
+        {
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+        },
+        # Pinned: the gate's verdict is "asciidoctor wrote nothing to stderr", so
+        # an unpinned upgrade that adds one diagnostic would redden files the
+        # host renders clean. A version bump here is a deliberate, reviewable act.
+        {
+          name: "Install asciidoctor",
+          run: "sudo gem install --no-document asciidoctor -v 2.0.26",
+        },
+        # asciidoctor's default failure level is FATAL, so a malformed table
+        # emits ERROR on stderr and still exits 0. This gate reads stderr, not
+        # the exit code, and plants a known-bad fixture first so a green run
+        # means the gate was able to fail and did not.
+        {
+          name: "AsciiDoc render gate",
+          run: "scripts/check-adoc.sh",
+        },
+      ],
+    },
+    # End-to-end positive AND negative control for the composite Action itself.
+    # Reading action.yml proves nothing about `git ls-remote`, actions/cache or
+    # `cargo install --git` on a real runner; only running it does. `uses: ./`
+    # runs the action.yml in this very commit, so a PR that breaks the Action
+    # goes red here rather than in a teacher's repository.
+    action: {
+      name: "berrywiki check Action (self-test)",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 20,
+      steps: [
+        {
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+        },
+        # fixtures/test-wiki is a known-answer fixture: 10 pages, 0 errors and
+        # exactly 3 warnings (one broken link, two malformed metadata values).
+        # Asserting all three means a silent no-op cannot pass as a check.
+        # `uses: ./` leaves github.action_ref empty, so the Action falls back to
+        # building the CLI from `main`. That is the intended fallback and it is
+        # what this job exercises; it also means this job checks the PR's
+        # fixtures with main's CLI, which is correct while no PR touches both.
+        {
+          name: "Action over the known-answer fixture",
+          id: "control",
+          uses: "./",
+          with: {
+            path: "fixtures/test-wiki",
+          },
+        },
+        {
+          name: "Assert the known answer",
+          env: {
+            PAGES: "${{ steps.control.outputs.pages }}",
+            ERRORS: "${{ steps.control.outputs.errors }}",
+            WARNINGS: "${{ steps.control.outputs.warnings }}",
+          },
+          run: "set -euo pipefail\nprintf 'pages=%s errors=%s warnings=%s\\n' \"$PAGES\" \"$ERRORS\" \"$WARNINGS\"\n[ \"$PAGES\" = \"10\" ] || { echo \"::error::expected 10 pages\"; exit 1; }\n[ \"$ERRORS\" = \"0\" ] || { echo \"::error::expected 0 errors\"; exit 1; }\n[ \"$WARNINGS\" = \"3\" ] || { echo \"::error::expected 3 warnings\"; exit 1; }\n",
+        },
+        # The negative control. The same fixture carries three warnings, so
+        # strict: 'true' MUST fail. Without this, a strict mode that silently
+        # passed everything would look identical to one that works.
+        {
+          name: "Action in strict mode must fail on the same fixture",
+          id: "strict",
+          continue-on-error: true,
+          uses: "./",
+          with: {
+            path: "fixtures/test-wiki",
+            strict: "true",
+          },
+        },
+        {
+          name: "Assert strict mode failed",
+          env: {
+            OUTCOME: "${{ steps.strict.outcome }}",
+          },
+          run: "set -euo pipefail\necho \"strict outcome: $OUTCOME\"\n[ \"$OUTCOME\" = \"failure\" ] || {\n  echo \"::error::strict mode passed a wiki with 3 warnings; the gate cannot fail\"\n  exit 1\n}\n",
+        },
+      ],
+    },
+  },
+}
