@@ -1022,6 +1022,22 @@ mod tests {
         parse_ctd(src, "testhash")
     }
 
+    // Found by the `import_ctd` fuzz target (2026-10-05): a formatted run of
+    // nothing but spaces sliced past itself and panicked.
+    #[test]
+    fn a_formatted_run_of_only_spaces_does_not_panic() {
+        for attrs in [
+            r#"strikethrough="true""#,
+            r#"weight="heavy""#,
+            r#"style="italic""#,
+        ] {
+            let m = model(&format!(
+                r#"<cherrytree><node name="A" unique_id="1"><rich_text>x</rich_text><rich_text {attrs}>   </rich_text><rich_text>y</rich_text></node></cherrytree>"#
+            ));
+            assert_eq!(m.nodes.len(), 1, "{attrs}");
+        }
+    }
+
     #[test]
     fn a_notebook_becomes_a_tree() {
         let m = model(

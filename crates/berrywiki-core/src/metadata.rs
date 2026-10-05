@@ -170,19 +170,60 @@ pub fn parse_source(source: &str) -> ParsedSource {
     if lines.get(body_start).map(|l| l.trim().is_empty()) == Some(true) {
         body_start += 1;
     }
-    let body = lines[body_start..].join("\n");
-    // Preserve a single trailing newline convention for the body.
-    let body = if body.is_empty() {
-        String::new()
-    } else {
-        format!("{body}\n")
-    };
+    // The body is the source's own bytes from that line on, never a rebuild
+    // from `lines()`: a rebuild rewrote every CRLF line ending to LF (so a
+    // page edited on Windows changed in full on its first BerryWiki save),
+    // shed one `\r` per save from a `\r\r\n` ending, and added a final
+    // newline the file did not have. Found by fuzzing (INV-1). `str::lines`
+    // and `split_inclusive('\n')` split at the same places, so line indices
+    // map onto byte offsets.
+    let body_offset: usize = source
+        .split_inclusive('\n')
+        .take(body_start)
+        .map(str::len)
+        .sum();
+    let body = source[body_offset..].to_string();
 
     ParsedSource {
         metadata: Some(meta),
         body,
         diagnostics,
     }
+}
+
+/// `value` as a save will write it back: control characters become spaces and
+/// a stray `-->` is defused, exactly as [`serialize_metadata`] does, so what is
+/// parsed is what a save keeps (INV-1: serialisation is idempotent). Without
+/// this a parent id carrying a control character was parsed as one id and
+/// saved as another, silently re-parenting the page. A value that needed
+/// normalising raises a warning naming its field.
+fn normalised(field: &str, value: &str, diagnostics: &mut Vec<Diagnostic>) -> String {
+    if !sanitises_field(value) {
+        return value.to_string();
+    }
+    diagnostics.push(Diagnostic::warning(
+        "metadata.normalised-value",
+        format!(
+            "`{field}` contained a control character or `-->`; it was normalised to what a save would write."
+        ),
+    ));
+    sanitise_field(value).trim().to_string()
+}
+
+/// An unknown-field line as a save will write it back. Such lines are
+/// preserved verbatim, except that a `-->` inside one would close the comment
+/// early, so the serialiser defuses it to `-- >`; doing the same here keeps
+/// parse and save in agreement (INV-1), with a warning.
+fn preserved_line(line: &str, diagnostics: &mut Vec<Diagnostic>) -> String {
+    let line = line.trim_end();
+    if !line.contains("-->") {
+        return line.to_string();
+    }
+    diagnostics.push(Diagnostic::warning(
+        "metadata.normalised-value",
+        format!("An unknown metadata line contained `-->`; it was defused to `-- >`: {line:?}"),
+    ));
+    line.replace("-->", "-- >")
 }
 
 fn parse_block(lines: &[&str], diagnostics: &mut Vec<Diagnostic>) -> PageMetadata {
@@ -205,14 +246,18 @@ fn parse_block(lines: &[&str], diagnostics: &mut Vec<Diagnostic>) -> PageMetadat
         };
         match key.as_str() {
             "id" => {
-                meta.id = value.to_string();
+                meta.id = normalised("id", value, diagnostics);
                 seen_id = true;
             }
             "parent" => {
+                // Normalise first: a value that only becomes `null` or empty
+                // once its control characters are gone must mean "no parent",
+                // as it will after a save.
+                let value = normalised("parent", value, diagnostics);
                 meta.parent_id = if value == "null" || value.is_empty() {
                     None
                 } else {
-                    Some(value.to_string())
+                    Some(value)
                 };
             }
             "position" => match value.parse::<i64>() {
@@ -222,7 +267,7 @@ fn parse_block(lines: &[&str], diagnostics: &mut Vec<Diagnostic>) -> PageMetadat
                     format!("Invalid `position` value {value:?}; defaulted to 0."),
                 )),
             },
-            "kind" => meta.kind = PageKind::parse(value),
+            "kind" => meta.kind = PageKind::parse(&normalised("kind", value, diagnostics)),
             "archived" => match value {
                 "true" => meta.archived = true,
                 "false" => meta.archived = false,
@@ -240,7 +285,7 @@ fn parse_block(lines: &[&str], diagnostics: &mut Vec<Diagnostic>) -> PageMetadat
                     // Inline list form: tags: [a, b]
                     meta.tags = inner
                         .split(',')
-                        .map(|t| t.trim().to_string())
+                        .map(|t| normalised("tags", t.trim(), diagnostics))
                         .filter(|t| !t.is_empty())
                         .collect();
                 } else {
@@ -249,7 +294,7 @@ fn parse_block(lines: &[&str], diagnostics: &mut Vec<Diagnostic>) -> PageMetadat
                     while i + 1 < lines.len() {
                         let next = lines[i + 1];
                         if let Some(item) = next.trim_start().strip_prefix("- ") {
-                            tags.push(item.trim().to_string());
+                            tags.push(normalised("tags", item.trim(), diagnostics));
                             i += 1;
                         } else {
                             // A blank or non-item line ends the block list.
@@ -259,17 +304,31 @@ fn parse_block(lines: &[&str], diagnostics: &mut Vec<Diagnostic>) -> PageMetadat
                     meta.tags = tags;
                 }
             }
+            _ if key.contains("-->") => {
+                // A close marker inside the key cannot be written back in any
+                // form that still parses as this key (defusing it adds a
+                // space, and keys may not contain whitespace), so the next
+                // read would drop the line. Drop it now, as a save would, so
+                // read and save agree (INV-1). Found by fuzzing.
+                diagnostics.push(Diagnostic::warning(
+                    "metadata.unparsed-line",
+                    format!(
+                        "Ignored a metadata line whose key contains `-->`: {:?}",
+                        line.trim()
+                    ),
+                ));
+            }
             _ => {
                 // Unknown top-level key: preserve verbatim, INCLUDING any
                 // block-list items or indented continuation lines beneath it.
                 // Dropping them would silently corrupt the file on the next
                 // save (breaking the unknown-field-preservation contract).
-                meta.extra.push(line.trim_end().to_string());
+                meta.extra.push(preserved_line(line, diagnostics));
                 while i + 1 < lines.len() {
                     let next = lines[i + 1];
                     let indented = next.starts_with(' ') || next.starts_with('\t');
                     if indented && !next.trim().is_empty() {
-                        meta.extra.push(next.trim_end().to_string());
+                        meta.extra.push(preserved_line(next, diagnostics));
                         i += 1;
                     } else {
                         break;
@@ -397,6 +456,134 @@ pub fn serialize_source(meta: Option<&PageMetadata>, body: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Found by the `metadata_roundtrip` fuzz target (2026-10-05): a parent id
+    // carrying control characters was parsed as one id and saved as another.
+    #[test]
+    fn a_value_with_control_characters_round_trips_with_a_warning() {
+        let src = "<!-- berrywiki\nid: page-1\nparent: abc\u{1}\u{0}def\nkind: page\u{7}\n\
+tags: [ok, b\u{1}ad]\narchived: false\n-->\nBody\n";
+        let first = parse_source(src);
+        let meta = first.metadata.clone().expect("block parsed");
+        assert_eq!(meta.parent_id.as_deref(), Some("abc  def"));
+        assert!(first
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "metadata.normalised-value"));
+
+        let saved = serialize_source(Some(&meta), &first.body);
+        let second = parse_source(&saved);
+        assert_eq!(
+            second.metadata, first.metadata,
+            "a save must not change what was parsed"
+        );
+        assert_eq!(
+            serialize_source(second.metadata.as_ref(), &second.body),
+            saved
+        );
+    }
+
+    // Found by `metadata_roundtrip` (2026-10-05, second sweep): an unknown
+    // field's continuation line containing `-->` was kept raw but saved
+    // defused, so the first save changed a line the contract preserves.
+    #[test]
+    fn an_unknown_line_containing_a_close_marker_round_trips() {
+        let src = "<!-- berrywiki\nid: page-1\nparent: null\nlabels:\n  - co-->e-a\n  - plain\narchived: false\n-->\nBody\n";
+        let first = parse_source(src);
+        let meta = first.metadata.clone().expect("block parsed");
+        assert!(
+            meta.extra.iter().any(|l| l.contains("co-- >e-a")),
+            "{:?}",
+            meta.extra
+        );
+        assert!(
+            meta.extra.iter().any(|l| l.contains("plain")),
+            "other lines kept"
+        );
+        let saved = serialize_source(Some(&meta), &first.body);
+        let second = parse_source(&saved);
+        assert_eq!(second.metadata, first.metadata);
+        assert_eq!(second.body, first.body);
+    }
+
+    // Found by `metadata_roundtrip` (2026-10-05, third sweep): an unknown
+    // key containing `-->` was preserved, then defused to a key with a space,
+    // which the next read dropped, so the first and second saves differed.
+    #[test]
+    fn a_close_marker_inside_an_unknown_key_is_dropped_consistently() {
+        let src = "<!-- berrywiki\nid: page-1\nparent: null\nx-->y: 90\nkeep: me\narchived: false\n-->\nBody\n";
+        let first = parse_source(src);
+        let meta = first.metadata.clone().expect("block parsed");
+        assert!(
+            !meta.extra.iter().any(|l| l.contains("x--")),
+            "{:?}",
+            meta.extra
+        );
+        assert!(
+            meta.extra.iter().any(|l| l == "keep: me"),
+            "other unknown lines kept"
+        );
+        assert!(first
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "metadata.unparsed-line"));
+        let once = serialize_source(Some(&meta), &first.body);
+        let second = parse_source(&once);
+        assert_eq!(
+            serialize_source(second.metadata.as_ref(), &second.body),
+            once
+        );
+    }
+
+    // Found by `metadata_roundtrip` (2026-10-05, fourth sweep): the body was
+    // rebuilt from `lines()`, so a Windows (CRLF) page had every line ending
+    // rewritten on its first save, and a page without a final newline gained one.
+    #[test]
+    fn a_crlf_body_survives_a_save_byte_for_byte() {
+        let body = "# Title\r\n\r\nWindows line endings.\r\nLast line\r\r\n";
+        let src = format!(
+            "<!-- berrywiki\r\nid: page-1\r\nparent: null\r\narchived: false\r\n-->\r\n\r\n{body}"
+        );
+        let first = parse_source(&src);
+        assert_eq!(first.body, body, "the body is the file's own bytes");
+        let saved = serialize_source(first.metadata.as_ref(), &first.body);
+        assert!(saved.ends_with(body), "a save keeps every CRLF: {saved:?}");
+        let second = parse_source(&saved);
+        assert_eq!(second.body, body);
+        assert_eq!(
+            serialize_source(second.metadata.as_ref(), &second.body),
+            saved
+        );
+    }
+
+    #[test]
+    fn a_body_without_a_final_newline_is_not_given_one() {
+        let src =
+            "<!-- berrywiki\nid: page-1\nparent: null\narchived: false\n-->\n\nNo newline at end";
+        let first = parse_source(src);
+        assert_eq!(first.body, "No newline at end");
+        let saved = serialize_source(first.metadata.as_ref(), &first.body);
+        assert!(saved.ends_with("\n\nNo newline at end"), "{saved:?}");
+    }
+
+    #[test]
+    fn a_parent_that_normalises_to_null_means_no_parent() {
+        for raw in ["null\u{1}", "\u{1}\u{2}", "\u{0}null"] {
+            let src =
+                format!("<!-- berrywiki\nid: page-1\nparent: {raw}\narchived: false\n-->\nBody\n");
+            let meta = parse_source(&src).metadata.expect("block parsed");
+            assert_eq!(meta.parent_id, None, "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn clean_values_raise_no_normalisation_warning() {
+        let first = parse_source(SAMPLE);
+        assert!(!first
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "metadata.normalised-value"));
+    }
 
     const SAMPLE: &str = "<!-- berrywiki\n\
 id: 0195f6ec-36a2-7a42-b519-5f558842e256\n\
