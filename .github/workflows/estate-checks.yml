@@ -1,0 +1,65 @@
+---
+# SPDX-License-Identifier: MPL-2.0
+#
+# Estate governance checks, vendored from the 2026-09-15 estate sync (0731e58).
+# Authored as KYAML (the estate's YAML form): flow style, quoted strings.
+#
+# Only actions that can FAIL are wired here. These vendored actions are
+# deliberately NOT wired, because each prints a pass without checking
+# anything, and a gate that cannot fail is a false claim of verification
+# (AGENTS.md §6):
+#   semantic-audit-check, proof-runner-check (its exit 1 is commented out),
+#   custom-tools-check (passes when the tools are absent), prat-check,
+#   metrics-check, badges-check, contractile-validation-check, gitsea-check,
+#   hosting-check, tests-benches-check, trust-humans-check,
+#   www-compliance-check.
+# Wire one only once it has a failure path and a planted negative proving it.
+#
+# Every step runs even if an earlier one failed, so one run reports every
+# finding; the job still fails if any step did.
+{
+  name: "Estate checks",
+  on: {
+    push: {branches: ["main"]},
+    pull_request: {},
+  },
+  permissions: {contents: "read"},
+  concurrency: {
+    group: "estate-checks-${{ github.ref }}",
+    "cancel-in-progress": true,
+  },
+  jobs: {
+    estate: {
+      name: "estate governance checks",
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 10,
+      steps: [
+        {uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"},  # v7.0.1
+        # Positive controls first: each suite plants a known-bad input and
+        # asserts its check fails on it, so a green check below can mean "clean"
+        # rather than "unable to fail".
+        {
+          name: "Self-tests of the script-backed checks",
+          run: "for t in .github/actions/*/test.sh; do echo \"== $t\"; bash \"$t\"; done",
+        },
+        {name: "Root shape (both directions)", if: "${{ !cancelled() }}", run: "bash scripts/check-root-shape.sh"},
+        {name: "No Markdown under docs/", if: "${{ !cancelled() }}", run: "bash scripts/check-no-md-in-docs.sh"},
+        {name: "No V-language references", if: "${{ !cancelled() }}", run: "bash scripts/check-no-vlang.sh"},
+        {name: "Document-format policy", if: "${{ !cancelled() }}", uses: "./.github/actions/formatting-check"},
+        {name: "Required files", if: "${{ !cancelled() }}", uses: "./.github/actions/required-files-check"},
+        {name: "SPDX licence identifiers", if: "${{ !cancelled() }}", uses: "./.github/actions/spdx-license-check"},
+        {name: "A2ML / K9 manifests", if: "${{ !cancelled() }}", uses: "./.github/actions/manifest-check"},
+        {name: "Linguist and banned languages", if: "${{ !cancelled() }}", uses: "./.github/actions/linguist-check"},
+        {name: "Task-runner recipes parse", if: "${{ !cancelled() }}", uses: "./.github/actions/recipes-set-check"},
+        {name: "Vaulted token format", if: "${{ !cancelled() }}", uses: "./.github/actions/vaulted-tokens-check"},
+        {name: "Private-key material", if: "${{ !cancelled() }}", uses: "./.github/actions/secrets-check"},
+        {name: "Code hygiene", if: "${{ !cancelled() }}", uses: "./.github/actions/code-hygiene-check"},
+        {name: "Idris2 ABI purity", if: "${{ !cancelled() }}", uses: "./.github/actions/idris2-abi-check"},
+        {name: "Zig FFI purity", if: "${{ !cancelled() }}", uses: "./.github/actions/zig-hexadeca-check"},
+        {name: "Citation metadata", if: "${{ !cancelled() }}", uses: "./.github/actions/referencing-check"},
+        {name: "AFFIRMATION snapshot", if: "${{ !cancelled() }}", uses: "./.github/actions/affirmation-check"},
+        {name: "BoJ cartridge", if: "${{ !cancelled() }}", uses: "./.github/actions/boj-cartridge-check"},
+      ],
+    },
+  },
+}

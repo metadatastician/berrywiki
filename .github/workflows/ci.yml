@@ -137,14 +137,16 @@ jobs:
           #    matched: they carry no upstream commit. Only paths that exist are
           #    searched, and grep's stderr is kept: under `bash -e` with pipefail a
           #    missing path (grep exit 2) killed this step with no output at all.
-          #    Exit 1 (no match) is the empty case below, not an error.
+          #    Exit 1 (no match) is the empty case below, not an error. The key and
+          #    value may be quoted, as KYAML writes them (`uses: "owner/repo@sha"`);
+          #    an unquoted-only pattern silently skips every KYAML workflow.
           targets=()
           for p in .github/workflows .github/actions action.yml; do
             [ -e "$p" ] && targets+=("$p")
           done
-          pins="$({ grep -rhoE 'uses:[[:space:]]*[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}' \
+          pins="$({ grep -rhoE '"?uses"?:[[:space:]]*"?[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}' \
                       "${targets[@]}" || [ $? -eq 1 ]; } \
-                  | sed -E 's/^uses:[[:space:]]*//' \
+                  | sed -E 's/^"?uses"?:[[:space:]]*"?//' \
                   | awk -F'@' '{ split($1, p, "/"); k = ($1 ~ /\.github\/workflows\/[^\/]+\.ya?ml$/) ? "R" : "A";
                                  print p[1] "/" p[2] "\t" $2 "\t" k }' \
                   | sort -u)"
