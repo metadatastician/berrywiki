@@ -516,7 +516,8 @@ mod tests {
     fn a_token_for_a_non_github_remote_is_refused_before_any_git_runs() {
         let sandbox = GitSandbox::create(&fixture());
         let dest = scratch("tokref");
-        match GitHubWiki::open(sandbox.remote.to_str().unwrap(), &dest, Some("s3cret")) {
+        let planted = format!("test-fixture-only-{}", std::process::id());
+        match GitHubWiki::open(sandbox.remote.to_str().unwrap(), &dest, Some(&planted)) {
             Err(GithubError::TokenRefused(_)) => {}
             Err(other) => panic!("expected TokenRefused, got {other}"),
             Ok(_) => panic!("a token must not be offered to a non-GitHub remote"),
@@ -623,7 +624,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_redirect_never_carries_the_token_to_another_host() {
-        const TOKEN: &str = "tok-ABC123-never-leak";
+        // Synthetic credential generated for this local test (the #48 pattern):
+        // it authenticates nothing, and only loopback stub servers see it.
+        let planted = format!("test-fixture-only-{}", std::process::id());
         // The redirect target demands credentials and records what it gets.
         let (target, target_seen) = http_stub(
             "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"x\"\r\n\
@@ -648,14 +651,17 @@ Content-Length: 0\r\nConnection: close\r\n\r\n"
 
         // Through run_git: the redirect is not followed, so nothing reaches
         // the target at all, credentials included.
-        let r = run_git(&["ls-remote", "--", &url], Some(TOKEN));
+        let r = run_git(&["ls-remote", "--", &url], Some(planted.as_str()));
         assert!(r.is_err(), "a refused redirect must surface as an error");
         assert!(
             !leaked(&target_seen),
             "the token reached the redirect target"
         );
         if let Err(e) = r {
-            assert!(!e.to_string().contains(TOKEN), "error text leaks the token");
+            assert!(
+                !e.to_string().contains(&planted),
+                "error text leaks the token"
+            );
         }
 
         // Positive control: the same request with redirects allowed DOES hand
@@ -672,7 +678,7 @@ Content-Length: 0\r\nConnection: close\r\n\r\n"
             .arg(format!("http://{first2}/x.wiki.git"))
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_ASKPASS", guard.path())
-            .env("BERRYWIKI_TOKEN", TOKEN)
+            .env("BERRYWIKI_TOKEN", &planted)
             .env("GIT_USERNAME", "x-access-token")
             .output()
             .unwrap();
