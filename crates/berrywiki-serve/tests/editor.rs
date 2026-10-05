@@ -686,6 +686,20 @@ fn reload_rejects_non_local_redirect_targets() {
     );
     let r = handle(&mut app, &Request::post("/reload", "back=//evil.example"));
     assert!(r.location.as_deref().unwrap_or("").starts_with("/?"));
+    // Browsers read `/\host` as `//host`; it must fall back too, whether the
+    // backslash arrives raw or percent-encoded. So must a control character.
+    for hostile in [
+        "back=/\\evil.example",
+        "back=%2F%5Cevil.example",
+        "back=%2Fok%09x",
+    ] {
+        let r = handle(&mut app, &Request::post("/reload", hostile));
+        let loc = r.location.as_deref().unwrap_or("");
+        assert!(loc.starts_with("/?"), "{hostile} redirected to {loc}");
+    }
+    // Positive control: a genuine local path is kept.
+    let r = handle(&mut app, &Request::post("/reload", "back=%2Ftags"));
+    assert!(r.location.as_deref().unwrap_or("").starts_with("/tags?"));
 }
 
 #[test]
