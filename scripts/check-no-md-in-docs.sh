@@ -23,7 +23,10 @@ REPO_ROOT="${1:-.}"
 DOCS_DIR="$REPO_ROOT/docs"
 
 # Justified exceptions, relative to repo root. Empty by default.
-ALLOWED=()
+# docs/community/global-campus-post.md: a forum-post draft the owner pastes
+# into a Markdown-only community forum (D-9); .adoc would have to be
+# converted back by hand before every posting.
+ALLOWED=("docs/community/global-campus-post.md")
 ALLOWED_DIRS=("docs/berrywiki/")
 
 if [ ! -d "$DOCS_DIR" ]; then

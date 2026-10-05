@@ -1,1 +1,37 @@
+# SPDX-License-Identifier: MPL-2.0
+# Root allowlist for scripts/check-root-shape.sh. Enforced in BOTH directions:
+# anything tracked at root that is not listed is drift, and any listed entry
+# without a leading '?' must exist. Git-ignored build output (target/) is
+# excluded by the script and must never be listed here.
+#
+# Recorded 2026-10-05 from the tracked root of main as the deliberate shape.
+.git
+action.yml
+AGENTS.md
+ARCHITECTURE.md
+Cargo.lock
+Cargo.toml
+CHANGELOG.md
+.claude/
 CLAUDE.md
+CODE_OF_CONDUCT.md
+CONTRIBUTING.md
+crates/
+docs/
+.editorconfig
+.env.example
+fixtures/
+GEMINI.md
+.gitattributes
+.github/
+.gitignore
+GOVERNANCE.md
+LICENSE
+LICENSES/
+.machine_readable/
+MAINTAINERS
+mise.toml
+README.md
+REUSE.toml
+scripts/
+SECURITY.md
