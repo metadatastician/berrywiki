@@ -84,10 +84,13 @@ Being explicit, because the difference matters:
   [`docs/execution/a11y-walkthrough.adoc`](docs/execution/a11y-walkthrough.adoc)
   and **has never been executed**. It needs a human at a browser with NVDA. No
   screen-reader claim is made until it has been.
-* **Live GitHub behaviour is unverified.** Every GitHub Wiki behaviour BerryWiki
-  relies on is recorded in [`docs/compatibility/github-wiki.adoc`](docs/compatibility/github-wiki.adoc)
-  and, as of today, **none has been tested against a real wiki** — those spikes
-  are credential-gated. Treat the compatibility report as a hypothesis list.
+* **Live GitHub behaviour is mostly, not fully, verified.** Every GitHub Wiki
+  behaviour BerryWiki relies on is recorded in [`docs/compatibility/github-wiki.adoc`](docs/compatibility/github-wiki.adoc).
+  A spike against a real, disposable wiki (2026-10-05) measured most rows. Not
+  settled: the repository size limit (deliberately not probed), token
+  authentication, and browser navigation to heading fragments. It also refuted two
+  hypotheses: `.md` and path-style links do not open the rendered page, and
+  attachments are publicly reachable by bare URL. Read each row's tag; do not read the report as all-verified.
 * **CherryTree import works; Zim import, packaging and proofs do not yet** —
   `berrywiki import` reads CherryTree XML notebooks, and what it cannot carry
   across is listed construct by construct in
