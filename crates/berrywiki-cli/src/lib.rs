@@ -31,8 +31,9 @@ USAGE:
     berrywiki check <folder>
     berrywiki sidebar <folder> [--write]
     berrywiki serve <folder> [--addr 127.0.0.1:23779] [--no-commit]
-                             [--author \"Name <email>\"]
+                             [--author \"Name <email>\"] [--allow-host name:port,...]
     berrywiki serve --github <owner/repo> [--cache dir] [--addr host:port]
+                             [--allow-host name:port,...]
     berrywiki backup <folder> <out-dir>
     berrywiki restore <backup-dir> <folder>
     berrywiki import <notebook.ctd> <folder> [--apply] [--json]
@@ -52,8 +53,12 @@ COMMANDS:
                to that with a warning. --author sets the commit identity
                (default: the git config of the clone). A GitHub mirror via
                --github is read-only (token via BERRYWIKI_GITHUB_TOKEN for
-               private wikis). Listens on TCP only, loopback by default, port
-               23779 (IANA-unassigned). Blocks until interrupted.
+               private wikis; it is sent only to https://github.com). Listens
+               on TCP only, loopback by default, port 23779 (IANA-unassigned).
+               Answers only to the names it is bound to (localhost and the
+               loopback address, even for a 0.0.0.0 bind) and refuses
+               cross-site changes; --allow-host adds names such as the one a
+               reverse proxy forwards under. Blocks until interrupted.
     backup     Write a recoverable copy of the wiki to a new directory: a git
                bundle of all committed history, plus drafts and the operation
                journal. Refuses a dirty working tree, because a bundle carries
@@ -76,7 +81,7 @@ COMMANDS:
 
 /// Flags that take a value, so `first_path` never mistakes the value for the
 /// folder (`berrywiki serve --author \"A <a@b>\" ./wiki` must serve ./wiki).
-const VALUE_FLAGS: &[&str] = &["--addr", "--github", "--cache", "--author"];
+const VALUE_FLAGS: &[&str] = &["--addr", "--github", "--cache", "--author", "--allow-host"];
 
 /// Default listen address. 23779 is in the IANA-unassigned block
 /// 23547–23999 (checked 2026-09-02 against the service-names registry) and is
@@ -149,6 +154,17 @@ pub(crate) fn has_flag(args: &[String], flag: &str) -> bool {
 }
 
 /// Value following `--flag` (e.g. `--addr 127.0.0.1:9000`), if present.
+/// Split a comma-separated `--allow-host` value into `host:port` names.
+fn allow_host_list(value: Option<&str>) -> Vec<String> {
+    value
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect()
+}
+
 fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     args.iter()
         .position(|a| a == flag)
@@ -294,6 +310,9 @@ fn cmd_sidebar(path: Option<&str>, write: bool, out: &mut dyn Write) -> io::Resu
 
 fn cmd_serve(args: &[String], out: &mut dyn Write) -> io::Result<i32> {
     let addr = flag_value(args, "--addr").unwrap_or(DEFAULT_ADDR);
+    // Extra Host names the server answers to; it answers only to the names it
+    // was bound to otherwise, as a defence against DNS rebinding.
+    let allow_hosts = allow_host_list(flag_value(args, "--allow-host"));
 
     // `--github <owner/repo|url>` mirrors the wiki into a cache dir and serves
     // it; otherwise a local folder is served directly.
@@ -317,7 +336,7 @@ fn cmd_serve(args: &[String], out: &mut dyn Write) -> io::Result<i32> {
             cache.display()
         )?;
         out.flush()?;
-        return match berrywiki_serve::serve_readonly(wiki.store(), addr) {
+        return match berrywiki_serve::serve_readonly_with_hosts(wiki.store(), addr, &allow_hosts) {
             Ok(()) => Ok(0),
             Err(e) => {
                 writeln!(out, "server error: {e}")?;
@@ -407,7 +426,7 @@ fn cmd_serve(args: &[String], out: &mut dyn Write) -> io::Result<i32> {
         "BerryWiki: serving {path} at http://{addr}  (editable; {commit_note}; {drafts_note}; {lock_note}; Ctrl-C to stop)"
     )?;
     out.flush()?;
-    match berrywiki_serve::serve(&mut app, addr) {
+    match berrywiki_serve::serve_with_hosts(&mut app, addr, &allow_hosts) {
         Ok(()) => Ok(0),
         Err(e) => {
             writeln!(out, "server error: {e}")?;
@@ -797,6 +816,16 @@ fn cmd_restore(args: &[String], out: &mut dyn Write) -> io::Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn allow_host_list_splits_and_trims() {
+        assert_eq!(
+            allow_host_list(Some(" wiki.local:23779 , box.lan:8080,,")),
+            vec!["wiki.local:23779".to_string(), "box.lan:8080".to_string()]
+        );
+        assert!(allow_host_list(None).is_empty());
+        assert!(allow_host_list(Some("")).is_empty());
+    }
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};

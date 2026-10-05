@@ -20,9 +20,10 @@
 //! on the operator's own machine) is not a browser being steered by a page,
 //! and is let through.
 //!
-//! The request head is also bounded here: line length, header count, and,
-//! via [`ServerConfig::read_timeout`], how long a client may take, so that one
-//! slow or hostile connection cannot stall a single-threaded server.
+//! The request head is also bounded here: line length and header count, and,
+//! via [`ServerConfig::connection_deadline`] and [`DeadlineReader`], how long a
+//! connection may take in total, so that one slow or hostile connection cannot
+//! stall a single-threaded server however it paces its bytes.
 
 use std::io::{BufRead, Read};
 use std::net::{IpAddr, SocketAddr};
@@ -36,6 +37,8 @@ pub(crate) const MAX_HEAD_LINE: u64 = 8 * 1024;
 pub(crate) const MAX_HEADERS: usize = 100;
 /// Default per-read socket timeout.
 pub const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(10);
+/// Default total time one connection may take (head and body together).
+pub const DEFAULT_CONNECTION_DEADLINE: Duration = Duration::from_secs(30);
 
 /// The parts of a request head the server acts on.
 #[derive(Debug, Default)]
@@ -123,43 +126,46 @@ pub(crate) fn read_head<R: BufRead>(r: &mut R) -> Result<Head, HeadError> {
 /// The `Host` values a server answers to.
 #[derive(Debug, Clone)]
 pub struct AllowedHosts {
-    /// Lower-case `host[:port]` forms. Empty with `any` set means "any name".
+    /// Lower-case `host[:port]` forms. There is no "any name" setting: a
+    /// server that answered to any name would answer to a rebound one.
     names: Vec<String>,
-    any: bool,
 }
 
 impl AllowedHosts {
-    /// The names a server bound at `addr` answers to.
+    /// The names a server listening on `bound` answers to.
     ///
-    /// A loopback bind answers to its literal address and to `localhost`, with
-    /// the port. A wildcard bind (`0.0.0.0`, `::`) answers to any name, because
-    /// the server cannot know which of the machine's names a client used; the
-    /// same-origin rule for state-changing requests still applies there. Any
-    /// other bind answers to its literal address only. An address that does not
-    /// parse answers to that exact string, nothing else.
-    pub fn for_bind_addr(addr: &str) -> Self {
-        let Ok(sa) = addr.parse::<SocketAddr>() else {
-            return Self {
-                names: vec![addr.to_ascii_lowercase()],
-                any: false,
-            };
+    /// `bound` must be the socket's *actual* address (from
+    /// `TcpListener::local_addr`), so an ephemeral `:0` bind gets its real port.
+    /// A loopback bind answers to its literal address and to `localhost`. A
+    /// wildcard bind (`0.0.0.0`, `::`) answers only to the loopback names:
+    /// the server cannot know which of the machine's other names are
+    /// legitimate, and guessing "any" is exactly what DNS rebinding exploits.
+    /// Further names are added explicitly with [`AllowedHosts::with_names`]
+    /// (`--allow-host`). Any other bind answers to its literal address.
+    pub fn for_socket(bound: SocketAddr) -> Self {
+        let port = bound.port();
+        let ip = bound.ip();
+        let hosts: Vec<String> = if ip.is_unspecified() || ip.is_loopback() {
+            let mut v = vec!["localhost".to_string()];
+            if ip.is_ipv4() || ip.is_unspecified() {
+                v.push("127.0.0.1".to_string());
+            }
+            if ip.is_ipv6() || ip.is_unspecified() {
+                v.push("[::1]".to_string());
+            }
+            if ip.is_loopback() {
+                v.push(match ip {
+                    IpAddr::V4(v4) => v4.to_string(),
+                    IpAddr::V6(v6) => format!("[{v6}]"),
+                });
+            }
+            v
+        } else {
+            vec![match ip {
+                IpAddr::V4(v4) => v4.to_string(),
+                IpAddr::V6(v6) => format!("[{v6}]"),
+            }]
         };
-        let port = sa.port();
-        let ip = sa.ip();
-        if ip.is_unspecified() {
-            return Self {
-                names: Vec::new(),
-                any: true,
-            };
-        }
-        let literal = match ip {
-            IpAddr::V4(v4) => v4.to_string(),
-            IpAddr::V6(v6) => format!("[{v6}]"),
-        };
-        let mut hosts = vec![literal];
-        if ip.is_loopback() {
-            hosts.push("localhost".to_string());
-        }
         let mut names = Vec::new();
         for h in hosts {
             names.push(format!("{h}:{port}"));
@@ -168,12 +174,56 @@ impl AllowedHosts {
                 names.push(h);
             }
         }
-        Self { names, any: false }
+        names.sort();
+        names.dedup();
+        Self { names }
+    }
+
+    /// The names for a listener bound from the operator's `--addr` value.
+    ///
+    /// The socket's real address decides the defaults. If `requested` named a
+    /// host (`wiki.local:23779`) rather than an IP, that exact name is allowed
+    /// too, since it is the name the operator chose to serve under.
+    pub fn for_listener(bound: SocketAddr, requested: &str) -> Self {
+        let mut allowed = Self::for_socket(bound);
+        if requested.parse::<SocketAddr>().is_err() {
+            if let Some((host, _)) = requested.rsplit_once(':') {
+                allowed = allowed.with_names([format!("{host}:{}", bound.port())]);
+            }
+        }
+        allowed
+    }
+
+    /// The defaults for a bind address given as text, resolved without a
+    /// socket. An address that does not parse answers to that exact string.
+    pub fn for_bind_addr(addr: &str) -> Self {
+        match addr.parse::<SocketAddr>() {
+            Ok(sa) => Self::for_socket(sa),
+            Err(_) => Self {
+                names: vec![addr.to_ascii_lowercase()],
+            },
+        }
+    }
+
+    /// These names plus `extra` (`host:port` forms), e.g. the public name a
+    /// reverse proxy forwards under.
+    pub fn with_names<I, S>(mut self, extra: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        for n in extra {
+            let n = n.as_ref().trim().to_ascii_lowercase();
+            if !n.is_empty() && !self.names.contains(&n) {
+                self.names.push(n);
+            }
+        }
+        self
     }
 
     /// Whether a `Host` header value is one of this server's names.
     fn permits(&self, host: &str) -> bool {
-        self.any || self.names.iter().any(|n| n.eq_ignore_ascii_case(host))
+        self.names.iter().any(|n| n.eq_ignore_ascii_case(host))
     }
 }
 
@@ -184,15 +234,62 @@ pub struct ServerConfig {
     pub allowed_hosts: AllowedHosts,
     /// How long a single read on a connection may block.
     pub read_timeout: Duration,
+    /// How long one connection may take in total, from accept to the end of
+    /// its body, however its bytes are paced.
+    pub connection_deadline: Duration,
 }
 
 impl ServerConfig {
-    /// The defaults for a server bound at `addr`.
+    /// The defaults for a server bound at `addr` (text, no socket).
     pub fn for_bind_addr(addr: &str) -> Self {
+        Self::with_hosts(AllowedHosts::for_bind_addr(addr))
+    }
+
+    /// The defaults with an explicit host allowlist.
+    pub fn with_hosts(allowed_hosts: AllowedHosts) -> Self {
         Self {
-            allowed_hosts: AllowedHosts::for_bind_addr(addr),
+            allowed_hosts,
             read_timeout: DEFAULT_READ_TIMEOUT,
+            connection_deadline: DEFAULT_CONNECTION_DEADLINE,
         }
+    }
+}
+
+/// A reader that enforces a total deadline across all of its reads.
+///
+/// A per-read timeout alone lets a client hold the connection forever by
+/// sending one byte just inside each timeout. Before every read this lowers
+/// the socket's timeout to the time remaining, and refuses once it is gone.
+pub(crate) struct DeadlineReader {
+    inner: std::net::TcpStream,
+    deadline: std::time::Instant,
+    per_read: Duration,
+}
+
+impl DeadlineReader {
+    /// Wrap `inner`, allowing `total` from now and at most `per_read` per read.
+    pub(crate) fn new(inner: std::net::TcpStream, total: Duration, per_read: Duration) -> Self {
+        Self {
+            inner,
+            deadline: std::time::Instant::now() + total,
+            per_read,
+        }
+    }
+}
+
+impl Read for DeadlineReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let left = self
+            .deadline
+            .saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "connection deadline exceeded",
+            ));
+        }
+        self.inner.set_read_timeout(Some(left.min(self.per_read)))?;
+        self.inner.read(buf)
     }
 }
 
@@ -358,16 +455,35 @@ mod tests {
     }
 
     #[test]
-    fn wildcard_bind_answers_any_name_but_still_needs_same_origin() {
-        let any = AllowedHosts::for_bind_addr("0.0.0.0:23779");
-        assert!(refuse(&head("GET", Some("box.lan:23779"), None, None), &any).is_none());
-        let h = head(
-            "POST",
-            Some("box.lan:23779"),
-            Some("http://evil.example"),
-            None,
-        );
-        assert_eq!(refuse(&h, &any).unwrap().status, 403);
+    fn a_wildcard_bind_answers_only_loopback_names_unless_told_otherwise() {
+        let wild = AllowedHosts::for_bind_addr("0.0.0.0:23779");
+        for h in ["127.0.0.1:23779", "localhost:23779", "[::1]:23779"] {
+            assert!(wild.permits(h), "{h}");
+        }
+        // A rebound or other name is refused: there is no "any" setting.
+        assert!(!wild.permits("attacker.example:23779"));
+        assert!(!wild.permits("box.lan:23779"));
+        let named = wild.with_names(["box.lan:23779"]);
+        assert!(named.permits("box.lan:23779"));
+        assert!(!named.permits("attacker.example:23779"));
+    }
+
+    #[test]
+    fn the_real_port_of_an_ephemeral_bind_is_used() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let bound = listener.local_addr().unwrap();
+        let a = AllowedHosts::for_listener(bound, "127.0.0.1:0");
+        assert!(a.permits(&format!("127.0.0.1:{}", bound.port())));
+        assert!(!a.permits("127.0.0.1:0"));
+    }
+
+    #[test]
+    fn a_host_name_bind_also_allows_that_name() {
+        let bound: SocketAddr = "127.0.0.1:23779".parse().unwrap();
+        let a = AllowedHosts::for_listener(bound, "wiki.local:23779");
+        assert!(a.permits("wiki.local:23779"));
+        assert!(a.permits("127.0.0.1:23779"));
+        assert!(!a.permits("other.local:23779"));
     }
 
     #[test]

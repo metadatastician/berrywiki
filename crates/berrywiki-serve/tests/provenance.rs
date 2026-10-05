@@ -52,12 +52,18 @@ fn scratch_wiki() -> PathBuf {
 /// Start an editor on an ephemeral loopback port and return its address and
 /// wiki folder. The server thread lives until the test process exits.
 fn start_server(read_timeout: Duration) -> (String, PathBuf) {
+    start_server_with(read_timeout, berrywiki_serve::DEFAULT_CONNECTION_DEADLINE)
+}
+
+/// [`start_server`] with an explicit total per-connection deadline.
+fn start_server_with(read_timeout: Duration, deadline: Duration) -> (String, PathBuf) {
     let wiki = scratch_wiki();
     let drafts = scratch_dir("drafts");
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap().to_string();
     let mut config = ServerConfig::for_bind_addr(&addr);
     config.read_timeout = read_timeout;
+    config.connection_deadline = deadline;
     let wiki_for_thread = wiki.clone();
     std::thread::spawn(move || {
         let mut app = App::with_drafts(
@@ -192,4 +198,32 @@ fn an_oversized_head_is_refused_with_431() {
         &format!("GET / HTTP/1.1\r\nHost: {addr}\r\nX-Pad: {pad}\r\n\r\n"),
     );
     assert_eq!(status, 431);
+}
+
+#[test]
+fn a_client_dripping_bytes_inside_each_timeout_is_cut_off() {
+    // 300 ms per read, 1 s per connection in total.
+    let (addr, _) = start_server_with(Duration::from_millis(300), Duration::from_secs(1));
+    // One byte every 150 ms, always inside the per-read timeout, never done.
+    let drip_addr = addr.clone();
+    std::thread::spawn(move || {
+        let mut s = TcpStream::connect(&drip_addr).unwrap();
+        let line = b"GET / HTTP/1.1\r\nX-Drip: ";
+        for b in line.iter().chain(std::iter::repeat(&b'a')) {
+            if s.write_all(&[*b]).is_err() {
+                break; // the server cut us off
+            }
+            std::thread::sleep(Duration::from_millis(150));
+        }
+    });
+    std::thread::sleep(Duration::from_millis(200));
+
+    let started = Instant::now();
+    let (status, _) = send(&addr, &format!("GET / HTTP/1.1\r\nHost: {addr}\r\n\r\n"));
+    assert_eq!(status, 200);
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "second client waited {:?} behind a dripping one",
+        started.elapsed()
+    );
 }

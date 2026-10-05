@@ -32,7 +32,7 @@ mod editor;
 mod guard;
 mod ids;
 
-pub use guard::{AllowedHosts, ServerConfig, DEFAULT_READ_TIMEOUT};
+pub use guard::{AllowedHosts, ServerConfig, DEFAULT_CONNECTION_DEADLINE, DEFAULT_READ_TIMEOUT};
 
 /// A minimal HTTP response.
 ///
@@ -1521,8 +1521,26 @@ const MAX_BODY: usize = 2 * 1024 * 1024;
 /// [`ServerConfig::for_bind_addr`] (Host and same-origin checks, bounded heads,
 /// read timeouts) before any route runs.
 pub fn serve(app: &mut App, addr: &str) -> io::Result<()> {
+    serve_with_hosts(app, addr, &[])
+}
+
+/// [`serve`], also answering to the `host:port` names in `extra_hosts`
+/// (`--allow-host`), e.g. the name a reverse proxy forwards under.
+pub fn serve_with_hosts(app: &mut App, addr: &str, extra_hosts: &[String]) -> io::Result<()> {
     let listener = TcpListener::bind(addr)?;
-    serve_listener(app, listener, &ServerConfig::for_bind_addr(addr))
+    let config = config_for(&listener, addr, extra_hosts)?;
+    serve_listener(app, listener, &config)
+}
+
+/// The config for a bound listener: host names from its real address (so an
+/// ephemeral `:0` gets its actual port), the requested name, and any extras.
+fn config_for(
+    listener: &TcpListener,
+    addr: &str,
+    extra_hosts: &[String],
+) -> io::Result<ServerConfig> {
+    let allowed = AllowedHosts::for_listener(listener.local_addr()?, addr).with_names(extra_hosts);
+    Ok(ServerConfig::with_hosts(allowed))
 }
 
 /// Serve the editor on an already-bound listener with an explicit config.
@@ -1550,8 +1568,17 @@ pub fn serve_listener(
 /// Blocking read-only server (the `--github` mirror path): GET via [`route`],
 /// everything else 405. The same Host check applies.
 pub fn serve_readonly(store: &LocalFolderStore, addr: &str) -> io::Result<()> {
+    serve_readonly_with_hosts(store, addr, &[])
+}
+
+/// [`serve_readonly`], also answering to the names in `extra_hosts`.
+pub fn serve_readonly_with_hosts(
+    store: &LocalFolderStore,
+    addr: &str,
+    extra_hosts: &[String],
+) -> io::Result<()> {
     let listener = TcpListener::bind(addr)?;
-    let config = ServerConfig::for_bind_addr(addr);
+    let config = config_for(&listener, addr, extra_hosts)?;
     for stream in listener.incoming() {
         match stream {
             Ok(mut s) => {
@@ -1565,10 +1592,24 @@ pub fn serve_readonly(store: &LocalFolderStore, addr: &str) -> io::Result<()> {
     Ok(())
 }
 
-/// Bound how long one connection can hold the single server thread.
+/// Bound how long one connection can hold the single server thread: reads are
+/// bounded per call here and in total by [`deadline_reader`]; writes per call.
 fn prepare_stream(s: &TcpStream, config: &ServerConfig) -> io::Result<()> {
     s.set_read_timeout(Some(config.read_timeout))?;
     s.set_write_timeout(Some(config.read_timeout))
+}
+
+/// A buffered reader over `stream` that refuses to read past the connection's
+/// total deadline, however slowly the client sends.
+fn deadline_reader(
+    stream: &TcpStream,
+    config: &ServerConfig,
+) -> io::Result<BufReader<guard::DeadlineReader>> {
+    Ok(BufReader::new(guard::DeadlineReader::new(
+        stream.try_clone()?,
+        config.connection_deadline,
+        config.read_timeout,
+    )))
 }
 
 /// Read the head and apply the guard: `Ok(head)` to proceed, `Err(response)`
@@ -1592,7 +1633,7 @@ fn handle_connection_readonly(
     store: &LocalFolderStore,
     config: &ServerConfig,
 ) -> io::Result<()> {
-    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut reader = deadline_reader(stream, config)?;
     let head = match screened_head(&mut reader, config) {
         Ok(h) => h,
         Err(Some(refusal)) => return write_response(stream, &refusal),
@@ -1619,7 +1660,7 @@ fn handle_connection_app(
     app: &mut App,
     config: &ServerConfig,
 ) -> io::Result<()> {
-    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut reader = deadline_reader(stream, config)?;
     let head = match screened_head(&mut reader, config) {
         Ok(h) => h,
         Err(Some(refusal)) => return write_response(stream, &refusal),
