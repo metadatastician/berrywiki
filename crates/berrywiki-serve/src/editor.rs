@@ -1079,11 +1079,20 @@ fn post_finish_merge(app: &mut App) -> Response {
 
 // --- reload ----------------------------------------------------------------
 
+/// Whether `back` is safe to send as a `Location`: a path on this server, with
+/// no way for a browser to read it as another host (`//host`, and `/\\host`,
+/// which browsers normalise to `//host`) and no control characters that could
+/// split the header.
+fn is_local_redirect_target(back: &str) -> bool {
+    back.starts_with('/')
+        && !back.starts_with("//")
+        && !back.contains('\\')
+        && !back.chars().any(char::is_control)
+}
+
 fn post_reload(app: &mut App, form: &str) -> Response {
     let back = form_value(form, "back");
-    // Local absolute paths only — no header injection, no open redirect.
-    let target = if back.starts_with('/') && !back.starts_with("//") && !back.contains(['\r', '\n'])
-    {
+    let target = if is_local_redirect_target(&back) {
         back
     } else {
         "/".to_string()

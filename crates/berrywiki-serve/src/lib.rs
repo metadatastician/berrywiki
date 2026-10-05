@@ -29,7 +29,10 @@ use berrywiki_sync::{ConflictReport, DivergedHandoff, Saved, SyncError, SyncOutc
 
 mod attach;
 mod editor;
+mod guard;
 mod ids;
+
+pub use guard::{AllowedHosts, ServerConfig, DEFAULT_CONNECTION_DEADLINE, DEFAULT_READ_TIMEOUT};
 
 /// A minimal HTTP response.
 ///
@@ -93,7 +96,9 @@ fn reason(status: u16) -> &'static str {
         404 => "Not Found",
         405 => "Method Not Allowed",
         409 => "Conflict",
+        403 => "Forbidden",
         413 => "Payload Too Large",
+        431 => "Request Header Fields Too Large",
         500 => "Internal Server Error",
         _ => "OK",
     }
@@ -1500,19 +1505,59 @@ pub(crate) fn source_hash(s: &str) -> String {
 
 // --- server ----------------------------------------------------------------
 
+/// Headers sent on every response. `style-src 'unsafe-inline'` admits the one
+/// inline stylesheet the layout uses; nothing admits script.
+const SECURITY_HEADERS: &str = "Content-Security-Policy: default-src 'self'; script-src 'none'; \
+object-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; \
+form-action 'self'; frame-ancestors 'none'\r\n\
+X-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\n";
+
 /// Maximum accepted POST body (a wiki page is text; 2 MiB is generous).
 const MAX_BODY: usize = 2 * 1024 * 1024;
 
 /// Blocking, single-threaded HTTP server for a single-user localhost session,
 /// with editing enabled. Returns only on a listener error. Single-threaded on
-/// purpose: `&mut App` is race-free in-process.
+/// purpose: `&mut App` is race-free in-process. Requests are screened by
+/// [`ServerConfig::for_bind_addr`] (Host and same-origin checks, bounded heads,
+/// read timeouts) before any route runs.
 pub fn serve(app: &mut App, addr: &str) -> io::Result<()> {
+    serve_with_hosts(app, addr, &[])
+}
+
+/// [`serve`], also answering to the `host:port` names in `extra_hosts`
+/// (`--allow-host`), e.g. the name a reverse proxy forwards under.
+pub fn serve_with_hosts(app: &mut App, addr: &str, extra_hosts: &[String]) -> io::Result<()> {
     let listener = TcpListener::bind(addr)?;
+    let config = config_for(&listener, addr, extra_hosts)?;
+    serve_listener(app, listener, &config)
+}
+
+/// The config for a bound listener: host names from its real address (so an
+/// ephemeral `:0` gets its actual port), the requested name, and any extras.
+fn config_for(
+    listener: &TcpListener,
+    addr: &str,
+    extra_hosts: &[String],
+) -> io::Result<ServerConfig> {
+    let allowed = AllowedHosts::for_listener(listener.local_addr()?, addr).with_names(extra_hosts);
+    Ok(ServerConfig::with_hosts(allowed))
+}
+
+/// Serve the editor on an already-bound listener with an explicit config.
+/// [`serve`] is this with the defaults for its bind address; tests use it to
+/// bind an ephemeral port.
+pub fn serve_listener(
+    app: &mut App,
+    listener: TcpListener,
+    config: &ServerConfig,
+) -> io::Result<()> {
     for stream in listener.incoming() {
         match stream {
             Ok(mut s) => {
                 // A per-connection error must not bring the server down.
-                let _ = handle_connection_app(&mut s, app);
+                if prepare_stream(&s, config).is_ok() {
+                    let _ = handle_connection_app(&mut s, app, config);
+                }
             }
             Err(_) => continue,
         }
@@ -1521,13 +1566,25 @@ pub fn serve(app: &mut App, addr: &str) -> io::Result<()> {
 }
 
 /// Blocking read-only server (the `--github` mirror path): GET via [`route`],
-/// everything else 405.
+/// everything else 405. The same Host check applies.
 pub fn serve_readonly(store: &LocalFolderStore, addr: &str) -> io::Result<()> {
+    serve_readonly_with_hosts(store, addr, &[])
+}
+
+/// [`serve_readonly`], also answering to the names in `extra_hosts`.
+pub fn serve_readonly_with_hosts(
+    store: &LocalFolderStore,
+    addr: &str,
+    extra_hosts: &[String],
+) -> io::Result<()> {
     let listener = TcpListener::bind(addr)?;
+    let config = config_for(&listener, addr, extra_hosts)?;
     for stream in listener.incoming() {
         match stream {
             Ok(mut s) => {
-                let _ = handle_connection_readonly(&mut s, store);
+                if prepare_stream(&s, &config).is_ok() {
+                    let _ = handle_connection_readonly(&mut s, store, &config);
+                }
             }
             Err(_) => continue,
         }
@@ -1535,20 +1592,59 @@ pub fn serve_readonly(store: &LocalFolderStore, addr: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn handle_connection_readonly(stream: &mut TcpStream, store: &LocalFolderStore) -> io::Result<()> {
-    let mut reader = BufReader::new(stream.try_clone()?);
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line)?;
+/// Bound how long one connection can hold the single server thread: reads are
+/// bounded per call here and in total by [`deadline_reader`]; writes per call.
+fn prepare_stream(s: &TcpStream, config: &ServerConfig) -> io::Result<()> {
+    s.set_read_timeout(Some(config.read_timeout))?;
+    s.set_write_timeout(Some(config.read_timeout))
+}
 
-    let mut parts = request_line.split_whitespace();
-    let method = parts.next().unwrap_or("");
-    let target = parts.next().unwrap_or("/");
-    let (path, query) = match target.split_once('?') {
+/// A buffered reader over `stream` that refuses to read past the connection's
+/// total deadline, however slowly the client sends.
+fn deadline_reader(
+    stream: &TcpStream,
+    config: &ServerConfig,
+) -> io::Result<BufReader<guard::DeadlineReader>> {
+    Ok(BufReader::new(guard::DeadlineReader::new(
+        stream.try_clone()?,
+        config.connection_deadline,
+        config.read_timeout,
+    )))
+}
+
+/// Read the head and apply the guard: `Ok(head)` to proceed, `Err(response)`
+/// to answer with a refusal, or `Err(None)` to drop a connection that never
+/// sent a complete head.
+fn screened_head<R: BufRead>(
+    reader: &mut R,
+    config: &ServerConfig,
+) -> Result<guard::Head, Option<Response>> {
+    let head = guard::read_head(reader).map_err(|e| guard::head_error_response(&e))?;
+    match guard::refuse(&head, &config.allowed_hosts) {
+        Some(refusal) => Err(Some(refusal)),
+        None => Ok(head),
+    }
+}
+
+/// Answer one connection on the read-only mirror: screen the head, then serve
+/// a GET or refuse any other method.
+fn handle_connection_readonly(
+    stream: &mut TcpStream,
+    store: &LocalFolderStore,
+    config: &ServerConfig,
+) -> io::Result<()> {
+    let mut reader = deadline_reader(stream, config)?;
+    let head = match screened_head(&mut reader, config) {
+        Ok(h) => h,
+        Err(Some(refusal)) => return write_response(stream, &refusal),
+        Err(None) => return Ok(()),
+    };
+    let (path, query) = match head.target.split_once('?') {
         Some((p, q)) => (p, q),
-        None => (target, ""),
+        None => (head.target.as_str(), ""),
     };
 
-    let response = if method == "GET" {
+    let response = if head.method == "GET" {
         route(store, path, query)
     } else {
         Response::html(405, "<h1>405 Method Not Allowed</h1>".to_string())
@@ -1557,36 +1653,20 @@ fn handle_connection_readonly(stream: &mut TcpStream, store: &LocalFolderStore) 
     write_response(stream, &response)
 }
 
-fn handle_connection_app(stream: &mut TcpStream, app: &mut App) -> io::Result<()> {
-    let mut reader = BufReader::new(stream.try_clone()?);
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line)?;
-
-    let mut parts = request_line.split_whitespace();
-    let method = parts.next().unwrap_or("").to_string();
-    let target = parts.next().unwrap_or("/").to_string();
-
-    // Two headers matter: the length, and the type that carries a multipart
-    // boundary. Everything else is ignored.
-    let mut content_length: usize = 0;
-    let mut content_type = String::new();
-    loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line)? == 0 {
-            break;
-        }
-        let trimmed = line.trim_end();
-        if trimmed.is_empty() {
-            break;
-        }
-        if let Some((k, v)) = trimmed.split_once(':') {
-            if k.eq_ignore_ascii_case("content-length") {
-                content_length = v.trim().parse().unwrap_or(0);
-            } else if k.eq_ignore_ascii_case("content-type") {
-                content_type = v.trim().to_string();
-            }
-        }
-    }
+/// Answer one connection on the editor: screen the head, read a bounded body,
+/// and dispatch it to [`handle`].
+fn handle_connection_app(
+    stream: &mut TcpStream,
+    app: &mut App,
+    config: &ServerConfig,
+) -> io::Result<()> {
+    let mut reader = deadline_reader(stream, config)?;
+    let head = match screened_head(&mut reader, config) {
+        Ok(h) => h,
+        Err(Some(refusal)) => return write_response(stream, &refusal),
+        Err(None) => return Ok(()),
+    };
+    let content_length = head.content_length;
 
     if content_length > MAX_BODY {
         return write_response(
@@ -1604,19 +1684,20 @@ fn handle_connection_app(stream: &mut TcpStream, app: &mut App) -> io::Result<()
     // corrupted by a conversion it never asked for.
     let body = String::from_utf8_lossy(&body_bytes).into_owned();
 
-    let (path, query) = split_target(&target);
+    let (path, query) = split_target(&head.target);
     let req = Request {
-        method,
+        method: head.method,
         path,
         query,
         body,
         bytes: body_bytes,
-        content_type,
+        content_type: head.content_type,
     };
     let response = handle(app, &req);
     write_response(stream, &response)
 }
 
+/// Write a response with its status line, security headers and payload.
 fn write_response(stream: &mut TcpStream, response: &Response) -> io::Result<()> {
     let mut head = format!(
         "HTTP/1.1 {} {}\r\n",
@@ -1635,6 +1716,10 @@ fn write_response(stream: &mut TcpStream, response: &Response) -> io::Result<()>
         Some(b) => b,
         None => response.body.as_bytes(),
     };
+    // Defence in depth for the no-script invariant: even if markup slipped
+    // through, the browser is told to run no script, load nothing foreign,
+    // and refuse to be framed or to submit forms elsewhere.
+    head.push_str(SECURITY_HEADERS);
     head.push_str(&format!(
         "Content-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         response.content_type,
