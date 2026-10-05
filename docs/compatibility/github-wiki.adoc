@@ -10,7 +10,13 @@ toc::[]
 This report strictly separates *Verified*, *Assumption*, *Unverified* and
 *Decision*. Do not treat an assumption as a fact.
 
-*Updated 2026-09-15: the live-GitHub column is no longer entirely untested.*
+*Updated 2026-10-05: the live spike has run.* Every live row except the
+repository size limit now carries evidence from the disposable wiki
+`metadatastician/berrywiki-wiki-spike`, including two refutations: `.md` and
+path-style links do not open the rendered page, and attachments are publicly
+reachable by bare URL. The authentication row is still untouched.
+
+*Earlier, 2026-09-15: the live-GitHub column stopped being entirely untested.*
 Publishing `metadatastician/berrywiki.wiki` and fetching the rendered pages
 settled four rows below — three confirming the hypothesis and *one refuting
 it*. The great majority of the column is still ❓, and the authentication row
@@ -65,35 +71,56 @@ GitHub-specific server behaviour (which stays in the next section).
 | Remote delete vs local edit = modify/delete conflict; local content kept on disk | ✅ | `remote_delete_of_locally_edited_page_keeps_local_content`
 |===
 
-== Live GitHub Wiki behaviour (UNVERIFIED — Phase 0 spike targets)
+== Live GitHub Wiki behaviour
 
-Each row below is a concrete test to run against a disposable
-`<repo>.wiki.git`. All are currently ❓.
+Each row is a concrete test against a real `<repo>.wiki.git`. The 2026-10-05
+spike ran them against the disposable wiki
+https://github.com/metadatastician/berrywiki-wiki-spike/wiki[`metadatastician/berrywiki-wiki-spike`]. Status codes were not taken as
+evidence: a page that does not exist also answers `200` (it redirects to the
+wiki home), so every result was checked by content. Only the size-limit row is
+still ❓.
 
 [cols="3,1,3", options="header"]
 |===
 | Question | Tag | Expected / hypothesis (to confirm or refute)
 
 | Does a leading `<!-- berrywiki ... -->` comment stay invisible in the rendered wiki page? | ✅ | *Confirmed 2026-09-15; independently observed 2026-09-29 on a second consumer.* The original test found neither `<!-- berrywiki` nor `archived: false` anywhere in the raw HTML of three sampled live pages. On [blocky-writer's Home page](https://github.com/hyperpolymath/blocky-writer/wiki), the rendered page contains the content following the leading metadata comment but not the comment or metadata values. The page source and its metadata are maintained in [`wiki/`](https://github.com/hyperpolymath/blocky-writer/tree/main/wiki). This is an independent live rendering observation, not a BerryWiki validation: `berrywiki check` was not run against that repository (the reporter lacked Rust and crates.io access).
-| Do nested subdirectories render as navigable hierarchy in the native wiki UI? | ❓ | 🟡 No — the native UI is effectively flat; hierarchy will live only in BerryWiki + `_Sidebar.md`.
-| Are `[[WikiLinks]]` resolved by global page title, ignoring path? | ❓ | 🟡 Yes.
-| Do `[[Page#heading]]` anchor links work? | ❓ | 🟡 Partial.
-| Do links with spaces / `.md` / no `.md` all resolve? | ❓ | 🟡 Mixed; needs the matrix run.
-| How do case-only renames behave on GitHub's store? | ❓ | 🟡 Risky on case-insensitive clients.
+| Do nested subdirectories render as navigable hierarchy in the native wiki UI? | ✅ | *Confirmed 2026-10-05 (spike).* No. A page stored at `nested/deeper/Nested-Leaf.md` is served at the flat URL `/wiki/Nested-Leaf` and listed flat in `_pages` as "Nested Leaf"; the directories are invisible. Hierarchy lives only in BerryWiki metadata and `_Sidebar.md`, as assumed.
+| Are `[[WikiLinks]]` resolved by global page title, ignoring path? | ✅ | *Confirmed 2026-10-05 (spike).* Yes. `[[Nested Leaf]]` renders as `/wiki/Nested-Leaf` and opens the page stored two directories deep; `[[Spike Target Page]]` and `[[Spike-Target-Page]]` both resolve to the same page.
+| Do `[[Page#heading]]` anchor links work? | 🟡 | *Partly measured 2026-10-05 (spike).* `[[Spike Target Page#Section Two]]` renders `href="…/wiki/Spike-Target-Page#Section-Two"` (case kept), while the heading's id is `user-content-section-two` (lower case). The plain Markdown form `[x](Spike-Target-Page#section-two)` matches the id exactly. Whether the mixed-case fragment still scrolls depends on GitHub's client-side script, which the spike did not exercise (no browser). Emit the lower-case Markdown form.
+| Do links with spaces / `.md` / no `.md` all resolve? | ❌ | *Refuted 2026-10-05 (spike): not all.* See the link-format matrix below. Bare names, `%20` spaces and `./` resolve to the rendered page; **a `.md` suffix 302-redirects to the raw Markdown** on `raw.githubusercontent.com` (`text/plain`), and **a path-style link** (`nested/deeper/Nested-Leaf`) dead-ends at `/wiki/nested`.
+| How do case-only renames behave on GitHub's store? | ✅ | *Measured 2026-10-05 (spike), server side only.* `Case-Probe.md` → `case-probe.md` (two-step `git mv`) pushes cleanly; a fresh clone contains only `case-probe.md`; both `/wiki/case-probe` and `/wiki/Case-Probe` serve the renamed page, so page lookup is case-insensitive. Behaviour on a case-insensitive *client* filesystem was not tested.
 | How should attachments be linked so they survive sync? | 📌 | Settled by link:../decisions/0011-attachments.adoc[ADR-0011]: page-id-keyed `assets/<page-id>/<filename>`, authored as an ordinary relative Markdown link and anchored at the root only at render time.
-| Does a relative `assets/<page-id>/<file>.png` link render as an image in the native wiki reader? | ❓ | 🟡 Yes — the wiki repo is an ordinary git repo and the path is an ordinary relative path. This is the assumption the whole attachment layout rests on; if it is refuted, ADR-0011's layout section is reopened, not merely amended.
-| Does GitHub enforce a size limit on a `.wiki.git` repository, and what is the failure shape when it is hit? | ❓ | 🟡 A limit exists and a push over it is rejected with a server-side message. BerryWiki's 1 MiB per-file cap bounds the rate of growth, never the total.
-| Does Git LFS work on a `.wiki.git` remote at all? | ❓ | 🟡 No. If it does, it is still not adopted: an LFS pointer file is unreadable in the native reader, which the locked constraints forbid.
-| Is an attachment inside `assets/` reachable by URL from the wiki's own web UI? | ❓ | 🟡 Only through the repository's blob view, not as a bare asset URL. Relevant to §3.8: a read lock is enforceable only where BerryWiki is the read path.
+| Does a relative `assets/<page-id>/<file>.png` link render as an image in the native wiki reader? | ✅ | *Confirmed 2026-10-05 (spike).* `![pixel](assets/<page-id>/pixel.png)` renders as `<img src="assets/<page-id>/pixel.png">` and that URL returns the PNG (checked by content, not status). ADR-0011's layout stands.
+| Does GitHub enforce a size limit on a `.wiki.git` repository, and what is the failure shape when it is hit? | ❓ | *Deliberately not tested.* Measuring it means pushing to a shared service until it refuses. 🟡 assumption unchanged: a limit exists; BerryWiki's 1 MiB per-file cap bounds growth, never the total.
+| Does Git LFS work on a `.wiki.git` remote at all? | ✅ | *Observed 2026-10-05 (spike): no.* The LFS batch API at `<repo>.wiki.git/info/lfs/objects/batch` rejects a token (`403 Bad credentials`) that the same repository's main LFS endpoint accepts (`200`, upload action offered; nothing was uploaded). Not adopted either way: a pointer file is unreadable in the native reader.
+| Is an attachment inside `assets/` reachable by URL from the wiki's own web UI? | ❌ | *Refuted 2026-10-05 (spike).* Not only via the blob view: the bare URL `/wiki/assets/<page-id>/pixel.png` and `raw.githubusercontent.com/wiki/<owner>/<repo>/assets/…` both return the PNG. Every attachment in a public wiki is publicly fetchable by URL, which strengthens the §3.8 point: a read lock exists only where BerryWiki is the read path.
 | How does `_Sidebar.md` behave / is it honoured? | ✅ | *Confirmed 2026-09-15.* The generated sidebar renders on every page fetched, not only `Home`. This is what carries BerryWiki's hierarchy into the native reader — see the filename row below, which is why it matters more than expected.
-| How do concurrent pushes fail (non-fast-forward)? | ❓ | 🟡 Rejected; must fetch-before-push.
+| How do concurrent pushes fail (non-fast-forward)? | ✅ | *Confirmed 2026-10-05 (spike).* The second of two pushes from the same base is rejected (`rc=1`, `! [rejected] … (fetch first)`); nothing is lost on the server. BerryWiki's fetch-before-push is required, as assumed.
 | Does the default wiki branch have special behaviour? | ✅ | *Confirmed 2026-09-15.* A fresh clone of `<repo>.wiki.git` checks out **`master`**, not `main`, on a repository whose own default branch is `main`. This wiki's first commit ("Initial Home page", 2026-07-20) predates any tooling in this project, so `master` was not chosen here. Whether GitHub *always* creates wiki remotes on `master` is not established by this single observation — but tooling that assumes `main` is wrong at least here.
 |===
 
-== Link-format matrix (to populate during the spike)
+== Link-format matrix
 
-For each: author form → persisted form → does GitHub render it → does it survive
-a rename. _Rows pending live evidence._
+Measured 2026-10-05 on the spike wiki, from page `Spike-Links` to a page stored as
+`Spike-Target-Page.md` (and one stored as `nested/deeper/Nested-Leaf.md`). "Opens"
+means the fetched page contained the target's own text, not merely `200`.
+Survival across a rename was not measured.
+
+[cols="2,2,1", options="header"]
+|===
+| Authored | Rendered `href` | Opens the rendered page?
+| `[[Spike Target Page]]` | `/wiki/Spike-Target-Page` | ✅
+| `[[Spike-Target-Page]]` | `/wiki/Spike-Target-Page` | ✅
+| `[[Nested Leaf]]` (stored two directories deep) | `/wiki/Nested-Leaf` | ✅
+| `[[Spike Target Page#Section Two]]` | `/wiki/Spike-Target-Page#Section-Two` | ✅ page; fragment case differs from the id (see above)
+| `[x](Spike-Target-Page)` | `Spike-Target-Page` | ✅
+| `[x](Spike%20Target%20Page)` | `Spike%20Target%20Page` | ✅
+| `[x](./Spike-Target-Page)` | `./Spike-Target-Page` | ✅
+| `[x](Spike-Target-Page#section-two)` | `Spike-Target-Page#section-two` | ✅ fragment matches the id
+| `[x](Spike-Target-Page.md)` | `Spike-Target-Page.md` | ❌ 302 to the raw Markdown, `text/plain`
+| `[x](nested/deeper/Nested-Leaf)` | `nested/deeper/Nested-Leaf` | ❌ redirects to `/wiki/nested`, no such page
+|===
 
 == Filename strategy findings
 
@@ -154,14 +181,15 @@ Source remains canonical regardless; the preview is advisory.
   GitHub-compatible approximation; confirm edge cases with Unicode).
 * Whether `_Sidebar.md` supports nested lists in the rendered sidebar to the
   depth we generate.
-* Whether a relative `assets/<page-id>/<file>` link renders in the native reader.
-  Recorded as a spike row above because it is the assumption
-  link:../decisions/0011-attachments.adoc[ADR-0011] rests on, not a loose end.
+* Whether GitHub's client script scrolls to a mixed-case fragment
+  (`#Section-Two`) when the heading id is lower case. Needs a browser.
 
-== Recommendations (provisional, pending the spike)
+== Recommendations
 
 . Persist links in GitHub-native Markdown; accept `[[…]]` only as *authoring*
-  input, serialised on save.
+  input, serialised on save. Serialise to the *bare page name* with a
+  lower-case heading fragment: never a `.md` suffix (it opens raw Markdown) and
+  never a directory path (it dead-ends), per the link-format matrix.
 . Use flat `--` filenames; keep the tree in metadata, never infer it from paths.
 . Keep the metadata HTML comment; its invisibility has now been observed on live
   GitHub Wiki pages in two repositories. Recheck if GitHub changes its renderer.

@@ -25,8 +25,10 @@ repo. **The wiki must stay fully usable without BerryWiki.**
   push, atomic logical commits, sidebar regenerated in the same commit as the
   tree change. Evidence base: `crates/berrywiki-git-compat`.
 - **Honesty:** never claim live GitHub behaviour is verified unless actually
-  tested against a real wiki (currently ALL unverified — see
-  `docs/compatibility/github-wiki.adoc`). Live tests are credential-gated.
+  tested against a real wiki. Each row of `docs/compatibility/github-wiki.adoc`
+  carries its own tag: most were settled by the 2026-10-05 spike against the
+  disposable wiki `metadatastician/berrywiki-wiki-spike`; the size limit and
+  token authentication are still untested.
 - **Docs:** AsciiDoc for technical docs/ADRs; Markdown only for wiki content
   and community-health files.
 - **Determinism:** metadata serialisation is idempotent; sidebar output is
