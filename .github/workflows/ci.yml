@@ -134,9 +134,16 @@ jobs:
 
           # 1. Collect every SHA-pinned external `uses:` in the workflow directory and in
           #    the root composite Action. Local refs (`./…`) and containers are not
-          #    matched: they carry no upstream commit.
-          pins="$(grep -rhoE 'uses:[[:space:]]*[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}' \
-                    .github/workflows .github/actions action.yml 2>/dev/null \
+          #    matched: they carry no upstream commit. Only paths that exist are
+          #    searched, and grep's stderr is kept: under `bash -e` with pipefail a
+          #    missing path (grep exit 2) killed this step with no output at all.
+          #    Exit 1 (no match) is the empty case below, not an error.
+          targets=()
+          for p in .github/workflows .github/actions action.yml; do
+            [ -e "$p" ] && targets+=("$p")
+          done
+          pins="$({ grep -rhoE 'uses:[[:space:]]*[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}' \
+                      "${targets[@]}" || [ $? -eq 1 ]; } \
                   | sed -E 's/^uses:[[:space:]]*//' \
                   | awk -F'@' '{ split($1, p, "/"); k = ($1 ~ /\.github\/workflows\/[^\/]+\.ya?ml$/) ? "R" : "A";
                                  print p[1] "/" p[2] "\t" $2 "\t" k }' \
