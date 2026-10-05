@@ -26,49 +26,60 @@
 # `docs/DEPENDABOT-POLICY.adoc` (standards#297) — dependabot must not open
 # semver-major bumps unattended.
 
-version: 2
-updates:
-  # GitHub Actions - always include.
-  #
-  # Major bumps are not held back here, unlike Cargo: the SHA pin is the real
-  # version, so a major bump arrives as a one-line, revertible diff, and the
-  # `test` and `lint` jobs run on the same PR.
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    groups:
-      actions:
-        patterns:
-          - "*"
-    open-pull-requests-limit: 2
-
-  # Rust/Cargo — SECURITY UPDATES ONLY.
-  #
-  # `open-pull-requests-limit: 0` suppresses routine version-update PRs while
-  # leaving Dependabot SECURITY PRs flowing. That is deliberate, and it is the
-  # narrower of two bad options: the previous rule here was
-  # `ignore: dependency-name: "*", update-types: [version-update:semver-patch]`,
-  # and under GitHub's current Dependabot behaviour `ignore` rules apply to
-  # *security* updates too — so it silenced patch-level security PRs
-  # estate-wide, which surfaced on 007 as three CVEs sitting open for weeks
-  # with no fix PR. See rsr-template-repo commit 78b050e.
-  #
-  # The consequence, recorded so it is not mistaken for a bug: a routine Cargo
-  # bump is never proposed automatically. As measured 2026-09-25 the only one
-  # outstanding is `comrak` 0.54.0 -> 0.55.0; `Cargo.lock` freezes the
-  # rustc-1.89-compatible resolution deliberately. A routine bump therefore
-  # takes the author-supplied path (estate policy §4: issue -> branch with the
-  # call-site update -> normal CI -> squash-merge), or this limit is raised
-  # from 0 to 2 when the maintainer decides routine bumps are wanted again.
-  # Flipping it is a policy change, so it is a reviewable one-line edit, not a
-  # silent side effect of anything else.
-  #
-  # Do NOT add `ignore: update-types: [version-update:semver-major]` here:
-  # estate policy asks for it, but on this repository it would re-open exactly
-  # the hole 78b050e closed, for major security updates.
-  - package-ecosystem: "cargo"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 0
+{
+  version: 2,
+  updates: [
+    # GitHub Actions - always include.
+    #
+    # Major bumps are not held back here, unlike Cargo: the SHA pin is the real
+    # version, so a major bump arrives as a one-line, revertible diff, and the
+    # `test` and `lint` jobs run on the same PR.
+    {
+      package-ecosystem: "github-actions",
+      directory: "/",
+      schedule: {
+        interval: "weekly",
+      },
+      groups: {
+        actions: {
+          patterns: [
+            "*",
+          ],
+        },
+      },
+      open-pull-requests-limit: 2,
+    },
+    # Rust/Cargo — SECURITY UPDATES ONLY.
+    #
+    # `open-pull-requests-limit: 0` suppresses routine version-update PRs while
+    # leaving Dependabot SECURITY PRs flowing. That is deliberate, and it is the
+    # narrower of two bad options: the previous rule here was
+    # `ignore: dependency-name: "*", update-types: [version-update:semver-patch]`,
+    # and under GitHub's current Dependabot behaviour `ignore` rules apply to
+    # *security* updates too — so it silenced patch-level security PRs
+    # estate-wide, which surfaced on 007 as three CVEs sitting open for weeks
+    # with no fix PR. See rsr-template-repo commit 78b050e.
+    #
+    # The consequence, recorded so it is not mistaken for a bug: a routine Cargo
+    # bump is never proposed automatically. As measured 2026-09-25 the only one
+    # outstanding is `comrak` 0.54.0 -> 0.55.0; `Cargo.lock` freezes the
+    # rustc-1.89-compatible resolution deliberately. A routine bump therefore
+    # takes the author-supplied path (estate policy §4: issue -> branch with the
+    # call-site update -> normal CI -> squash-merge), or this limit is raised
+    # from 0 to 2 when the maintainer decides routine bumps are wanted again.
+    # Flipping it is a policy change, so it is a reviewable one-line edit, not a
+    # silent side effect of anything else.
+    #
+    # Do NOT add `ignore: update-types: [version-update:semver-major]` here:
+    # estate policy asks for it, but on this repository it would re-open exactly
+    # the hole 78b050e closed, for major security updates.
+    {
+      package-ecosystem: "cargo",
+      directory: "/",
+      schedule: {
+        interval: "weekly",
+      },
+      open-pull-requests-limit: 0,
+    },
+  ],
+}

@@ -1,31 +1,14 @@
-name: 'Trust & Humans Gate'
-description: 'Validates presence of trust.txt and humans.txt, checking for Keybase associations.'
-runs:
-  using: 'composite'
-  steps:
-    - name: Run Trust and Humans Check
-      shell: bash
-      run: |
-        echo "Validating trust.txt and humans.txt..."
-        
-        WWW_DIR="."
-        [ -d "www" ] && WWW_DIR="www"
-        [ -d "public" ] && WWW_DIR="public"
-        
-        # Validate humans.txt
-        if [ ! -f "$WWW_DIR/humans.txt" ]; then
-          echo "::warning::Missing humans.txt. It must be very clear who is doing what."
-        else
-          if ! grep -qi "keybase" "$WWW_DIR/humans.txt"; then
-             echo "::warning::humans.txt found, but no keybase verification links detected."
-          fi
-        fi
-        
-        # Validate trust.txt
-        if [ ! -f "$WWW_DIR/trust.txt" ] && [ ! -f "$WWW_DIR/.well-known/trust.txt" ]; then
-          echo "::warning::Missing trust.txt."
-        else
-          echo "trust.txt verified."
-        fi
-        
-        echo "Trust & Humans validation complete."
+{
+  name: "Trust & Humans Gate",
+  description: "Validates presence of trust.txt and humans.txt, checking for Keybase associations.",
+  runs: {
+    using: "composite",
+    steps: [
+      {
+        name: "Run Trust and Humans Check",
+        shell: "bash",
+        run: "echo \"Validating trust.txt and humans.txt...\"\n\nWWW_DIR=\".\"\n[ -d \"www\" ] && WWW_DIR=\"www\"\n[ -d \"public\" ] && WWW_DIR=\"public\"\n\n# Validate humans.txt\nif [ ! -f \"$WWW_DIR/humans.txt\" ]; then\n  echo \"::warning::Missing humans.txt. It must be very clear who is doing what.\"\nelse\n  if ! grep -qi \"keybase\" \"$WWW_DIR/humans.txt\"; then\n     echo \"::warning::humans.txt found, but no keybase verification links detected.\"\n  fi\nfi\n\n# Validate trust.txt\nif [ ! -f \"$WWW_DIR/trust.txt\" ] && [ ! -f \"$WWW_DIR/.well-known/trust.txt\" ]; then\n  echo \"::warning::Missing trust.txt.\"\nelse\n  echo \"trust.txt verified.\"\nfi\n\necho \"Trust & Humans validation complete.\"\n",
+      },
+    ],
+  },
+}

@@ -11,76 +11,97 @@
 # The current file is also `disabled_manually` on GitHub, so it will not run
 # until that is cleared. See `docs/execution/debt-register.adoc` (CI/CD debt).
 
-name: GitHub Pages (Ddraig SSG)
-on:
-  push:
-    branches: [main, master]
-  workflow_dispatch:
-permissions:
-  actions: read
-  contents: read
-  pages: write
-  id-token: write
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    timeout-minutes: 15
-    container:
-      image: ghcr.io/stefan-hoeck/idris2-pack@sha256:f0758996a931fb35d9ecb1de273c4d59dabe2a09b433afc7e357f65a08b7e1ff
-    steps:
-      - name: Checkout Site
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Checkout Ddraig SSG
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: hyperpolymath/ddraig-ssg
-          path: .ddraig-ssg
-      - name: Compile Ddraig
-        working-directory: .ddraig-ssg
-        run: idris2 Ddraig.idr -o ddraig
-      - name: Build site
-        run: |
-          mkdir -p src
-          if [ ! -f src/index.md ] && [ -f README.md ]; then
-            cp README.md src/index.md
-          elif [ ! -f src/index.md ]; then
-            echo "# ${GITHUB_REPOSITORY}" > src/index.md
-          fi
-          # Canonical base must match where Pages actually publishes, which is
-          # derived from the repository OWNER — this repo lives in the
-          # metadatastician org, so a hardcoded hyperpolymath.github.io URL
-          # produced canonical links to a site that does not exist.
-          ./.ddraig-ssg/build/exec/ddraig build src _site "https://${GITHUB_REPOSITORY%%/*}.github.io/${GITHUB_REPOSITORY#*/}"
-      - name: Upload artifact
-        # `fc324d35` is tag `v5` == `v5.0.0`, the latest release of
-        # actions/upload-pages-artifact (2026-04-10). The previous pin,
-        # 3788795898…, does not exist in that repository at all: `GET
-        # /repos/actions/upload-pages-artifact/commits/3788795898…` answers 422,
-        # and `compare/3788795898…...v5` answers 404. A pin that names no
-        # commit is well formed, so nothing local catches it — the run dies at
-        # action download instead. Repointed 2026-09-25.
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-        with:
-          path: '_site'
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    timeout-minutes: 15
-    needs: build
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+{
+  name: "GitHub Pages (Ddraig SSG)",
+  on: {
+    push: {
+      branches: [
+        "main",
+        "master",
+      ],
+    },
+    workflow_dispatch: null,
+  },
+  permissions: {
+    actions: "read",
+    contents: "read",
+    pages: "write",
+    id-token: "write",
+  },
+  concurrency: {
+    group: "pages",
+    cancel-in-progress: false,
+  },
+  jobs: {
+    build: {
+      runs-on: "ubuntu-latest",
+      permissions: {
+        contents: "read",
+        pages: "write",
+        id-token: "write",
+      },
+      timeout-minutes: 15,
+      container: {
+        image: "ghcr.io/stefan-hoeck/idris2-pack@sha256:f0758996a931fb35d9ecb1de273c4d59dabe2a09b433afc7e357f65a08b7e1ff",
+      },
+      steps: [
+        {
+          name: "Checkout Site",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+        },
+        {
+          name: "Checkout Ddraig SSG",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+          with: {
+            repository: "hyperpolymath/ddraig-ssg",
+            path: ".ddraig-ssg",
+          },
+        },
+        {
+          name: "Compile Ddraig",
+          working-directory: ".ddraig-ssg",
+          run: "idris2 Ddraig.idr -o ddraig",
+        },
+        {
+          name: "Build site",
+          run: "mkdir -p src\nif [ ! -f src/index.md ] && [ -f README.md ]; then\n  cp README.md src/index.md\nelif [ ! -f src/index.md ]; then\n  echo \"# ${GITHUB_REPOSITORY}\" > src/index.md\nfi\n# Canonical base must match where Pages actually publishes, which is\n# derived from the repository OWNER — this repo lives in the\n# metadatastician org, so a hardcoded hyperpolymath.github.io URL\n# produced canonical links to a site that does not exist.\n./.ddraig-ssg/build/exec/ddraig build src _site \"https://${GITHUB_REPOSITORY%%/*}.github.io/${GITHUB_REPOSITORY#*/}\"\n",
+        },
+        {
+          name: "Upload artifact",
+          # `fc324d35` is tag `v5` == `v5.0.0`, the latest release of
+          # actions/upload-pages-artifact (2026-04-10). The previous pin,
+          # 3788795898…, does not exist in that repository at all: `GET
+          # /repos/actions/upload-pages-artifact/commits/3788795898…` answers 422,
+          # and `compare/3788795898…...v5` answers 404. A pin that names no
+          # commit is well formed, so nothing local catches it — the run dies at
+          # action download instead. Repointed 2026-09-25.
+          uses: "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9", # v5.0.0
+          with: {
+            path: "_site",
+          },
+        },
+      ],
+    },
+    deploy: {
+      environment: {
+        name: "github-pages",
+        url: "${{ steps.deployment.outputs.page_url }}",
+      },
+      runs-on: "ubuntu-latest",
+      permissions: {
+        contents: "read",
+        pages: "write",
+        id-token: "write",
+      },
+      timeout-minutes: 15,
+      needs: "build",
+      steps: [
+        {
+          name: "Deploy to GitHub Pages",
+          id: "deployment",
+          uses: "actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346", # v5.0.1
+        },
+      ],
+    },
+  },
+}

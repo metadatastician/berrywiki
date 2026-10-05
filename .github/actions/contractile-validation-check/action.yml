@@ -1,40 +1,14 @@
-name: 'Contractile Validation Gate'
-description: 'Validates that contractiles (must, trust, adjust, dust, bust, intend) are readable by their runners and the self-validating folder has required k9s.'
-runs:
-  using: 'composite'
-  steps:
-    - name: Run Contractile Validation
-      shell: bash
-      run: |
-        echo "Validating Contractiles via Runners..."
-        
-        # Check runners are working (mocked for now, assumes global runners or repo scripts)
-        runners=("must" "trust" "adjust" "dust" "bust" "intend")
-        
-        for runner in "${runners[@]}"; do
-          # Capitalize first letter to match file name (e.g. Mustfile)
-          verbfile="$(tr '[:lower:]' '[:upper:]' <<< ${runner:0:1})${runner:1}file.a2ml"
-          
-          # We only validate if the verb file exists in the repo
-          if [ -f "$verbfile" ] || [ -f "contractiles/$runner/$verbfile" ]; then
-             echo "Invoking $runner runner on $verbfile..."
-             # Placeholder for actual runner command
-             # e.g., a2ml-tool validate "$verbfile" --runner="$runner"
-          fi
-        done
-        
-        # Just runner check
-        if [ -f "Justfile" ]; then
-          echo "Invoking just runner on Justfile..."
-          # just --dry-run
-        fi
-        
-        # Self-Validating folder k9 check
-        if [ -d ".machine_readable/k9" ] || [ -d "contractiles/k9" ]; then
-           echo "Verifying self-validating folder contains appropriate k9 automation..."
-           # Check for kennel, yard, hunt tiers
-        else
-           echo "::warning::No self-validating k9 folder found."
-        fi
-        
-        echo "Contractile Validation Passed."
+{
+  name: "Contractile Validation Gate",
+  description: "Validates that contractiles (must, trust, adjust, dust, bust, intend) are readable by their runners and the self-validating folder has required k9s.",
+  runs: {
+    using: "composite",
+    steps: [
+      {
+        name: "Run Contractile Validation",
+        shell: "bash",
+        run: "echo \"Validating Contractiles via Runners...\"\n\n# Check runners are working (mocked for now, assumes global runners or repo scripts)\nrunners=(\"must\" \"trust\" \"adjust\" \"dust\" \"bust\" \"intend\")\n\nfor runner in \"${runners[@]}\"; do\n  # Capitalize first letter to match file name (e.g. Mustfile)\n  verbfile=\"$(tr '[:lower:]' '[:upper:]' <<< ${runner:0:1})${runner:1}file.a2ml\"\n  \n  # We only validate if the verb file exists in the repo\n  if [ -f \"$verbfile\" ] || [ -f \"contractiles/$runner/$verbfile\" ]; then\n     echo \"Invoking $runner runner on $verbfile...\"\n     # Placeholder for actual runner command\n     # e.g., a2ml-tool validate \"$verbfile\" --runner=\"$runner\"\n  fi\ndone\n\n# Just runner check\nif [ -f \"Justfile\" ]; then\n  echo \"Invoking just runner on Justfile...\"\n  # just --dry-run\nfi\n\n# Self-Validating folder k9 check\nif [ -d \".machine_readable/k9\" ] || [ -d \"contractiles/k9\" ]; then\n   echo \"Verifying self-validating folder contains appropriate k9 automation...\"\n   # Check for kennel, yard, hunt tiers\nelse\n   echo \"::warning::No self-validating k9 folder found.\"\nfi\n\necho \"Contractile Validation Passed.\"\n",
+      },
+    ],
+  },
+}
