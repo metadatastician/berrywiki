@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: MPL-2.0
+#
+# Every workflow file must parse and type-check (actionlint). Authored as KYAML.
+#
+# Why this is its own file: from 2026-09-25 to 2026-10-05 an unquoted `: ` in
+# one ci.yml step name (#60) made the file invalid YAML. GitHub then ran ci.yml
+# with ZERO jobs on every push, so tests, the accessibility gate, the
+# script-free sweeps and the Action self-test silently stopped for ten days,
+# while every PR still merged (only `scan / gitleaks` is required). Fixed in
+# #65. A check that lived inside ci.yml would have died with it; a broken
+# workflow cannot report its own breakage. This file checks all the others,
+# and itself.
+#
+# KYAML (flow style, every string quoted) removes the original colon class,
+# but a missing comma or brace is just as fatal and just as silent.
+#
+# ⚠ NO `uses:` ANYWHERE, DELIBERATELY. If this file depended on an action, a
+# bad pin or an estate actions.lock entry could stop it at startup — the same
+# zero-job silence it exists to catch. It fetches the commit with plain git and
+# installs actionlint from the release tarball, checked against a hard-coded
+# sha256 (the value published in actionlint_1.7.12_checksums.txt, re-measured
+# 2026-10-06). Bump the version and the hash together, by hand.
+#
+# The gate is narrow on purpose: shellcheck and pyflakes integration are
+# switched off, because their findings depend on whichever version the runner
+# image ships and would change the verdict without any change here. The
+# question asked is only "will GitHub run this file?".
+#
+# The self-test plants two broken workflows and one good one before the real
+# run, so a green result proves the gate was able to fail.
+{
+  name: "Workflow Lint",
+  on: {
+    pull_request: {},
+    push: {
+      branches: [
+        "main",
+      ],
+    },
+    workflow_dispatch: {},
+  },
+  concurrency: {
+    group: "${{ github.workflow }}-${{ github.ref }}",
+    cancel-in-progress: true,
+  },
+  permissions: {
+    contents: "read",
+  },
+  jobs: {
+    actionlint: {
+      name: "actionlint (every workflow parses)",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 10,
+      env: {
+        ACTIONLINT_VERSION: "1.7.12",
+        ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8",
+      },
+      steps: [
+        {
+          name: "Fetch the commit under test (no action dependency)",
+          env: {
+            TOKEN: "${{ github.token }}",
+          },
+          run: "set -euo pipefail\ngit init -q src\ncd src\ngit -c \"http.extraheader=Authorization: Basic $(printf 'x-access-token:%s' \"$TOKEN\" | base64 -w0)\" \\\n  fetch -q --depth=1 \"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY\" \"$GITHUB_SHA\"\ngit checkout -q FETCH_HEAD\ngit log -1 --format='checked out %H'\n",
+        },
+        {
+          name: "Install actionlint (sha256-checked)",
+          run: "set -euo pipefail\ntgz=\"actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz\"\ncurl -fsSL -o \"$RUNNER_TEMP/$tgz\" \\\n  \"https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$tgz\"\necho \"$ACTIONLINT_SHA256  $RUNNER_TEMP/$tgz\" | sha256sum --check --strict\ntar -xzf \"$RUNNER_TEMP/$tgz\" -C \"$RUNNER_TEMP\" actionlint\n\"$RUNNER_TEMP/actionlint\" -version\n",
+        },
+        {
+          name: "Self-test: planted broken workflows must fail, a good one must pass",
+          run: "set -euo pipefail\nAL=\"$RUNNER_TEMP/actionlint -shellcheck= -pyflakes=\"\nt=\"$RUNNER_TEMP/selftest\"\nmkdir -p \"$t\"\n# The 2026-09-25 fault, verbatim in shape: an unquoted ': ' in a block-style name.\nprintf 'on: push\\njobs:\\n  a:\\n    runs-on: ubuntu-latest\\n    steps:\\n      - name: Every pin uses: must resolve\\n        run: \"true\"\\n' > \"$t/colon.yml\"\n# The KYAML equivalent: a missing comma between two keys.\nprintf '{\\n  on: {push: {}},\\n  jobs: {a: {runs-on: \"ubuntu-latest\" steps: [{run: \"true\"}]}},\\n}\\n' > \"$t/comma.yml\"\nprintf '{\\n  on: {push: {}},\\n  jobs: {a: {runs-on: \"ubuntu-latest\", steps: [{run: \"true\"}]}},\\n}\\n' > \"$t/good.yml\"\nfor bad in colon comma; do\n  if $AL \"$t/$bad.yml\" >/dev/null; then\n    echo \"::error::self-test: planted $bad.yml was NOT rejected; this gate cannot fail\"\n    exit 1\n  fi\n  echo \"self-test: planted $bad.yml correctly rejected\"\ndone\n$AL \"$t/good.yml\"\necho \"self-test: planted good.yml correctly passed\"\n",
+        },
+        {
+          name: "Lint every workflow in the repository",
+          working-directory: "src",
+          run: "set -euo pipefail\nshopt -s nullglob\nfiles=(.github/workflows/*.yml .github/workflows/*.yaml)\nif [ \"${#files[@]}\" -eq 0 ]; then\n  echo \"::error::no workflow files found; refusing to report a vacuous pass\"\n  exit 1\nfi\necho \"linting ${#files[@]} workflow file(s):\"\nprintf '  %s\\n' \"${files[@]}\"\n\"$RUNNER_TEMP/actionlint\" -shellcheck= -pyflakes= \"${files[@]}\"\necho \"OK: ${#files[@]} workflow file(s) parse and type-check\"\n",
+        },
+      ],
+    },
+  },
+}
