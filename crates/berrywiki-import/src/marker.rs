@@ -131,10 +131,13 @@ mod tests {
         assert!(id.chars().all(|c| c == '-' || c.is_ascii_hexdigit()));
         // Version nibble and variant bits, the two fields that say what kind
         // of UUID this is.
-        assert!(parts[2].starts_with('8'), "version nibble: {id}");
+        assert!(
+            parts[2].starts_with('8'),
+            "version nibble must be 8 (UUIDv8)"
+        );
         assert!(
             matches!(parts[3].as_bytes()[0], b'8' | b'9' | b'a' | b'b'),
-            "variant nibble: {id}"
+            "variant bits must be 10xx (RFC 9562)"
         );
     }
 

@@ -53,6 +53,35 @@ Six jobs, least-privilege (`permissions: contents: read`):
   3 warnings), then asserts `strict: 'true'` *fails* on the same fixture — a
   positive and a negative control, so a no-op cannot pass as a check.
 
+== Workflow: `.github/workflows/workflow-lint.yml`
+
+One job, `actionlint (every workflow parses)`, runs
+https://github.com/rhysd/actionlint[actionlint] over every file in
+`.github/workflows/`, including `ci.yml` and itself.
+
+It is a separate file because a workflow that does not parse cannot report
+its own failure. From 2026-09-25 to 2026-10-05, an unquoted `: ` in one
+`ci.yml` step name (#60) made the file invalid YAML. GitHub ran `ci.yml` with
+*zero jobs* on every push, so every gate listed above silently stopped. PRs
+still merged, because only `scan / gitleaks` is required. #65 fixed it. A lint
+step inside `ci.yml` would have died with it.
+
+The design avoids the same silence:
+
+* *No `uses:`.* The commit is fetched with plain `git`, and actionlint is
+  installed from the release tarball against a hard-coded sha256. No action pin
+  or estate `actions.lock` entry can stop this workflow at startup.
+* *Narrow question.* shellcheck and pyflakes integration are off, so the verdict
+  cannot change with the runner image. The job answers only "will GitHub run
+  this file?".
+* *Planted negatives first.* Before the real run, the job lints three planted
+  workflows:
+** the 09-25 unquoted-colon fault, which must fail;
+** a KYAML file missing a comma, which must fail;
+** a good file, which must pass.
+
+The job also refuses an empty file list.
+
 == Pins
 
 Every `uses:` here is a full 40-character commit SHA with a trailing version
@@ -73,6 +102,9 @@ cause. The pinned set, verified against upstream on 2026-09-25:
   release newer than `v1` (2022), so the branch tip is the version
 | `hyperpolymath/standards` scorecard reusable | `7b931ef7` | hand
 | `hyperpolymath/standards` secret-scanner reusable | `e13e2ea3` | hand
+| actionlint release tarball (`workflow-lint.yml`, sha256, not a `uses:`) | `1.7.12` | hand: bump
+  `ACTIONLINT_VERSION` and `ACTIONLINT_SHA256` together, taking the hash from
+  the release's `checksums.txt` and re-measuring it with `sha256sum`
 |===
 
 The two reusable-workflow pins cannot be Dependabot's: each targets a commit
