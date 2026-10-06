@@ -442,12 +442,16 @@ pub fn serialize_source(meta: Option<&PageMetadata>, body: &str) -> String {
     match meta {
         None => body.to_string(),
         Some(m) => {
+            // The exact mirror of `parse_source`, which drops one blank
+            // separator line after the block: write one, then the body
+            // untouched. Trimming the body's leading newlines here (as this
+            // once did) deleted any blank lines at the top of a page on its
+            // first save. Found by the INV-1 property test.
             let block = serialize_metadata(m);
-            let body_trimmed = body.trim_start_matches('\n');
-            if body_trimmed.is_empty() {
+            if body.is_empty() {
                 block
             } else {
-                format!("{block}\n{body_trimmed}")
+                format!("{block}\n{body}")
             }
         }
     }
@@ -574,6 +578,31 @@ tags: [ok, b\u{1}ad]\narchived: false\n-->\nBody\n";
             let meta = parse_source(&src).metadata.expect("block parsed");
             assert_eq!(meta.parent_id, None, "{raw:?}");
         }
+    }
+
+    // Found by the INV-1 property test (2026-10-06): the serialiser trimmed
+    // the body's leading newlines, so blank lines at the top of a page were
+    // deleted on its first save.
+    #[test]
+    fn blank_lines_at_the_top_of_a_body_survive_a_save() {
+        let src = "<!-- berrywiki\nid: page-1\nparent: null\narchived: false\n-->\n\n\n\nAfter three blank lines\n";
+        let first = parse_source(src);
+        assert_eq!(
+            first.body, "\n\nAfter three blank lines\n",
+            "one separator dropped, the rest kept"
+        );
+        let saved = serialize_source(first.metadata.as_ref(), &first.body);
+        assert_eq!(
+            parse_source(&saved).body,
+            first.body,
+            "a save must keep them"
+        );
+        // A body made only of a blank line is kept too.
+        let only = "<!-- berrywiki\nid: page-1\nparent: null\narchived: false\n-->\n\n\n";
+        let first = parse_source(only);
+        assert_eq!(first.body, "\n");
+        let saved = serialize_source(first.metadata.as_ref(), &first.body);
+        assert_eq!(parse_source(&saved).body, "\n");
     }
 
     #[test]

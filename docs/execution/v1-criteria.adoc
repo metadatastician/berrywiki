@@ -74,7 +74,7 @@ Ordered by the project's charter priorities.
 |===
 | ID | Criterion | Evidence that satisfies it | Now
 
-| T1 | Each invariant INV-1 to INV-6 has property-based tests as well as example tests. | Property tests named in `invariants.adoc` next to the existing witnesses. | ❌
+| T1 | Each invariant INV-1 to INV-6 has property-based tests as well as example tests. | Property tests named in `invariants.adoc` next to the existing witnesses. | 🟡 INV-1, INV-2 and INV-3 have generated-case property tests (`crates/berrywiki-core/tests/properties.rs`, 3,000 cases each by default, seed replay); INV-4, INV-5 and INV-6 do not yet
 | T2 | The test suite catches real defects. | `cargo-mutants` over core, store, sync, serve, git and render: a caught rate of at least _(proposed)_ 90%, with each surviving mutant either killed or listed as equivalent, with a reason. | ❌
 | T3 | Every self-check is shown to fail. | A planted negative for the served-script detector, the invariants-ledger script, the source audits (`git/tests/audit.rs`, `sync/tests/structural.rs`) and each CI gate. | 🟡 some exist
 | T4 | Crash safety is tested under injected failure. | Tests that inject write and fsync failures and interleave writers, and that show no torn or lost page. | ❌
