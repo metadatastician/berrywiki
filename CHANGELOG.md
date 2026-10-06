@@ -99,6 +99,9 @@ signature) alongside the OCI image produced by `guix pack`. Work package
   `metadata.normalised-value` warning; an unknown line whose key contains
   `-->` is dropped on read with a warning, as a save would drop it (found by
   fuzzing; INV-1).
+- **Saving a page deleted blank lines at its top.** The serialiser trimmed the
+  body's leading newlines; it now writes the body untouched after one
+  separator line, the exact mirror of the parser (found by property testing).
 - **Saving a page rewrote its line endings.** A page with Windows (CRLF) line
   endings had every line changed to LF on its first BerryWiki save, and a
   page without a final newline gained one. The page body is now kept byte for
