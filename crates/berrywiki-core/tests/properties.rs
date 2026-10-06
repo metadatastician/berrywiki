@@ -33,6 +33,18 @@ fn seeds() -> Vec<u64> {
 }
 
 /// A small deterministic generator (SplitMix64).
+#[test]
+fn the_generator_is_deterministic_per_seed() {
+    let mut a = Gen::new(42);
+    let mut b = Gen::new(42);
+    let mut c = Gen::new(43);
+    let sa: Vec<u64> = (0..64).map(|_| a.next()).collect();
+    let sb: Vec<u64> = (0..64).map(|_| b.next()).collect();
+    let sc: Vec<u64> = (0..64).map(|_| c.next()).collect();
+    assert_eq!(sa, sb, "same seed must give the same sequence");
+    assert_ne!(sa, sc, "different seeds must differ");
+}
+
 struct Gen(u64);
 
 impl Gen {
