@@ -257,5 +257,56 @@
         },
       ],
     },
+    # v1 criterion R4 (docs/execution/v1-criteria.adoc): BerryWiki is in use on
+    # a wiki it did not create, and `berrywiki check` passes there, with a
+    # planted negative rejected IN CI at the candidate commit. The consumer is
+    # hyperpolymath/blocky-writer (issue #61), checked out at a pinned commit so
+    # that its authors' later edits cannot turn this repository red; moving the
+    # pin is a deliberate, reviewed act. Unlike the Action self-test above, the
+    # CLI here is built from the commit under test, so the run IS evidence at
+    # that commit. The script's three steps and their failure modes are
+    # documented in scripts/check-real-wiki.sh.
+    real-wiki: {
+      name: "real-world wiki check (blocky-writer)",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 20,
+      env: {
+        CONSUMER_REPO: "hyperpolymath/blocky-writer",
+        CONSUMER_SHA: "91a6c654eaf08026725ecca492d245a115badbe4",
+        CONSUMER_PAGES: "8",
+      },
+      steps: [
+        {
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+        },
+        {
+          name: "Check out the consumer wiki at its pinned commit",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+          with: {
+            repository: "${{ env.CONSUMER_REPO }}",
+            ref: "${{ env.CONSUMER_SHA }}",
+            path: "consumer",
+            persist-credentials: false,
+          },
+        },
+        {
+          uses: "dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067", # master
+          with: {
+            toolchain: "1.89.0",
+          },
+        },
+        {
+          uses: "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6", # v2.9.2
+        },
+        {
+          name: "build the CLI under test (locked)",
+          run: "cargo build --locked -p berrywiki-cli",
+        },
+        {
+          name: "check, sidebar and planted negative",
+          run: "set -euo pipefail\ntest \"$(git -C consumer rev-parse HEAD)\" = \"$CONSUMER_SHA\"\nscripts/check-real-wiki.sh target/debug/berrywiki consumer/wiki \"$CONSUMER_PAGES\"\n",
+        },
+      ],
+    },
   },
 }
